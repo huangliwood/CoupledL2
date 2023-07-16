@@ -404,6 +404,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
           rrTableEntries = 16,
           rrTagBits = 6
         ))
+        // prefetch = Some(SPPParameters())
       )
     }))).node
 
