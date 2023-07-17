@@ -21,6 +21,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.diplomacy.{BundleBridgeSink,BundleBridgeSource, LazyModule, LazyModuleImp}
 import coupledL2._
 import utility.Pipeline
 
@@ -45,4 +46,14 @@ class PrefetchReceiver()(implicit p: Parameters) extends PrefetchModule {
   io.req.bits.source := 0.U // TODO: ensure source 0 is dcache
   io.req.valid := io.recv_addr.valid
 
+}
+
+class PrefetchSmsOuterNode(val clientNum:Int=2)(implicit p: Parameters) extends LazyModule{
+  val outNode = BundleBridgeSource(Some(() => new PrefetchRecv()))
+  lazy val module = new LazyModuleImp(this){
+    val prefetchRecv = outNode.out.head._1
+    prefetchRecv.addr := 0.U
+    prefetchRecv.addr_valid := false.B
+    prefetchRecv.l2_pf_en := true.B
+  }
 }

@@ -177,6 +177,8 @@ class HyperPrefetcher()(implicit p: Parameters) extends PrefetchBranchV2Module {
   sms.io.recv_addr.valid := io.recv_addr.valid
   sms.io.recv_addr.bits := io.recv_addr.bits
   sms.io.req.ready := true.B
+  sms.io.resp.bits.tag := 0.U
+  sms.io.resp.bits.set := 0.U
 
   fTable.io.req.valid := q_spp.io.deq.fire || q_bop.io.deq.fire || sms.io.req.valid
   fTable.io.req.bits := Mux(sms.io.req.valid, sms.io.req.bits, 

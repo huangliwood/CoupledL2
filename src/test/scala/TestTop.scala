@@ -393,7 +393,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
     master_nodes = master_nodes ++ Seq(l1d, l1i) // TODO
 
     val l1xbar = TLXbar()
-    val l2node = LazyModule(new CoupledL2()(new Config((_, _, _) => {
+    val l2 = LazyModule(new CoupledL2()(new Config((_, _, _) => {
       case L2ParamKey => L2Param(
         name = s"l2$i",
         ways = 4,
@@ -406,11 +406,12 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
         // ))
         prefetch = Some(HyperPrefetchParams())
       )
-    }))).node
-
+    })))
+    val l2node = l2.node
     l1xbar := TLBuffer() := l1i
     l1xbar := TLBuffer() := l1d
-
+    val l1_sms_send_0_node = LazyModule(new PrefetchSmsOuterNode)
+    l2.pf_recv_node.get := l1_sms_send_0_node.outNode
     l2xbar := TLBuffer() := l2node := l1xbar
   }
 
