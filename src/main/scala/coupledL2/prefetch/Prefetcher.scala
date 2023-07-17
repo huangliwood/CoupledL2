@@ -31,6 +31,7 @@ class PrefetchReq(implicit p: Parameters) extends PrefetchBundle {
   val needT = Bool()
   val source = UInt(sourceIdBits.W)
   val isBOP = Bool()
+  def addr = Cat(tag, set, 0.U(offsetBits.W))
 }
 
 class PrefetchResp(implicit p: Parameters) extends PrefetchBundle {
@@ -52,11 +53,22 @@ class PrefetchTrain(implicit p: Parameters) extends PrefetchBundle {
   def addr = Cat(tag, set, 0.U(offsetBits.W))
 }
 
+class PrefetchEvict(implicit p: Parameters) extends PrefetchBundle {
+  // val id = UInt(sourceIdBits.W)
+  val tag = UInt(fullTagBits.W)
+  val set = UInt(setBits.W)
+  def addr = Cat(tag, set, 0.U(offsetBits.W))
+}
+
 class PrefetchIO(implicit p: Parameters) extends PrefetchBundle {
   val train = Flipped(DecoupledIO(new PrefetchTrain))
   val req = DecoupledIO(new PrefetchReq)
   val resp = Flipped(DecoupledIO(new PrefetchResp))
   val recv_addr = Flipped(ValidIO(UInt(64.W)))
+  val evict = prefetchOpt.get match {
+    case hyper: HyperPrefetchParams => Some(Flipped(DecoupledIO(new PrefetchEvict)))
+    case _ => None
+  }
 }
 
 class PrefetchQueue(implicit p: Parameters) extends PrefetchModule {
@@ -110,7 +122,7 @@ class Prefetcher(implicit p: Parameters) extends PrefetchModule {
   val io_l2_pf_en = IO(Input(Bool()))
 
   prefetchOpt.get match {
-    case spp: SPPParameters =>
+    case spp: SPPParameters => // case spp only
       val pft = Module(new SignaturePathPrefetch)
       val pftQueue = Module(new PrefetchQueue)
       val pipe = Module(new Pipeline(io.req.bits.cloneType, 1))
@@ -119,7 +131,7 @@ class Prefetcher(implicit p: Parameters) extends PrefetchModule {
       pftQueue.io.enq <> pft.io.req
       pipe.io.in <> pftQueue.io.deq
       io.req <> pipe.io.out
-    case bop: BOPParameters =>
+    case bop: BOPParameters => // case bop only
       val pft = Module(new BestOffsetPrefetch)
       val pftQueue = Module(new PrefetchQueue)
       val pipe = Module(new Pipeline(io.req.bits.cloneType, 1))
@@ -128,7 +140,7 @@ class Prefetcher(implicit p: Parameters) extends PrefetchModule {
       pftQueue.io.enq <> pft.io.req
       pipe.io.in <> pftQueue.io.deq
       io.req <> pipe.io.out
-    case receiver: PrefetchReceiverParams =>
+    case receiver: PrefetchReceiverParams => // case sms+bop 
       val l1_pf = Module(new PrefetchReceiver())
       val bop = Module(new BestOffsetPrefetch()(p.alterPartial({
         case L2ParamKey => p(L2ParamKey).copy(prefetch = Some(BOPParameters()))
@@ -156,6 +168,24 @@ class Prefetcher(implicit p: Parameters) extends PrefetchModule {
       XSPerfAccumulate(cacheParams, "prefetch_req_fromL1", l1_pf.io.req.valid)
       XSPerfAccumulate(cacheParams, "prefetch_req_fromL2", bop_en && bop.io.req.valid)
       XSPerfAccumulate(cacheParams, "prefetch_req_L1L2_overlapped", l1_pf.io.req.valid && bop_en && bop.io.req.valid)
+    
+    case hyperPf: HyperPrefetchParams => // case spp +  bop + smsReceiver
+      val hybrid_pfts = Module(new HyperPrefetcher())
+      val pftQueue = Module(new PrefetchQueue)
+      val pipe = Module(new Pipeline(io.req.bits.cloneType, 1))
+      hybrid_pfts.io.train <> io.train
+      hybrid_pfts.io.resp <> io.resp
+      hybrid_pfts.io.recv_addr := ValidIODelay(io.recv_addr, 2)
+      io.evict match {
+        case Some(evict) =>
+        hybrid_pfts.io.evict <> evict
+        pftQueue.io.enq <> hybrid_pfts.io.req
+        pipe.io.in <> pftQueue.io.deq
+        io.req <> pipe.io.out
+        case None =>
+        hybrid_pfts.io.evict := DontCare
+      }
+
     case _ => assert(cond = false, "Unknown prefetcher")
   }
 }
