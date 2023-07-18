@@ -257,13 +257,24 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
     val prefetcher = prefetchOpt.map(_ => Module(new Prefetcher()(pftParams)))
     val prefetchTrains = prefetchOpt.map(_ => Wire(Vec(banks, DecoupledIO(new PrefetchTrain()(pftParams)))))
     val prefetchResps = prefetchOpt.map(_ => Wire(Vec(banks, DecoupledIO(new PrefetchResp()(pftParams)))))
+    val prefetchEvicts = prefetchOpt.get match{
+      case hyper : HyperPrefetchParams =>
+        Some( Wire(Vec(banks, DecoupledIO(new PrefetchEvict()(pftParams)))))
+      case _ => None
+    }
     val prefetchReqsReady = WireInit(VecInit(Seq.fill(banks)(false.B)))
     prefetchOpt.foreach {
       _ =>
         fastArb(prefetchTrains.get, prefetcher.get.io.train, Some("prefetch_train"))
         prefetcher.get.io.req.ready := Cat(prefetchReqsReady).orR
         fastArb(prefetchResps.get, prefetcher.get.io.resp, Some("prefetch_resp"))
+        prefetchEvicts match {
+          case Some(evict_wire) => 
+          fastArb(evict_wire, prefetcher.get.io.evict.get, Some("prefetch_evict"))
+          case None =>
+        }
     }
+
     pf_recv_node match {
       case Some(x) =>
         prefetcher.get.io.recv_addr.valid := x.in.head._1.addr_valid
@@ -318,6 +329,12 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
             val resp = Pipeline(s.resp)
             prefetchTrains.get(i) <> train
             prefetchResps.get(i) <> resp
+            prefetchEvicts match {
+                  case Some(evict_wire) => 
+                  val s_evict = Pipeline(s.evict.get)
+                  evict_wire(i) <> s_evict
+                  case None =>
+                }
             // restore to full address
             if(bankBits != 0){
               val train_full_addr = Cat(
@@ -332,6 +349,17 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
               prefetchTrains.get(i).bits.set := train_set
               prefetchResps.get(i).bits.tag := resp_tag
               prefetchResps.get(i).bits.set := resp_set
+              prefetchEvicts match {
+                case Some(evict_wire) => 
+                  val s_evict = Pipeline(s.evict.get)
+                  val evict_full_addr = Cat(
+                    s_evict.bits.tag, s_evict.bits.set, i.U(bankBits.W), 0.U(offsetBits.W)
+                  )
+                  val (evict_tag, evict_set, _) = s.parseFullAddress(evict_full_addr)
+                  evict_wire(i).bits.tag := evict_tag
+                  evict_wire(i).bits.set := evict_set
+                case None =>
+              }
             }
         }
 

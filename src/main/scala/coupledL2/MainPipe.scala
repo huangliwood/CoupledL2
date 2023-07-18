@@ -27,7 +27,7 @@ import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink.TLPermissions._
 import coupledL2.utils._
 import coupledL2.debug._
-import coupledL2.prefetch.PrefetchTrain
+import coupledL2.prefetch.{PrefetchTrain, HyperPrefetchParams, PrefetchEvict}
 
 class MainPipe(implicit p: Parameters) extends L2Module {
   val io = IO(new Bundle() {
@@ -100,7 +100,10 @@ class MainPipe(implicit p: Parameters) extends L2Module {
     val globalCounter = Input(UInt(log2Ceil(mshrsAll).W))
     /* send prefetchTrain to Prefetch to trigger a prefetch req */
     val prefetchTrain = prefetchOpt.map(_ => DecoupledIO(new PrefetchTrain))
-
+    val prefetchEvict = prefetchOpt.get match {
+      case hyper: HyperPrefetchParams => Some(DecoupledIO(new PrefetchEvict))
+      case _ => None
+    }
     val toMonitor = Output(new MainpipeMoni())
   })
 
