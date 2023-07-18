@@ -189,6 +189,8 @@ class MainPipe(implicit p: Parameters) extends L2Module {
   // For channel C reqs, Release will always hit on MainPipe, no need for MSHR
   val need_mshr_s3 = need_mshr_s3_a || need_mshr_s3_b
 
+  // For evict address
+  val need_evict = acquire_on_miss_s3 && (!dirResult_s3.hit )
   /* Signals to MSHR Ctl */
   // Allocation of MSHR: new request only
   val alloc_state = WireInit(0.U.asTypeOf(new FSMState()))
@@ -415,6 +417,13 @@ class MainPipe(implicit p: Parameters) extends L2Module {
       train.bits.set := req_s3.set
       train.bits.needT := req_needT_s3
       train.bits.source := req_s3.sourceId
+  }
+  io.prefetchEvict match {
+    case Some(evict) =>
+      evict.bits.tag := ms_task.tag
+      evict.bits.set := ms_task.set
+      evict.valid := !need_evict
+    case None => 
   }
 
   /* ======== Stage 4 ======== */
