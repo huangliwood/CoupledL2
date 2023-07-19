@@ -333,6 +333,14 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
                   case Some(evict_wire) => 
                   val s_evict = Pipeline(s.evict.get)
                   evict_wire(i) <> s_evict
+                  if(bankBits != 0){
+                    val evict_full_addr = Cat(
+                      s_evict.bits.tag, s_evict.bits.set, i.U(bankBits.W), 0.U(offsetBits.W)
+                    )
+                    val (evict_tag, evict_set, _) = s.parseFullAddress(evict_full_addr)
+                    evict_wire(i).bits.tag := evict_tag
+                    evict_wire(i).bits.set := evict_set
+                  }
                   case None =>
                 }
             // restore to full address
@@ -349,17 +357,17 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
               prefetchTrains.get(i).bits.set := train_set
               prefetchResps.get(i).bits.tag := resp_tag
               prefetchResps.get(i).bits.set := resp_set
-              prefetchEvicts match {
-                case Some(evict_wire) => 
-                  val s_evict = Pipeline(s.evict.get)
-                  val evict_full_addr = Cat(
-                    s_evict.bits.tag, s_evict.bits.set, i.U(bankBits.W), 0.U(offsetBits.W)
-                  )
-                  val (evict_tag, evict_set, _) = s.parseFullAddress(evict_full_addr)
-                  evict_wire(i).bits.tag := evict_tag
-                  evict_wire(i).bits.set := evict_set
-                case None =>
-              }
+              // prefetchEvicts match {
+              //   case Some(evict_wire) => 
+              //     val s_evict = Pipeline(s.evict.get)
+              //     val evict_full_addr = Cat(
+              //       s_evict.bits.tag, s_evict.bits.set, i.U(bankBits.W), 0.U(offsetBits.W)
+              //     )
+              //     val (evict_tag, evict_set, _) = s.parseFullAddress(evict_full_addr)
+              //     evict_wire(i).bits.tag := evict_tag
+              //     evict_wire(i).bits.set := evict_set
+              //   case None =>
+              // }
             }
         }
 
