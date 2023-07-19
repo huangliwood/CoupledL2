@@ -195,4 +195,5 @@ class HyperPrefetcher()(implicit p: Parameters) extends PrefetchBranchV2Module {
   XSPerfAccumulate(cacheParams, "sms_send2_queue", fTable.io.resp.fire && sms.io.req.valid)
   XSPerfAccumulate(cacheParams, "bop_send2_queue", fTable.io.resp.fire && q_bop.io.deq.fire)
   XSPerfAccumulate(cacheParams, "spp_send2_queue", fTable.io.resp.fire && q_spp.io.deq.fire)
+  XSPerfAccumulate(cacheParams, "prefetcher_has_evict", io.evict.fire())
 }
