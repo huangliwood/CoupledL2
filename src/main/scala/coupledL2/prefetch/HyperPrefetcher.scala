@@ -40,6 +40,8 @@ class FilterV2(implicit p: Parameters) extends PrefetchBranchV2Module {
     val req = Flipped(DecoupledIO(new PrefetchReq))
     val resp = DecoupledIO(new PrefetchReq)
     val evict = Flipped(DecoupledIO(new PrefetchEvict))
+    val spp2llc = Input(Bool())
+    val hint2llc = ValidIO(new PrefetchReq)
   })
 
   def idx(addr:      UInt) = addr(log2Up(fTableEntries) - 1, 0)
@@ -53,7 +55,6 @@ class FilterV2(implicit p: Parameters) extends PrefetchBranchV2Module {
 
   val fTable = RegInit(VecInit(Seq.fill(fTableEntries)(0.U.asTypeOf(fTableEntry()))))
   val q = Module(new ReplaceableQueueV2(UInt(fullAddressBits.W), fTableQueueEntries))
-
   val oldAddr = io.req.bits.addr
   val blkAddr = oldAddr(fullAddressBits - 1, offsetBits)
   val pageAddr = oldAddr(fullAddressBits - 1, pageOffsetBits)
@@ -65,10 +66,11 @@ class FilterV2(implicit p: Parameters) extends PrefetchBranchV2Module {
   readResult := fTable(idx(pageAddr))
   hit := readResult.valid && tag(pageAddr) === readResult.tag
   val hitForMap = hit && readResult.bitMap(blkOffset)
-
   io.resp.valid := io.req.fire() && !hitForMap
   io.resp.bits := io.req.bits
 
+  io.hint2llc.valid := io.req.fire && !hitForMap && io.spp2llc
+  io.hint2llc.bits := io.req.bits
   val wData = Wire(fTableEntry())
   val newBitMap = readResult.bitMap.zipWithIndex.map{ case (b, i) => Mux(i.asUInt === blkOffset, true.B, false.B) }
   
@@ -83,7 +85,7 @@ class FilterV2(implicit p: Parameters) extends PrefetchBranchV2Module {
     }
   }
 
-  q.io.enq.valid := io.req.fire && !hitForMap
+  q.io.enq.valid := io.req.fire && !hitForMap && !io.spp2llc // if spp2llc , don't enq
   q.io.enq.bits := io.req.bits.addr
   q.io.deq.ready := q.io.full && q.io.enq.fire
 
@@ -126,6 +128,7 @@ class HyperPrefetcher()(implicit p: Parameters) extends PrefetchBranchV2Module {
     val resp = Flipped(DecoupledIO(new PrefetchResp))
     val evict = Flipped(DecoupledIO(new PrefetchEvict))
     val recv_addr = Flipped(ValidIO(UInt(64.W)))
+    val hint2llc = ValidIO(new PrefetchReq)
   })
 
   val fTable = Module(new FilterV2)
@@ -146,9 +149,13 @@ class HyperPrefetcher()(implicit p: Parameters) extends PrefetchBranchV2Module {
   val bop_req = q_bop.io.deq.bits
 
   val q_spp = Module(new ReplaceableQueueV2(chiselTypeOf(spp.io.req.bits), pTableQueueEntries))
+  val q_spp_hint2llc = Module(new ReplaceableQueueV2(chiselTypeOf(Bool()), pTableQueueEntries))
   q_spp.io.enq <> spp.io.req
   q_spp.io.deq.ready := !q_bop.io.deq.fire && !sms.io.req.valid
+  q_spp_hint2llc.io.enq := spp.io.hint2llc
+  q_spp_hint2llc.io.deq.ready := !q_bop.io.deq.fire && !sms.io.req.valid
   val spp_req = q_spp.io.deq.bits
+  val spp_hint2llc = q_spp_hint2llc.io.deq.bits
 
   spp.io.train.valid := io.train.valid
   spp.io.train.bits := io.train.bits
@@ -183,9 +190,10 @@ class HyperPrefetcher()(implicit p: Parameters) extends PrefetchBranchV2Module {
   fTable.io.req.valid := q_spp.io.deq.fire || q_bop.io.deq.fire || sms.io.req.valid
   fTable.io.req.bits := Mux(sms.io.req.valid, sms.io.req.bits, 
                           Mux(q_bop.io.deq.fire, bop_req, spp_req))
-
+  fTable.io.spp2llc := Mux(sms.io.req.valid, false.B, 
+                          Mux(q_bop.io.deq.fire, false.B, spp_hint2llc)) 
   io.req <> fTable.io.resp
-
+  io.hint2llc := fTable.io.hint2llc
   fTable.io.evict.valid := io.evict.valid
   fTable.io.evict.bits := io.evict.bits
   io.evict.ready := fTable.io.evict.ready

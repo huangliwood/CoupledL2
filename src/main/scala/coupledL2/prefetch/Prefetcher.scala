@@ -69,6 +69,7 @@ class PrefetchIO(implicit p: Parameters) extends PrefetchBundle {
     case hyper: HyperPrefetchParams => Some(Flipped(DecoupledIO(new PrefetchEvict)))
     case _ => None
   }
+  val hint2llc = if(sppMultiLevelRefillOpt.nonEmpty)  Some(ValidIO(new PrefetchReq)) else None
 }
 
 class PrefetchQueue(implicit p: Parameters) extends PrefetchModule {
@@ -131,6 +132,19 @@ class Prefetcher(implicit p: Parameters) extends PrefetchModule {
       pftQueue.io.enq <> pft.io.req
       pipe.io.in <> pftQueue.io.deq
       io.req <> pipe.io.out
+      io.hint2llc match{
+      case Some(sender) =>
+        pftQueue.io.enq.valid := pft.io.req.valid && (!pft.io.hint2llc)
+        pftQueue.io.enq.bits <> pft.io.req.bits
+        pipe.io.in <> pftQueue.io.deq
+        io.req <> pipe.io.out
+        sender.valid := pft.io.hint2llc
+        sender.bits := pft.io.req.bits
+      case _ =>
+        pftQueue.io.enq <> pft.io.req
+        pipe.io.in <> pftQueue.io.deq
+        io.req <> pipe.io.out
+    }
     case bop: BOPParameters => // case bop only
       val pft = Module(new BestOffsetPrefetch)
       val pftQueue = Module(new PrefetchQueue)
@@ -185,7 +199,12 @@ class Prefetcher(implicit p: Parameters) extends PrefetchModule {
         case None =>
         hybrid_pfts.io.evict := DontCare
       }
-
+      // has spp multi-level cache option
+      io.hint2llc match{
+        case Some(sender) =>
+          sender <> hybrid_pfts.io.hint2llc
+        case _ =>
+      }
     case _ => assert(cond = false, "Unknown prefetcher")
   }
 }

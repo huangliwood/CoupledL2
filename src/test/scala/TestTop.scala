@@ -379,7 +379,8 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
   val l2xbar = TLXbar()
   val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffffffL), beatBytes = 32))
   var master_nodes: Seq[TLClientNode] = Seq() // TODO
-
+  val NumCores=2
+  val l3pf_RecvXbar = LazyModule(new PrefetchReceiverXbar(NumCores))
   (0 until nrL2).map{i =>
     val l1d = createClientNode(s"l1d$i", 32)
     val l1i = TLClientNode(Seq(
@@ -413,6 +414,11 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
     val l1_sms_send_0_node = LazyModule(new PrefetchSmsOuterNode)
     l2.pf_recv_node.get := l1_sms_send_0_node.outNode
     l2xbar := TLBuffer() := l2node := l1xbar
+    l2.spp_send_node match{
+      case Some(x) =>
+        l3pf_RecvXbar.inNode(i) := l2.spp_send_node.get
+      case None =>
+    }
   }
 
   val l3 = LazyModule(new HuanCun()(new Config((_, _, _) => {
@@ -430,10 +436,17 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
           blockGranularity = log2Ceil(128)
         ),
       ),
+      prefetch=None,
+      prefetchRecv = Some(huancun.prefetch.PrefetchReceiverParams()),
       echoField = Seq(huancun.DirtyField()),
       simulation = true
     )
   })))
+  l3.pf_l3recv_node match{
+    case Some(x) =>
+      l3.pf_l3recv_node.get := l3pf_RecvXbar.outNode.head
+    case None =>
+  }
 
   ram.node :=
     TLXbar() :=*

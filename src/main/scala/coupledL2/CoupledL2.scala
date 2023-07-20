@@ -59,6 +59,7 @@ trait HasCoupledL2Parameters {
   
   // Prefetch
   val prefetchOpt = cacheParams.prefetch
+  val sppMultiLevelRefillOpt = cacheParams.sppMultiLevelRefill
   val hasPrefetchBit = prefetchOpt.nonEmpty && prefetchOpt.get.hasPrefetchBit
   val topDownOpt = if(cacheParams.elaboratedTopDown) Some(true) else None
 
@@ -212,6 +213,22 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
     case _ => None
   }
 
+  val spp_send_node: Option[BundleBridgeSink[PrefetchRecv]] = prefetchOpt.get match {
+    case hyper_pf: HyperPrefetchParams =>
+      sppMultiLevelRefillOpt match{
+        case Some(x) => 
+          Some(BundleBridgeSink(Some(() => new PrefetchRecv())))
+        case _ => None
+      }
+    // case spp_onlly: SPPParameters =>
+    //   sppMultiLevelRefillOpt match{
+    //     case Some(x) => 
+    //       Some(BundleBridgeSink(Some(() => new PrefetchRecv())))
+    //     case _ => None
+    //   }
+    case _ => None //Spp not exist, can not use multl-level refill
+  }
+
   lazy val module = new LazyModuleImp(this) {
     val banks = node.in.size
     val bankBits = if (banks == 1) 0 else log2Up(banks)
@@ -285,6 +302,14 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
         prefetcher.foreach(_.io_l2_pf_en := false.B)
     }
 
+
+    spp_send_node match{
+      case Some(sender) =>
+        sender.out.head._1.addr := Cat(prefetcher.get.io.hint2llc.get.bits.tag, prefetcher.get.io.hint2llc.get.bits.set, 0.U(offsetBits.W))
+        sender.out.head._1.addr_valid := prefetcher.get.io.hint2llc.get.valid
+        sender.out.head._1.l2_pf_en := true.B
+      case None =>
+    }
     def restoreAddress(x: UInt, idx: Int) = {
       restoreAddressUInt(x, idx.U)
     }
