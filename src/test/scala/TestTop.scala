@@ -405,7 +405,8 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
         //   rrTableEntries = 16,
         //   rrTagBits = 6
         // ))
-        prefetch = Some(HyperPrefetchParams())
+        prefetch = Some(HyperPrefetchParams()),
+        sppMultiLevelRefill = Some(HyperPrefetchParams())
       )
     })))
     val l2node = l2.node
@@ -416,6 +417,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
     l2xbar := TLBuffer() := l2node := l1xbar
     l2.spp_send_node match{
       case Some(x) =>
+        println(f"spp_send_node${i} connecting to l3pf_RecvXbar")
         l3pf_RecvXbar.inNode(i) := l2.spp_send_node.get
       case None =>
     }
@@ -444,6 +446,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
   })))
   l3.pf_l3recv_node match{
     case Some(x) =>
+      println(f"pf_l3recv_node connecting to l3pf_RecvXbar out")
       l3.pf_l3recv_node.get := l3pf_RecvXbar.outNode.head
     case None =>
   }

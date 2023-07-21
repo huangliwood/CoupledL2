@@ -63,7 +63,7 @@ class PrefetchSmsOuterNode(val clientNum:Int=2)(implicit p: Parameters) extends 
 // spp sender/receiver xbar
 class PrefetchReceiverXbar(val clientNum:Int=2)(implicit p: Parameters) extends LazyModule{
   val inNode = Seq.fill(clientNum)(BundleBridgeSink(Some(() => new coupledL2.PrefetchRecv)))
-  val outNode = Seq.fill(1)(BundleBridgeSource(Some(() => new huancun.PrefetchRecv())))
+  val outNode = Seq.fill(1)(BundleBridgeSource(Some(() => new huancun.prefetch.l3PrefetchRecv())))
   lazy val module = new LazyModuleImp(this){
     val arbiter = Module(new Arbiter(new PrefetchRecv, clientNum))
     arbiter.suggestName(s"pf_l3recv_node_arb")
@@ -77,7 +77,7 @@ class PrefetchReceiverXbar(val clientNum:Int=2)(implicit p: Parameters) extends 
     arbiter.io.out.valid := DontCare
     outNode.head.out.head._1.addr_valid := arbiter.io.out.bits.addr_valid
     outNode.head.out.head._1.addr := arbiter.io.out.bits.addr
-    outNode.head.out.head._1.l2_pf_en := arbiter.io.out.bits.l2_pf_en
+    outNode.head.out.head._1.pf_en := arbiter.io.out.bits.l2_pf_en
     arbiter.io.out.ready := true.B
   }
 }

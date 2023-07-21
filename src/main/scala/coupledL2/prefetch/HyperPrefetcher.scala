@@ -149,10 +149,11 @@ class HyperPrefetcher()(implicit p: Parameters) extends PrefetchBranchV2Module {
   val bop_req = q_bop.io.deq.bits
 
   val q_spp = Module(new ReplaceableQueueV2(chiselTypeOf(spp.io.req.bits), pTableQueueEntries))
-  val q_spp_hint2llc = Module(new ReplaceableQueueV2(chiselTypeOf(Bool()), pTableQueueEntries))
+  val q_spp_hint2llc = Module(new ReplaceableQueueV2(Bool(), pTableQueueEntries))
   q_spp.io.enq <> spp.io.req
   q_spp.io.deq.ready := !q_bop.io.deq.fire && !sms.io.req.valid
-  q_spp_hint2llc.io.enq := spp.io.hint2llc
+  q_spp_hint2llc.io.enq.valid := spp.io.hint2llc
+  q_spp_hint2llc.io.enq.bits := DontCare
   q_spp_hint2llc.io.deq.ready := !q_bop.io.deq.fire && !sms.io.req.valid
   val spp_req = q_spp.io.deq.bits
   val spp_hint2llc = q_spp_hint2llc.io.deq.bits
