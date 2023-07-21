@@ -39,7 +39,10 @@ class PrefetchReceiver()(implicit p: Parameters) extends PrefetchModule {
   // just ignore train reqs
   io.train.ready := true.B
   io.resp.ready := true.B
-
+  io.hint2llc match{
+    case Some(x) => x := DontCare
+    case _ => None
+  }
   io.req.bits.tag := parseFullAddress(io.recv_addr.bits)._1
   io.req.bits.set := parseFullAddress(io.recv_addr.bits)._2
   io.req.bits.needT := false.B

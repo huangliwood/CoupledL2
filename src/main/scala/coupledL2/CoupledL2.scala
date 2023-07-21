@@ -217,7 +217,7 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
     case hyper_pf: HyperPrefetchParams =>
       sppMultiLevelRefillOpt match{
         case Some(x) =>
-          Some(BundleBridgeSource(Some(() => new PrefetchRecv())))
+          Some(BundleBridgeSource(() => new PrefetchRecv()))
         case _ => None
       }
     // case spp_onlly: SPPParameters =>
@@ -347,6 +347,10 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
 
         slice.io.prefetch.zip(prefetcher).foreach {
           case (s, p) =>
+            s.hint2llc match{
+              case Some(x) => x := DontCare
+              case _ => None
+            }
             s.req.valid := p.io.req.valid && bank_eq(p.io.req.bits.set, i, bankBits)
             s.req.bits := p.io.req.bits
             prefetchReqsReady(i) := s.req.ready && bank_eq(p.io.req.bits.set, i, bankBits)
