@@ -152,8 +152,8 @@ class HyperPrefetcher()(implicit p: Parameters) extends PrefetchBranchV2Module {
   val q_spp_hint2llc = Module(new ReplaceableQueueV2(Bool(), pTableQueueEntries))
   q_spp.io.enq <> spp.io.req
   q_spp.io.deq.ready := !q_bop.io.deq.fire && !sms.io.req.valid
-  q_spp_hint2llc.io.enq.valid := spp.io.hint2llc
-  q_spp_hint2llc.io.enq.bits := DontCare
+  q_spp_hint2llc.io.enq.valid := spp.io.req.valid
+  q_spp_hint2llc.io.enq.bits := spp.io.hint2llc
   q_spp_hint2llc.io.deq.ready := !q_bop.io.deq.fire && !sms.io.req.valid
   val spp_req = q_spp.io.deq.bits
   val spp_hint2llc = q_spp_hint2llc.io.deq.bits
@@ -195,6 +195,7 @@ class HyperPrefetcher()(implicit p: Parameters) extends PrefetchBranchV2Module {
                           Mux(q_bop.io.deq.fire, false.B, spp_hint2llc)) 
   io.req <> fTable.io.resp
   io.hint2llc := fTable.io.hint2llc
+  dontTouch(io.hint2llc)
   fTable.io.evict.valid := io.evict.valid
   fTable.io.evict.bits := io.evict.bits
   io.evict.ready := fTable.io.evict.ready

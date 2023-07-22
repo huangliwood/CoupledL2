@@ -326,6 +326,11 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
       if(bankBits == 0) true.B else set(bankBits - 1, 0) === bankId.U
     }
 
+    spp_send_node match{
+      case Some(x) =>
+       XSPerfAccumulate(cacheParams, "L2_sender_sended", x.out.head._1.addr_valid) 
+    }
+  
     val slices = node.in.zip(node.out).zipWithIndex.map {
       case (((in, edgeIn), (out, edgeOut)), i) =>
         require(in.params.dataBits == out.params.dataBits)
