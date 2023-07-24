@@ -134,6 +134,7 @@ class Prefetcher(implicit p: Parameters) extends PrefetchModule {
       io.req <> pipe.io.out
       io.hint2llc match{
       case Some(sender) =>
+        println(s"${cacheParams.name}Prefetch Config: SPP + SPP cross-level refill")
         pftQueue.io.enq.valid := pft.io.req.valid && (!pft.io.hint2llc)
         pftQueue.io.enq.bits <> pft.io.req.bits
         pipe.io.in <> pftQueue.io.deq
@@ -141,11 +142,13 @@ class Prefetcher(implicit p: Parameters) extends PrefetchModule {
         sender.valid := pft.io.hint2llc
         sender.bits := pft.io.req.bits
       case _ =>
+        println(s"${cacheParams.name}Prefetch Config: SPP")
         pftQueue.io.enq <> pft.io.req
         pipe.io.in <> pftQueue.io.deq
         io.req <> pipe.io.out
     }
     case bop: BOPParameters => // case bop only
+      println(s"${cacheParams.name}Prefetch Config: BOP")
       val pft = Module(new BestOffsetPrefetch)
       val pftQueue = Module(new PrefetchQueue)
       val pipe = Module(new Pipeline(io.req.bits.cloneType, 1))
@@ -155,6 +158,7 @@ class Prefetcher(implicit p: Parameters) extends PrefetchModule {
       pipe.io.in <> pftQueue.io.deq
       io.req <> pipe.io.out
     case receiver: PrefetchReceiverParams => // case sms+bop 
+      println(s"${cacheParams.name}Prefetch Config: BOP + SMS receiver")
       val l1_pf = Module(new PrefetchReceiver())
       val bop = Module(new BestOffsetPrefetch()(p.alterPartial({
         case L2ParamKey => p(L2ParamKey).copy(prefetch = Some(BOPParameters()))
@@ -202,8 +206,9 @@ class Prefetcher(implicit p: Parameters) extends PrefetchModule {
       // has spp multi-level cache option
       io.hint2llc match{
         case Some(sender) =>
+          println(s"${cacheParams.name}Prefetch Config: BOP + SMS receiver + SPP + SPP cross-level refill")
           sender <> hybrid_pfts.io.hint2llc
-        case _ =>
+        case _ => println(s"L${cacheParams.name}Prefetch Config: BOP + SMS receiver + SPP")
       }
     case _ => assert(cond = false, "Unknown prefetcher")
   }

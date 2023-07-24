@@ -65,22 +65,22 @@ class PrefetchSmsOuterNode(val clientNum:Int=2)(implicit p: Parameters) extends 
 
 // spp sender/receiver xbar
 class PrefetchReceiverXbar(val clientNum:Int=2)(implicit p: Parameters) extends LazyModule{
-  val inNode = Seq.fill(clientNum)(BundleBridgeSink(Some(() => new coupledL2.PrefetchRecv)))
-  val outNode = Seq.fill(1)(BundleBridgeSource(Some(() => new huancun.PrefetchRecv)))
+  val inNode = Seq.fill(clientNum)(BundleBridgeSink(Some(() => new coupledL2.LlcPrefetchRecv)))
+  val outNode = Seq.fill(1)(BundleBridgeSource(Some(() => new huancun.LlcPrefetchRecv)))
   lazy val module = new LazyModuleImp(this){
-    val arbiter = Module(new Arbiter(new PrefetchRecv, clientNum))
+    val arbiter = Module(new Arbiter(new LlcPrefetchRecv, clientNum))
     arbiter.suggestName(s"pf_l3recv_node_arb")
     for (i <- 0 until clientNum) {
       arbiter.io.in(i).valid := inNode(i).in.head._1.addr_valid
       arbiter.io.in(i).bits.addr_valid := inNode(i).in.head._1.addr_valid
-      arbiter.io.in(i).bits.addr := inNode(i).in.head._1.addr
-      arbiter.io.in(i).bits.l2_pf_en := inNode(i).in.head._1.l2_pf_en
+      arbiter.io.in(i).bits.addr       := inNode(i).in.head._1.addr
+      arbiter.io.in(i).bits.needT      := inNode(i).in.head._1.needT
       arbiter.io.in(i).ready := DontCare
     }
     arbiter.io.out.valid := DontCare
     outNode.head.out.head._1.addr_valid := arbiter.io.out.bits.addr_valid
-    outNode.head.out.head._1.addr := arbiter.io.out.bits.addr
-    outNode.head.out.head._1.l2_pf_en := arbiter.io.out.bits.l2_pf_en
+    outNode.head.out.head._1.addr       := arbiter.io.out.bits.addr
+    outNode.head.out.head._1.needT      := arbiter.io.out.bits.needT
     arbiter.io.out.ready := true.B
   }
 }

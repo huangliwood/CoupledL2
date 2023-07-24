@@ -213,11 +213,11 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
     case _ => None
   }
 
-  val spp_send_node: Option[BundleBridgeSource[PrefetchRecv]] = prefetchOpt.get match {
+  val spp_send_node: Option[BundleBridgeSource[LlcPrefetchRecv]] = prefetchOpt.get match {
     case hyper_pf: HyperPrefetchParams =>
       sppMultiLevelRefillOpt match{
         case Some(x) =>
-          Some(BundleBridgeSource(() => new PrefetchRecv()))
+          Some(BundleBridgeSource(() => new LlcPrefetchRecv()))
         case _ => None
       }
     // case spp_onlly: SPPParameters =>
@@ -305,9 +305,9 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
 
     spp_send_node match{
       case Some(sender) =>
-        sender.out.head._1.addr := Cat(prefetcher.get.io.hint2llc.get.bits.tag, prefetcher.get.io.hint2llc.get.bits.set, 0.U(offsetBits.W))
+        sender.out.head._1.addr       := Cat(prefetcher.get.io.hint2llc.get.bits.tag, prefetcher.get.io.hint2llc.get.bits.set, 0.U(offsetBits.W))
         sender.out.head._1.addr_valid := prefetcher.get.io.hint2llc.get.valid
-        sender.out.head._1.l2_pf_en := true.B
+        sender.out.head._1.needT      := prefetcher.get.io.hint2llc.get.bits.needT
       case None =>
     }
     def restoreAddress(x: UInt, idx: Int) = {
