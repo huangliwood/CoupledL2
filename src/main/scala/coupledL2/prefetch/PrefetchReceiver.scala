@@ -75,12 +75,14 @@ class PrefetchReceiverXbar(val clientNum:Int=2)(implicit p: Parameters) extends 
       arbiter.io.in(i).bits.addr_valid := inNode(i).in.head._1.addr_valid
       arbiter.io.in(i).bits.addr       := inNode(i).in.head._1.addr
       arbiter.io.in(i).bits.needT      := inNode(i).in.head._1.needT
+      arbiter.io.in(i).bits.source      := inNode(i).in.head._1.source
       arbiter.io.in(i).ready := DontCare
     }
     arbiter.io.out.valid := DontCare
     outNode.head.out.head._1.addr_valid := arbiter.io.out.bits.addr_valid
     outNode.head.out.head._1.addr       := arbiter.io.out.bits.addr
     outNode.head.out.head._1.needT      := arbiter.io.out.bits.needT
+    outNode.head.out.head._1.source     := arbiter.io.out.bits.source
     arbiter.io.out.ready := true.B
   }
 }

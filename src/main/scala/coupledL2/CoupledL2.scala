@@ -305,9 +305,10 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
 
     spp_send_node match{
       case Some(sender) =>
-        sender.out.head._1.addr       := Cat(prefetcher.get.io.hint2llc.get.bits.tag, prefetcher.get.io.hint2llc.get.bits.set, 0.U(offsetBits.W))
+        sender.out.head._1.addr       := prefetcher.get.io.hint2llc.get.bits.addr
         sender.out.head._1.addr_valid := prefetcher.get.io.hint2llc.get.valid
         sender.out.head._1.needT      := prefetcher.get.io.hint2llc.get.bits.needT
+        sender.out.head._1.source     := prefetcher.get.io.hint2llc.get.bits.source
       case None =>
     }
     def restoreAddress(x: UInt, idx: Int) = {

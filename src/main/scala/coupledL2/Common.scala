@@ -22,6 +22,7 @@ import chisel3.util._
 import chipsalliance.rocketchip.config.Parameters
 
 import freechips.rocketchip.tilelink.TLPermissions._
+import coupledL2.prefetch.PrefetchBundle
 
 abstract class L2Module(implicit val p: Parameters) extends MultiIOModule with HasCoupledL2Parameters
 abstract class L2Bundle(implicit val p: Parameters) extends Bundle with HasCoupledL2Parameters
@@ -246,7 +247,8 @@ class PrefetchRecv extends Bundle {
   val l2_pf_en = Bool()
 }
 
-class LlcPrefetchRecv extends Bundle {
+class LlcPrefetchRecv extends Bundle{
+  val source = UInt(8.W)
   val needT = Bool()
   val addr = UInt(64.W)
   val addr_valid = Bool()
