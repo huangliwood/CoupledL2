@@ -448,6 +448,11 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       ),
       prefetch=None,
       prefetchRecv = Some(huancun.prefetch.PrefetchReceiverParams()),
+      /*must has spp, otherwise Assert Fail,must same with L2 sppMultiLevelRefill
+      sppMultiLevelRefill options:
+      PrefetchReceiverParams() => spp has cross level refill
+      None                     => spp only refill L2
+      */
       echoField = Seq(huancun.DirtyField()),
       simulation = true
     )
