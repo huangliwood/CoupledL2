@@ -63,6 +63,19 @@ class PrefetchSmsOuterNode(val clientNum:Int=2)(implicit p: Parameters) extends 
   }
 }
 
+// null node
+class SppSenderNull(val clientNum:Int=2)(implicit p: Parameters) extends LazyModule{
+  val outNode = Seq.fill(clientNum)(BundleBridgeSource(Some(() => new coupledL2.LlcPrefetchRecv())))
+  lazy val module = new LazyModuleImp(this){
+    for (i <- 0 until clientNum) {
+      outNode(i).out.head._1.addr_valid := DontCare
+      outNode(i).out.head._1.addr       := DontCare
+      outNode(i).out.head._1.needT      := DontCare
+      outNode(i).out.head._1.source     := DontCare
+    }
+  }
+}
+
 // spp sender/receiver xbar
 class PrefetchReceiverXbar(val clientNum:Int=2)(implicit p: Parameters) extends LazyModule{
   val inNode = Seq.fill(clientNum)(BundleBridgeSink(Some(() => new coupledL2.LlcPrefetchRecv)))

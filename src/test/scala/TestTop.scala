@@ -380,8 +380,8 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
   val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffffffL), beatBytes = 32))
   var master_nodes: Seq[TLClientNode] = Seq() // TODO
   val NumCores=2
-  val l3pf_RecvXbar = LazyModule(new PrefetchReceiverXbar(NumCores))
-  (0 until nrL2).map{i =>
+  // val nullNode = LazyModule(new SppSenderNull)
+  val l2List = (0 until nrL2).map{i =>
     val l1d = createClientNode(s"l1d$i", 32)
     val l1i = TLClientNode(Seq(
       TLMasterPortParameters.v1(
@@ -401,26 +401,34 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
         sets = 128,
         clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
         echoField = Seq(huancun.DirtyField()),
-        // prefetch = Some(BOPParameters(
-        //   rrTableEntries = 16,
-        //   rrTagBits = 6
-        // ))
-        prefetch = Some(HyperPrefetchParams()),
-        sppMultiLevelRefill = Some(HyperPrefetchParams())
+        // prefetch = Some(BOPParameters(rrTableEntries = 16,rrTagBits = 6))
+        prefetch = Some(HyperPrefetchParams()),/* 
+        del L2 prefetche recv option, move into: prefetch =  PrefetchReceiverParams
+        prefetch options:
+          SPPParameters          => spp only
+          BOPParameters          => bop only
+          PrefetchReceiverParams => sms+bop
+          HyperPrefetchParams    => spp+bop+sms
+        */
+        sppMultiLevelRefill = Some(coupledL2.prefetch.PrefetchReceiverParams()),
+        /*must has spp, otherwise Assert Fail
+        sppMultiLevelRefill options:
+        PrefetchReceiverParams() => spp has cross level refill
+        None                     => spp only refill L2 
+        */
       )
     })))
     val l2node = l2.node
     l1xbar := TLBuffer() := l1i
     l1xbar := TLBuffer() := l1d
-    val l1_sms_send_0_node = LazyModule(new PrefetchSmsOuterNode)
-    l2.pf_recv_node.get := l1_sms_send_0_node.outNode
-    l2xbar := TLBuffer() := l2node := l1xbar
-    l2.spp_send_node match{
-      case Some(x) =>
-        println(f"spp_send_node${i} connecting to l3pf_RecvXbar")
-        l3pf_RecvXbar.inNode(i) := l2.spp_send_node.get
+    l2.pf_recv_node match{
+      case Some(l2Recv) => 
+        val l1_sms_send_0_node = LazyModule(new PrefetchSmsOuterNode)
+        l2Recv := l1_sms_send_0_node.outNode
       case None =>
     }
+    l2xbar := TLBuffer() := l2node := l1xbar
+    l2 // return l2 list
   }
 
   val l3 = LazyModule(new HuanCun()(new Config((_, _, _) => {
@@ -439,18 +447,52 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
         ),
       ),
       prefetch=None,
-      prefetchRecv = Some(huancun.prefetch.PrefetchReceiverParams()),
+      prefetchRecv = None,//Some(huancun.prefetch.PrefetchReceiverParams()),
       echoField = Seq(huancun.DirtyField()),
       simulation = true
     )
   })))
-  l3.pf_l3recv_node match{
+  // l2List.zipWithIndex.foreach { 
+  //   case (l2, i) =>
+  //     l2.spp_send_node match{
+  //       case Some(sppSend) =>
+  //         val l3pf_RecvXbar =  LazyModule(new PrefetchReceiverXbar(NumCores))
+  //         l3pf_RecvXbar.inNode(i) := l2.spp_send_node.get
+  //         println(f"spp_send_node${i} connecting to l3pf_RecvXbar")
+  //       case None => 
+  //     }
+  // }
+  // println(f"pf_l3recv_node connecting to l3pf_RecvXbar out")
+  val sppHasCrossLevelRefillOpt = p(L2ParamKey).sppMultiLevelRefill
+  println(f"SPP cross level refill: ${sppHasCrossLevelRefillOpt} ")
+  sppHasCrossLevelRefillOpt match{
     case Some(x) =>
+      val l3pf_RecvXbar = LazyModule(new PrefetchReceiverXbar(NumCores))
+      l2List.zipWithIndex.foreach { 
+        case (l2, i) =>
+          l2.spp_send_node match {
+            case Some(l2Send) =>
+              l3pf_RecvXbar.inNode(i) := l2Send
+              println(f"spp_send_node${i} connecting to l3pf_RecvXbar")
+            case None =>
+        }
+      }
       println(f"pf_l3recv_node connecting to l3pf_RecvXbar out")
-      l3.pf_l3recv_node.get := l3pf_RecvXbar.outNode.head
+      l3.pf_l3recv_node.map(l3_recv =>  l3_recv:= l3pf_RecvXbar.outNode.head)
     case None =>
   }
 
+  // l3.pf_l3recv_node match{
+  //   case Some(l3recv) =>
+  //     val l3pf_RecvXbar =  LazyModule(new PrefetchReceiverXbar(NumCores))
+  //     l2List.zipWithIndex.foreach { 
+  //       case (l2, i) =>
+  //         l3pf_RecvXbar.inNode(i) := l2.spp_send_node.get
+  //         println(f"spp_send_node${i} connecting to l3pf_RecvXbar")
+  //     }
+  //     l3recv:= l3pf_RecvXbar.outNode.head
+  //   case None =>
+  // }
   ram.node :=
     TLXbar() :=*
       TLFragmenter(32, 64) :=*

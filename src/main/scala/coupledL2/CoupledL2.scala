@@ -220,12 +220,12 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
           Some(BundleBridgeSource(() => new LlcPrefetchRecv()))
         case _ => None
       }
-    // case spp_onlly: SPPParameters =>
-    //   sppMultiLevelRefillOpt match{
-    //     case Some(x) => 
-    //       Some(BundleBridgeSink(Some(() => new PrefetchRecv())))
-    //     case _ => None
-    //   }
+    case spp_only: SPPParameters =>
+      sppMultiLevelRefillOpt match{
+        case Some(x) => 
+          Some(BundleBridgeSource(Some(() => new LlcPrefetchRecv())))
+        case _ => None
+      }
     case _ => None //Spp not exist, can not use multl-level refill
   }
 
@@ -330,6 +330,7 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
     spp_send_node match{
       case Some(x) =>
        XSPerfAccumulate(cacheParams, "L2_sender_sended", x.out.head._1.addr_valid) 
+      case None =>
     }
   
     val slices = node.in.zip(node.out).zipWithIndex.map {

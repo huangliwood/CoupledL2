@@ -190,7 +190,7 @@ class MainPipe(implicit p: Parameters) extends L2Module {
   val need_mshr_s3 = need_mshr_s3_a || need_mshr_s3_b
 
   // For evict address
-  val need_evict = acquire_on_miss_s3 && (!dirResult_s3.hit )
+  val need_evict = acquire_on_miss_s3 && (!dirResult_s3.hit ) && meta_s3.state =/= INVALID
   /* Signals to MSHR Ctl */
   // Allocation of MSHR: new request only
   val alloc_state = WireInit(0.U.asTypeOf(new FSMState()))
