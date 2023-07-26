@@ -447,7 +447,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
         ),
       ),
       prefetch=None,
-      prefetchRecv = None,//Some(huancun.prefetch.PrefetchReceiverParams()),
+      prefetchRecv = Some(huancun.prefetch.PrefetchReceiverParams()),
       echoField = Seq(huancun.DirtyField()),
       simulation = true
     )
@@ -590,7 +590,22 @@ object TestTop_fullSys extends App {
   val config = new Config((_, _, _) => {
     case L2ParamKey => L2Param(
       clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
-      echoField = Seq(DirtyField())
+      echoField = Seq(DirtyField()),
+      // prefetch = Some(BOPParameters(rrTableEntries = 16,rrTagBits = 6))
+      prefetch = Some(HyperPrefetchParams()), /*
+      del L2 prefetche recv option, move into: prefetch =  PrefetchReceiverParams
+      prefetch options:
+        SPPParameters          => spp only
+        BOPParameters          => bop only
+        PrefetchReceiverParams => sms+bop
+        HyperPrefetchParams    => spp+bop+sms
+      */
+      sppMultiLevelRefill = Some(coupledL2.prefetch.PrefetchReceiverParams()),
+      /*must has spp, otherwise Assert Fail
+      sppMultiLevelRefill options:
+      PrefetchReceiverParams() => spp has cross level refill
+      None                     => spp only refill L2
+      */
     )
     case HCCacheParamsKey => HCCacheParameters(
       echoField = Seq(DirtyField())
