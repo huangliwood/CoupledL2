@@ -205,24 +205,22 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
     managerFn = managerPortParams
   )
 
-  val pf_recv_node: Option[BundleBridgeSink[PrefetchRecv]] = prefetchOpt match {
-    case Some(_: PrefetchReceiverParams) =>
-      Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
-    case Some(_: HyperPrefetchParams) =>
-      Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
-    case _ => None
-  }
+ val pf_recv_node: Option[BundleBridgeSink[PrefetchRecv]] = prefetchOpt match {
+  case Some(receive: PrefetchReceiverParams) => Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
+  case Some(sms_sender_hyper: HyperPrefetchParams) => Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
+  case _ => None
+}
 
-  val spp_send_node: Option[BundleBridgeSource[LlcPrefetchRecv]] = prefetchOpt.get match {
-    case hyper_pf: HyperPrefetchParams =>
+  val spp_send_node: Option[BundleBridgeSource[LlcPrefetchRecv]] = prefetchOpt match {
+    case Some(hyper_pf: HyperPrefetchParams) =>
       sppMultiLevelRefillOpt match{
-        case Some(x) =>
+        case Some(receive: PrefetchReceiverParams) =>
           Some(BundleBridgeSource(() => new LlcPrefetchRecv()))
         case _ => None
       }
-    case spp_only: SPPParameters =>
+    case Some(spp_only: SPPParameters) =>
       sppMultiLevelRefillOpt match{
-        case Some(x) => 
+        case Some(receive: PrefetchReceiverParams) => 
           Some(BundleBridgeSource(Some(() => new LlcPrefetchRecv())))
         case _ => None
       }
@@ -311,6 +309,12 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
         sender.out.head._1.source     := prefetcher.get.io.hint2llc.get.bits.source
       case None =>
     }
+
+    println(s"CPL2 OPTS ! ")
+    println(prefetchOpt.get)
+    println(sppMultiLevelRefillOpt.get)
+    println(pf_recv_node)
+    println(spp_send_node)
     def restoreAddress(x: UInt, idx: Int) = {
       restoreAddressUInt(x, idx.U)
     }
