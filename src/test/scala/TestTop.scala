@@ -9,6 +9,7 @@ import freechips.rocketchip.tilelink._
 import huancun._
 import coupledL2.prefetch._
 import utility.{ChiselDB, FileRegisters}
+import coupledL3._
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -342,6 +343,112 @@ class TestTop_L2L3L2()(implicit p: Parameters) extends LazyModule {
   }
 }
 
+// class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
+
+//   /* L1D L1I L1D L1I (L1I sends Get)
+//    *  \  /    \  /
+//    *   L2      L2
+//    *    \     /
+//    *       L3
+//    */
+
+//   val delayFactor = 0.2
+//   val cacheParams = p(L2ParamKey)
+
+//   val nrL2 = 2
+
+//   def createClientNode(name: String, sources: Int) = {
+//     val masterNode = TLClientNode(Seq(
+//       TLMasterPortParameters.v2(
+//         masters = Seq(
+//           TLMasterParameters.v1(
+//             name = name,
+//             sourceId = IdRange(0, sources),
+//             supportsProbe = TransferSizes(cacheParams.blockBytes)
+//           )
+//         ),
+//         channelBytes = TLChannelBeatBytes(cacheParams.blockBytes),
+//         minLatency = 1,
+//         echoFields = Nil,
+//         requestFields = Seq(AliasField(2)),
+//         responseKeys = cacheParams.respKey
+//       )
+//     ))
+//     masterNode
+//   }
+
+//   val l2xbar = TLXbar()
+//   val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffL), beatBytes = 32))
+//   var master_nodes: Seq[TLClientNode] = Seq() // TODO
+
+//   (0 until nrL2).map{i =>
+//     val l1d = createClientNode(s"l1d$i", 32)
+//     val l1i = TLClientNode(Seq(
+//       TLMasterPortParameters.v1(
+//         clients = Seq(TLMasterParameters.v1(
+//           name = s"l1i$i",
+//           sourceId = IdRange(0, 32)
+//         ))
+//       )
+//     ))
+//     master_nodes = master_nodes ++ Seq(l1d, l1i) // TODO
+
+//     val l1xbar = TLXbar()
+//     val l2node = LazyModule(new CoupledL2()(new Config((_, _, _) => {
+//       case L2ParamKey => L2Param(
+//         name = s"l2$i",
+//         ways = 4,
+//         sets = 128,
+//         clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
+//         echoField = Seq(DirtyField()),
+//         prefetch = Some(BOPParameters(
+//           rrTableEntries = 16,
+//           rrTagBits = 6
+//         ))
+//       )
+//     }))).node
+
+//     l1xbar := TLBuffer() := l1i
+//     l1xbar := TLBuffer() := l1d
+
+//     l2xbar := TLBuffer() := l2node := l1xbar
+//   }
+
+//   val l3 = LazyModule(new HuanCun()(new Config((_, _, _) => {
+//     case HCCacheParamsKey => HCCacheParameters(
+//       name = "L3",
+//       level = 3,
+//       ways = 4,
+//       sets = 128,
+//       inclusive = false,
+//       clientCaches = (0 until nrL2).map(i =>
+//         CacheParameters(
+//           name = s"l2",
+//           sets = 128,
+//           ways = 4,
+//           blockGranularity = log2Ceil(128)
+//         ),
+//       ),
+//       echoField = Seq(DirtyField()),
+//       simulation = true
+//     )
+//   })))
+
+//   ram.node :=
+//     TLXbar() :=*
+//       TLFragmenter(32, 64) :=*
+//       TLCacheCork() :=*
+//       TLDelayer(delayFactor) :=*
+//       l3.node :=* l2xbar
+
+//   lazy val module = new LazyModuleImp(this) {
+//     master_nodes.zipWithIndex.foreach {
+//       case (node, i) =>
+//         node.makeIOs()(ValName(s"master_port_$i"))
+//     }
+//   }
+// }
+
 class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
 
   /* L1D L1I L1D L1I (L1I sends Get)
@@ -377,7 +484,8 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
   }
 
   val l2xbar = TLXbar()
-  val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffL), beatBytes = 32))
+  // val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffL), beatBytes = 32))
+  val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffffL), beatBytes = 32))
   var master_nodes: Seq[TLClientNode] = Seq() // TODO
 
   (0 until nrL2).map{i =>
@@ -397,7 +505,8 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       case L2ParamKey => L2Param(
         name = s"l2$i",
         ways = 4,
-        sets = 128,
+        // sets = 128,
+        sets = 32,
         clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
         echoField = Seq(DirtyField()),
         prefetch = Some(BOPParameters(
@@ -413,25 +522,29 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
     l2xbar := TLBuffer() := l2node := l1xbar
   }
 
-  val l3 = LazyModule(new HuanCun()(new Config((_, _, _) => {
-    case HCCacheParamsKey => HCCacheParameters(
-      name = "L3",
-      level = 3,
+  val l3 = LazyModule(new CoupledL3()(new Config((_, _, _) => {
+    case L3ParamKey => L3Param(
+      name = s"l3",
       ways = 4,
-      sets = 128,
-      inclusive = false,
-      clientCaches = (0 until nrL2).map(i =>
-        CacheParameters(
-          name = s"l2",
-          sets = 128,
-          ways = 4,
-          blockGranularity = log2Ceil(128)
-        ),
-      ),
+      // sets = 128,
+      sets = 32,
+      clientCaches = Seq(L2ClientParam(aliasBitsOpt = None)), // TODO: For L3 this should be L2Param
       echoField = Seq(DirtyField()),
-      simulation = true
+      prefetch = None
     )
   })))
+
+  val dma_node = TLClientNode(Seq(TLMasterPortParameters.v2(
+      Seq(TLMasterParameters.v1(
+        name = "dma",
+        sourceId = IdRange(0, 16),
+        supportsProbe = TransferSizes.none
+      )),
+      channelBytes = TLChannelBeatBytes(cacheParams.blockBytes),
+      minLatency = 1,
+      echoFields = Nil,
+    )))
+  l2xbar := TLBuffer() := dma_node
 
   ram.node :=
     TLXbar() :=*
@@ -445,6 +558,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       case (node, i) =>
         node.makeIOs()(ValName(s"master_port_$i"))
     }
+    dma_node.makeIOs()(ValName("dma_port"))
   }
 }
 

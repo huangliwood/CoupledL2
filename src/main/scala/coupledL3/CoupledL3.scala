@@ -17,7 +17,7 @@
 
 // See LICENSE.SiFive for license details.
 
-package coupledL2
+package coupledL3
 
 import chisel3._
 import chisel3.util._
@@ -28,12 +28,12 @@ import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.util._
 import chipsalliance.rocketchip.config.Parameters
 import scala.math.max
-import coupledL2.prefetch._
-import coupledL2.utils.XSPerfAccumulate
+import coupledL3.prefetch._
+import coupledL3.utils.XSPerfAccumulate
 
-trait HasCoupledL2Parameters {
+trait HasCoupledL3Parameters {
   val p: Parameters
-  val cacheParams = p(L2ParamKey)
+  val cacheParams = p(L3ParamKey)
 
   val blocks = cacheParams.sets * cacheParams.ways
   val blockBytes = cacheParams.blockBytes
@@ -51,6 +51,16 @@ trait HasCoupledL2Parameters {
 
   val bufBlocks = 8 // hold data that flows in MainPipe
   val bufIdxBits = log2Up(bufBlocks)
+
+  val enableClockGate = cacheParams.enableClockGate
+
+  val dataEccCode = cacheParams.dataEccCode
+  val dataEccEnable = dataEccCode != None && dataEccCode != Some("none")
+  val tagEccCode = cacheParams.tagEccCode
+  val tagEccEnable = tagEccCode != None && tagEccCode != Some("none")
+
+  val enableDebug = cacheParams.enableDebug
+
 
   // 1 cycle for sram read, and latch for another cycle
   val sramLatency = 2
@@ -76,11 +86,14 @@ trait HasCoupledL2Parameters {
   lazy val sourceIdAll = 1 << sourceIdBits
 
   val mshrsAll = cacheParams.mshrs
-  val idsAll = 256// ids of L2 //TODO: Paramterize like this: max(mshrsAll * 2, sourceIdAll * 2)
+  val idsAll = 256// ids of L3 //TODO: Paramterize like this: max(mshrsAll * 2, sourceIdAll * 2)
   val mshrBits = log2Up(idsAll)
   // id of 0XXXX refers to mshrId
   // id of 1XXXX refers to reqs that do not enter mshr
   // require(isPow2(idsAll))
+
+  val lookupBufEntries = 16
+  val lookupBufBits = log2Up(lookupBufEntries)
 
   // width params with bank idx (used in prefetcher / ctrl unit)
   lazy val fullAddressBits = edgeOut.bundle.addressBits
@@ -152,7 +165,15 @@ trait HasCoupledL2Parameters {
   }
 }
 
-class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Parameters {
+trait DontCareInnerLogic { this: Module =>
+  override def IO[T <: Data](iodef: T): T = {
+    val p = chisel3.experimental.IO.apply(iodef)
+    p <> DontCare
+    p
+  }
+}
+
+class CoupledL3(implicit p: Parameters) extends LazyModule with HasCoupledL3Parameters {
 
   val xfer = TransferSizes(blockBytes, blockBytes)
   val atom = TransferSizes(1, cacheParams.channelBytes.d.get)
@@ -165,15 +186,21 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
         supports = TLSlaveToMasterTransferSizes(
           probe = xfer
         ),
-        sourceId = {
+        sourceId = if(cacheParams.name == "l3"){
+          println(s"[Diplomacy stage] ${cacheParams.name} client num: ${m.masters.length}")
+          println(s"[Diplomacy stage] ${cacheParams.name} client sourceId:")
+          m.masters.zipWithIndex.foreach{case(m, i) => println(s"[Diplomacy stage] \t[${i}]${m.name} => start: ${m.sourceId.start} end: ${m.sourceId.end}")}
+          val idEnd = idsAll
+          println(s"[Diplomacy stage] ${cacheParams.name} sourceId idRange(0, ${idEnd})\n")
+          IdRange(0, idEnd)
+        } else {
           println(s"[Diplomacy stage] ${cacheParams.name} client num: ${m.masters.length}")
           println(s"[Diplomacy stage] ${cacheParams.name} client sourceId:")
           m.masters.zipWithIndex.foreach{case(m, i) => println(s"[Diplomacy stage] \t[${i}]${m.name} => start: ${m.sourceId.start} end: ${m.sourceId.end}")}
           val idEnd = 64 // TODO：Parameterize
           println(s"[Diplomacy stage] ${cacheParams.name} sourceId idRange(0, ${idEnd})\n")
-          IdRange(0, 64)
+          IdRange(0, idEnd)
         }
-        
       )
     ),
     channelBytes = cacheParams.channelBytes,
@@ -234,7 +261,7 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
     }
     val sizeStr = sizeBytesToStr(sizeBytes)
     val prefetch = "prefetch: " + cacheParams.prefetch
-    println(s"====== Inclusive ${cacheParams.name} ($sizeStr * $banks-bank) $prefetch ======")
+    println(s"====== ${cacheParams.inclusionPolicy} ${cacheParams.name} ($sizeStr * $banks-bank) $prefetch ======")
     println(s"bankBits: ${bankBits}")
     println(s"replacement: ${cacheParams.replacement}")
     println(s"replace policy: ${cacheParams.releaseData}")
@@ -276,8 +303,8 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
         prefetcher.get.io.recv_addr.bits := x.in.head._1.addr
         prefetcher.get.io_l2_pf_en := x.in.head._1.l2_pf_en
       case None =>
-        prefetcher.foreach(_.io.recv_addr := 0.U.asTypeOf(ValidIO(UInt(64.W))))
-        prefetcher.foreach(_.io_l2_pf_en := false.B)
+        prefetcher.foreach(_.io.recv_addr := DontCare)
+        prefetcher.foreach(_.io_l2_pf_en := DontCare)
     }
 
     def restoreAddress(x: UInt, idx: Int) = {
@@ -299,13 +326,12 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
     val slices = node.in.zip(node.out).zipWithIndex.map {
       case (((in, edgeIn), (out, edgeOut)), i) =>
         require(in.params.dataBits == out.params.dataBits)
-        val rst_L2 = reset
-        val slice = withReset(rst_L2) { 
+        val rst_L3 = reset
+        val slice = withReset(rst_L3) { 
           Module(new Slice()(p.alterPartial {
             case EdgeInKey  => edgeIn
             case EdgeOutKey => edgeOut
             case BankBitsKey => bankBits
-            case SliceIdKey => i
           })) 
         }
         slice.io.in <> in
@@ -313,7 +339,6 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
         out <> slice.io.out
         out.a.bits.address := restoreAddress(slice.io.out.a.bits.address, i)
         out.c.bits.address := restoreAddress(slice.io.out.c.bits.address, i)
-        slice.io.sliceId := i.U
 
         slice.io.prefetch.zip(prefetcher).foreach {
           case (s, p) =>
@@ -343,7 +368,7 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
 
         slice
     }
-    val l1Hint_arb = Module(new Arbiter(new L2ToL1Hint(), slices.size))
+    val l1Hint_arb = Module(new Arbiter(new L3ToL1Hint(), slices.size))
     val slices_l1Hint = slices.zipWithIndex.map {
       case (s, i) => Pipeline(s.io.l1Hint, depth = 1, pipe = false, name = Some(s"l1Hint_buffer_$i"))
     }
