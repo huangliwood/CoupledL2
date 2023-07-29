@@ -63,8 +63,6 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
     }))
   })
 
-  /* ======== Data Structure ======== */
-
   io.ATag := io.in.bits.tag
   io.ASet := io.in.bits.set
 
@@ -73,8 +71,11 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   val chosenQ = Module(new Queue(new ChosenQBundle(log2Ceil(entries)), entries = 1, pipe = true, flow = false))
   val chosenQValid = chosenQ.io.deq.valid
 
-  /* ======== Enchantment ======== */
+  // --------------------------------------------------------------------------
+  //  Enchantment
+  // --------------------------------------------------------------------------
   val NWay = cacheParams.ways
+
   // count conflict
   def sameAddr(a: TaskBundle, b: TaskBundle):     Bool = Cat(a.tag, a.set) === Cat(b.tag, b.set)
   def sameAddr(a: TaskBundle, b: MSHRBlockAInfo): Bool = Cat(a.tag, a.set) === Cat(b.reqTag, b.set)
@@ -122,18 +123,11 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   // other flags
   val in      = io.in.bits
   val full    = Cat(buffer.map(_.valid)).andR
-  // flow not allowed when full, or entries might starve
-  // val conflictWithMSHR = conflict(in)
-  // val mainPipeBlock = Cat(io.mainPipeBlock).orR
-  // val noFreeWayWithMSHR = noFreeWay(in)
-  // val canFlow = flow.B && !full &&
-  //   !conflictWithMSHR && !chosenQValid && !mainPipeBlock && !noFreeWayWithMSHR
 
-  val canFlow = flow.B && !full &&
-    !conflict(in) && !chosenQValid && !Cat(io.mainPipeBlock).orR && !noFreeWay(in)
+  // flow not allowed when full, or entries might starve
+  val canFlow = flow.B && !full && !conflict(in) && !chosenQValid && !Cat(io.mainPipeBlock).orR && !noFreeWay(in)
   val doFlow  = canFlow && io.out.ready
 
-  //  val depMask    = buffer.map(e => e.valid && sameAddr(io.in.bits, e.task))
   // remove duplicate prefetch if same-addr A req in MSHR or ReqBuf
   val isPrefetch = in.fromA && in.opcode === Hint
   val dupMask    = VecInit(
@@ -147,7 +141,10 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
 
   //!! TODO: we can also remove those that duplicate with mainPipe
 
-  /* ======== Alloc ======== */
+  
+  // --------------------------------------------------------------------------
+  //  Alloc
+  // --------------------------------------------------------------------------
   io.in.ready   := !full || doFlow
 
   val insertIdx = PriorityEncoder(buffer.map(!_.valid))
@@ -162,7 +159,6 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
     entry.valid   := true.B
     // when Addr-Conflict / Same-Addr-Dependent / MainPipe-Block / noFreeWay-in-Set, entry not ready
     entry.rdy     := !conflict(in) && !mpBlock && !noFreeWay(in) && !s1Block // && !Cat(depMask).orR
-    // entry.rdy := !conflictWithMSHR && !mainPipeBlock && !noFreeWayWithMSHR && !s1Block
     entry.task    := io.in.bits
     entry.waitMP  := Cat(
       s1Block,
@@ -172,11 +168,12 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
     entry.waitMS  := conflictMask(in)
     entry.occWays := Mux(mpBlock, 0.U, occWays(in))
 
-//    entry.depMask := depMask
-//    assert(PopCount(conflictMask(in)) <= 2.U)
   }
 
-  /* ======== Issue ======== */
+
+  // --------------------------------------------------------------------------
+  //  Issue
+  // --------------------------------------------------------------------------
   issueArb.io.in zip buffer foreach {
     case(in, e) =>
       // when io.out.valid, we temporarily stall all entries of the same set
@@ -186,7 +183,10 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
       in.bits  := e
   }
 
-  /* ======== chosenQ enq ======== */
+
+  // --------------------------------------------------------------------------
+  //  chosenQ enq
+  // --------------------------------------------------------------------------
   // once fired at issueArb, it is ok to enter MainPipe without conflict
   // however, it may be blocked for other reasons such as high-prior reqs or MSHRFull
   // in such case, we need a place to save it
@@ -219,7 +219,6 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   for (e <- buffer) {
     when(e.valid) {
       val waitMSUpdate  = WireInit(e.waitMS)
-//      val depMaskUpdate = WireInit(e.depMask)
       val occWaysUpdate = WireInit(e.occWays)
 
       // when mshr will_free, clear it in other reqs' waitMS and occWays
@@ -244,11 +243,6 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
         occWaysUpdate := occWays(e.task)
       }
 
-      // when request is sent, clear it in other reqs' depMask
-//      when(io.out.fire && !canFlow) {
-//        depMaskUpdate(chosenQ.io.deq.bits.id) := false.B
-//      }
-
       // set waitMP if fired-s1-req is the same set
       val s1A_Block = io.out.fire && sameSet(e.task, io.out.bits)
       val s1B_Block = io.sinkEntrance.valid && io.sinkEntrance.bits.set === e.task.set
@@ -259,16 +253,18 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
 
       // update info
       e.waitMS  := waitMSUpdate
-//      e.depMask := depMaskUpdate
       e.occWays := occWaysUpdate
       e.rdy     := !waitMSUpdate.orR && !e.waitMP && !noFreeWay(occWaysUpdate) && !s1_Block
     }
   }
 
-  /* ======== Output ======== */
+
+
+  // --------------------------------------------------------------------------
+  //  Output
+  // --------------------------------------------------------------------------
   // when entry.rdy is no longer true,
   // we cancel req in chosenQ, with the entry still held in buffer to issue later
-//  val cancel = (canFlow && sameSet(chosenQ.io.deq.bits.bits.task, io.in.bits)) || !buffer(chosenQ.io.deq.bits.id).rdy
   val cancel = !buffer(chosenQ.io.deq.bits.id).rdy
 
   chosenQ.io.deq.ready := io.out.ready || cancel
@@ -282,6 +278,8 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   // for Dir to choose a way not occupied by some unfinished MSHR task
   io.out.bits.wayMask := Mux(canFlow, ~occWays(io.in.bits), ~chosenQ.io.deq.bits.bits.occWays)
 
+
+  
   // add XSPerf to see how many cycles the req is held in Buffer
   if(cacheParams.enablePerf) {
     XSPerfAccumulate(cacheParams, "drop_prefetch", dup)

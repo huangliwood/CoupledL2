@@ -277,6 +277,13 @@ class MainPipe(implicit p: Parameters) extends L2Module {
   val source_req_s3 = Wire(new TaskBundle)
   source_req_s3 := Mux(sink_resp_s3.valid, sink_resp_s3.bits, req_s3)
 
+  //  TODO: debug address consider multi-bank
+  def restoreAddr(set: UInt, tag: UInt) = {
+    (set << offsetBits).asUInt + (tag << (setBits + offsetBits)).asUInt
+  }
+  val debug_addr_s3 = restoreAddr(task_s3.bits.set, task_s3.bits.tag) // (task_s3.bits.set << offsetBits).asUInt + (task_s3.bits.tag << (setBits + offsetBits)).asUInt
+  dontTouch(debug_addr_s3)
+
   /* ======== Interact with DS ======== */
   val data_s3 = Mux(io.refillBufResp_s3.valid, io.refillBufResp_s3.bits.data, io.releaseBufResp_s3.bits.data)
   val hasData_s3 = source_req_s3.opcode(0)

@@ -109,11 +109,7 @@ class MSHRCtl(implicit p: Parameters) extends L3Module {
   io.toMainPipe.mshr_alloc_ptr := OHToUInt(selectedMSHROH)
 
   val resp_sinkC_match_vec = mshrs.map { mshr =>
-    val mshr_valid = if (cacheParams.name == "l3") 
-                        mshr.io.status.valid && mshr.io.status.bits.w_c_resp
-                        // mshr.io.status.valid 
-                      else 
-                        mshr.io.status.valid && mshr.io.status.bits.w_c_resp
+    val mshr_valid = mshr.io.status.valid && mshr.io.status.bits.w_c_resp
 
     mshr_valid &&
       io.resps.sinkC.set === mshr.io.status.bits.set &&
@@ -142,11 +138,33 @@ class MSHRCtl(implicit p: Parameters) extends L3Module {
   }
 
   val setMatchVec_b = mshrs.map(m => m.io.status.valid && m.io.status.bits.set === io.fromReqArb.status_s1.b_set)
+  // val setConflictVec_b = (setMatchVec_b zip mshrs.map(_.io.status.bits.nestB)).map(x => x._1 && !x._2)
   val setConflictVec_b = (setMatchVec_b zip mshrs.map(_.io.status.bits.nestB)).map(x => x._1 && !x._2)
+  val setConflictVec_b_1 = setConflictVec_b.zip(mshrs.map(_.io.status.bits)).map{
+    case(conflict, channel) => conflict && (io.fromReqArb.status_s1.fromProbeHelper && channel.fromC || !io.fromReqArb.status_s1.fromProbeHelper)
+  } 
+
+  def getMSHRSameSetVec(valid: Bool, set: UInt) = {
+    val mshrSameSetVec = VecInit(io.toReqBuf.map { status =>
+      status.valid && valid && status.bits.set === set
+    })
+    mshrSameSetVec
+  }
+  def getOccWayVec(valid: Bool, set: UInt) = {
+    val mshrSameSetVec = getMSHRSameSetVec(valid, set)
+    val occWay = mshrSameSetVec.zip(io.toReqBuf).map{
+      case(sameSet, status) => 
+        Mux(sameSet, UIntToOH(status.bits.way), 0.U(cacheParams.ways.W))
+    }.reduce(_|_)
+    occWay
+  }
+  val occWay = getOccWayVec(true.B, io.fromReqArb.status_s1.c_set)
+  val hasEmptyWay = ~occWay.andR
+  
   val setMatchVec_c = mshrs.map(m => m.io.status.valid && m.io.status.bits.set === io.fromReqArb.status_s1.c_set)
   val setConflictVec_c = (setMatchVec_c zip mshrs.map(_.io.status.bits.nestC)).map(x => x._1 && !x._2)
-  io.toReqArb.blockC_s1 := mshrFull || Cat(setConflictVec_c).orR
-  io.toReqArb.blockB_s1 := mshrFull || Cat(setConflictVec_b).orR
+  io.toReqArb.blockC_s1 := mshrFull || Cat(setConflictVec_c).orR || !hasEmptyWay
+  io.toReqArb.blockB_s1 := mshrFull || Cat(setConflictVec_b_1).orR
   io.toReqArb.blockA_s1 := a_mshrFull // conflict logic moved to ReqBuf
 
   /* Acquire downwards */

@@ -105,6 +105,7 @@ class PipeStatus(implicit p: Parameters) extends L3Bundle with HasChannelBits
 class PipeEntranceStatus(implicit p: Parameters) extends L3Bundle {
   val tags = Vec(3, UInt(tagBits.W))
   val sets = Vec(3, UInt(setBits.W))
+  val fromProbeHelper = Bool()
 
   def c_tag = tags(0)
   def b_tag = tags(1)

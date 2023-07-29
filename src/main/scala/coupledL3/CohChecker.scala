@@ -22,7 +22,7 @@ class CohChecker(implicit p: Parameters) extends L3Module {
 
       // directory result (from MainPipe stage 3)
       val dirResult = Input(new DirResult)
-      val clientDirResult = if(cacheParams.inclusionPolicy == "NINE") Some(Input(new noninclusive.ClientDirResult)) else None
+      val clientDirResult = Input(new noninclusive.ClientDirResult)
 
       // from ProbeHelper, arrive with clientDirResult
       val clientDirConflict = Input(Bool())
@@ -72,7 +72,7 @@ class CohChecker(implicit p: Parameters) extends L3Module {
 
 
   // client dir result (Only for NINE)
-  val clientDirResult = io.in.clientDirResult.getOrElse(0.U.asTypeOf(new noninclusive.ClientDirResult))
+  val clientDirResult = io.in.clientDirResult
   val hasClientHit = clientDirResult.hits.asUInt.orR
   val clientMetas = clientDirResult.metas
   dontTouch(clientDirResult)
@@ -150,7 +150,7 @@ class CohChecker(implicit p: Parameters) extends L3Module {
   aNeedProbe := sinkReqA && exceptReqClientHitOH.orR && ( reqNeedT || !dirResult.hit || exceptReqClientMetaHasT )
   aTrigProbeHelper := sinkReqA && dirResult.hit && io.in.clientDirConflict
 
-  bNeedProbeackThrough := !dirResult.hit && dirResult.meta.state =/= INVALID && replaceNeedRelease
+  bNeedProbeackThrough := !dirResult.hit // && dirResult.meta.state =/= INVALID && replaceNeedRelease
 
   cNeedReplacement := req.fromC && !dirResult.hit && dirResult.meta.state =/= INVALID && replaceNeedRelease
 
@@ -278,13 +278,13 @@ class CohChecker(implicit p: Parameters) extends L3Module {
   io.out.mshrAlloc.bits.clientDirResult.foreach( _ := clientDirResult)
   io.out.mshrAlloc.bits.state := allocState
 
-  io.out.flags.cacheAlias := cacheAlias
+  io.out.flags.cacheAlias       := cacheAlias
   io.out.flags.aNeedReplacement := aNeedReplacement
   io.out.flags.cNeedReplacement := cNeedReplacement
-  io.out.flags.aNeedProbe := aNeedProbe
-  io.out.flags.aNeedMSHR := aNeedMSHR
-  io.out.flags.bNeedMSHR := bNeedMSHR
-  io.out.flags.cNeedMSHR := cNeedMSHR
-  io.out.flags.needMSHR := needMSHR
+  io.out.flags.aNeedProbe       := aNeedProbe
+  io.out.flags.aNeedMSHR        := aNeedMSHR
+  io.out.flags.bNeedMSHR        := bNeedMSHR
+  io.out.flags.cNeedMSHR        := cNeedMSHR
+  io.out.flags.needMSHR         := needMSHR
 
 }

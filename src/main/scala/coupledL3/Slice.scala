@@ -47,46 +47,34 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   val dataStorage = Module(new DataStorage())
   val refillUnit = Module(new RefillUnit())
   val sinkA = Module(new SinkA)
-  val sinkC = Module(new SinkC_1)
+  val sinkC = Module(new SinkC)
   val sourceC = Module(new SourceC)
   val grantBuf = if (!useFIFOGrantBuffer) Module(new GrantBuffer) else Module(new GrantBufferFIFO)
   val refillBuf = Module(new MSHRBuffer(wPorts = 2))
   val releaseBuf = Module(new MSHRBuffer(wPorts = 3))
   val putDataBuf = Module(new LookupBuffer(entries = lookupBufEntries))
 
-  val probeHelperOpt = if (cacheParams.inclusionPolicy == "NINE") Some(Module(new ProbeHelper(entries = 5, enqDelay = 1))) else None
-  val clientDirectoryOpt = if (cacheParams.inclusionPolicy == "NINE") Some(Module(new noninclusive.ClientDirectory())) else None
+  val probeHelper = Module(new ProbeHelper(entries = 5, enqDelay = 1))
+  val clientDirectory = Module(new noninclusive.ClientDirectory())
 
   reqArb.io.fromProbeHelper.blockSinkA := false.B
 
-  probeHelperOpt.foreach{
-    probeHelper =>
-      // We will get client directory result after 2 cyels of delay
-      probeHelper.io.clientDirResult.valid := RegNextN(reqArb.io.dirRead_s1.valid, 2, Some(false.B)) // TODO: Optimize for clock gate
-      probeHelper.io.clientDirResult.bits := clientDirectoryOpt.get.io.resp
+  // We will get client directory result after 2 cyels of delay
+  probeHelper.io.clientDirResult.valid := RegNextN(reqArb.io.dirRead_s1.valid, 2, Some(false.B)) // TODO: Optimize for clock gate
+  probeHelper.io.clientDirResult.bits := clientDirectory.io.resp
 
-      reqArb.io.fromProbeHelper.blockSinkA := probeHelper.io.full
-      reqArb.io.probeHelperTask.get <> probeHelper.io.task
+  reqArb.io.fromProbeHelper.blockSinkA := probeHelper.io.full
+  reqArb.io.probeHelperTask <> probeHelper.io.task
 
-      mainPipe.io.clientDirConflict.get := probeHelper.io.dirConflict
-  }
+  mainPipe.io.clientDirConflict.get := probeHelper.io.dirConflict
 
-  clientDirectoryOpt.foreach{
-    clientDirectory =>
-      // clientDirectory.io.read <> DontCare
-      // clientDirectory.io.tagWReq <> DontCare
-      // clientDirectory.io.metaWReq <> DontCare
 
-      clientDirectory.io.read.valid := reqArb.io.dirRead_s1.valid
-      clientDirectory.io.read.bits.set := reqArb.io.dirRead_s1.bits.set
-      clientDirectory.io.read.bits.tag := reqArb.io.dirRead_s1.bits.tag
-      clientDirectory.io.read.bits.replacerInfo := reqArb.io.dirRead_s1.bits.replacerInfo
+  clientDirectory.io.read <> reqArb.io.clientDirRead_s1
+  clientDirectory.io.tagWReq <> mainPipe.io.clientTagWReq.get
+  clientDirectory.io.metaWReq <> mainPipe.io.clientMetaWReq.get
 
-      mainPipe.io.clientDirResult_s3.get <> clientDirectory.io.resp
-
-      clientDirectory.io.tagWReq <> mainPipe.io.clientTagWReq.get
-      clientDirectory.io.metaWReq <> mainPipe.io.clientMetaWReq.get
-  }
+  mainPipe.io.clientDirResult_s3.get <> clientDirectory.io.resp
+  
 
   val prbq = Module(new ProbeQueue())
   prbq.io <> DontCare // @XiaBin TODO
@@ -118,10 +106,7 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   mshrCtl.io.resps.sourceC := sourceC.io.resp
   mshrCtl.io.nestedwb := mainPipe.io.nestedwb
   mshrCtl.io.probeHelperWakeup := mainPipe.io.probeHelperWakeup
-//  mshrCtl.io.pbRead <> sinkA.io.pbRead
-//  mshrCtl.io.pbResp <> sinkA.io.pbResp
-//  sinkA.io.pbRead <> DontCare // TODO:
-//  sinkA.io.pbResp <> DontCare // TODO:
+
 
   directory.io.resp <> mainPipe.io.dirResp_s3
   directory.io.metaWReq <> mainPipe.io.metaWReq

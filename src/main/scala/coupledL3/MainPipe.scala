@@ -254,7 +254,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   cohChecker.io.in <> DontCare
   cohChecker.io.in.task <> task_s3
   cohChecker.io.in.dirResult := dirResult_s3
-  cohChecker.io.in.clientDirResult.foreach( _ := clientDirResult_s3)
+  cohChecker.io.in.clientDirResult := clientDirResult_s3
   cohChecker.io.in.clientDirConflict := io.clientDirConflict.getOrElse(false.B)
   io.toMSHRCtl.mshr_alloc_s3 <> cohChecker.io.out.mshrAlloc
   
@@ -441,7 +441,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
 
   /* ======== Write Directory ======== */
   val metaW_valid_s3_a = sinkA_req_s3 && !need_mshr_s3_a && !req_get_s3 && !req_prefetch_s3 && !req_put_s3 // get & prefetch that hit will not write meta
-  val metaW_valid_s3_b = sinkB_req_s3 && !need_mshr_s3_b && dirResult_s3.hit && (meta_s3.state === TIP || meta_s3.state === BRANCH && req_s3.param === toN)
+  val metaW_valid_s3_b = sinkB_req_s3 && !need_mshr_s3_b && dirResult_s3.hit && (meta_s3.state === TIP || meta_s3.state === BRANCH && req_s3.param === toN) && !req_s3.fromProbeHelper
   val metaW_valid_s3_c = sinkC_req_s3 && !need_mshr_s3_c
   val metaW_valid_s3_repl = false.B // !mshr_req_s3 && mainpipe_release
   val metaW_valid_s3_mshr = mshr_req_s3 && req_s3.metaWen
@@ -877,7 +877,8 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   val s2HasGrant = task_s2.valid && task_s2.bits.mshrTask && task_s2.bits.fromA && (task_s2.bits.opcode === GrantData || task_s2.bits.opcode === Grant)
   val s3HasRelease = task_s3.valid && !task_s3.bits.mshrTask && task_s3.bits.fromC && (task_s3.bits.opcode === ReleaseData || task_s3.bits.opcode === Release)
   val s2s3SameSet = task_s2.valid && task_s3.valid && task_s2.bits.set === task_s3.bits.set
-  assert(!(s2HasGrant && s3HasRelease && s2s3SameSet), "Release may not be able to nest Acquire")
+  val s2s3SameTag = task_s2.valid && task_s3.valid && task_s2.bits.tag === task_s3.bits.tag
+  assert(!(s2HasGrant && s3HasRelease && s2s3SameSet && s2s3SameTag), "Release may not be able to nest Acquire")
 
   // --------------------------------------------------------------------------
   //  Performance counters

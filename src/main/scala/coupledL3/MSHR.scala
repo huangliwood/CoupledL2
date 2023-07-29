@@ -84,10 +84,11 @@ class MSHR(implicit p: Parameters) extends L3Module {
   // nested C info
   val waitNestedC = RegInit(false.B)
   val nestedReleaseToN = RegInit(false.B)
+  val nestedProbeToN = RegInit(false.B)
   val nestedSourceIdC = RegInit(0.U(sourceIdBits.W))
   val nestedReleaseNeedRelease = RegInit(false.B)
   val nestedReleaseValid = WireInit(false.B)
-
+  val nestedWbMatch = WireInit(false.B)
 
   val aNeedProbe = RegInit(false.B)
   val probeAckParamVec = RegInit(VecInit(Seq.fill(clientBits)(0.U.asTypeOf(chiselTypeOf(io.resps.sink_c.bits.param)))))
@@ -169,7 +170,6 @@ class MSHR(implicit p: Parameters) extends L3Module {
     probeDirty  := false.B
     probeGotN   := false.B
     probeGotNtoNReg := false.B
-    nestedReleaseToN     := false.B
     aNeedProbe := !io.alloc.bits.state.s_rprobe
     probeAckParamVec.foreach( _ := DontCare)
     stateAfterProbe := INVALID
@@ -255,8 +255,8 @@ class MSHR(implicit p: Parameters) extends L3Module {
   val b_task = {
     val ob = io.tasks.source_b.bits
     ob := DontCare
-    ob.tag := req.tag // Mux(req.fromProbeHelper, clientDirResult.tag, clientDirResult.tag)
-    ob.set := req.set // Mux(req.fromProbeHelper, clientDirResult.set, clientDirResult.set)
+    ob.tag := req.tag
+    ob.set := req.set
     ob.off := 0.U
     ob.opcode := Probe
     when(!state.s_pprobe) {
@@ -282,7 +282,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
       clientsExceptReqClientOH
     )
 
-    ob.needData := !dirResult.hit || dirResult.hit && dirResult.meta.state <= TRUNK // TODO:
+    ob.needData := !dirResult.hit || dirResult.hit && dirResult.meta.state <= TRUNK
 
     ob
   }
@@ -319,7 +319,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
     mp_release.mshrId := io.id
     mp_release.aliasTask.foreach(_ := false.B)
     mp_release.useProbeData := true.B // read ReleaseBuf when useProbeData && opcode(0) is true
-    mp_release.selfHasData := req.fromA // For A dir miss and nested C dir hit
+    mp_release.selfHasData := Mux(req.fromProbeHelper, probeGotNtoN, Mux(nestedProbeToN, true.B, req.fromA)) // For A dir miss and nested C dir hit
     mp_release.way := Mux(nestedReleaseNeedRelease, dirResult.way, req.way)
     mp_release.dirty := meta.dirty && meta.state =/= INVALID || probeDirty
 
@@ -335,12 +335,12 @@ class MSHR(implicit p: Parameters) extends L3Module {
       mp_release.clientTagWen := false.B // NINE directory is inclusive
     }.otherwise{
       mp_release.meta := MetaEntry()
-      mp_release.metaWen := !nestedReleaseNeedRelease
+      mp_release.metaWen := Mux(nestedProbeToN, true.B, !nestedReleaseNeedRelease)
       mp_release.tagWen := !dirResult.hit
       mp_release.dsWen := false.B
 
       mp_release.clientWay := clientDirResult.way
-      mp_release.clientMetaWen := !nestedReleaseNeedRelease
+      mp_release.clientMetaWen := Mux(nestedProbeToN, false.B, !nestedReleaseNeedRelease)
       mp_release.clientMeta.foreach( meta => meta.state := INVALID )
       mp_release.clientTagWen := false.B // NINE directory is inclusive
     }
@@ -381,15 +381,16 @@ class MSHR(implicit p: Parameters) extends L3Module {
       dirty = false.B,
       state = Mux(
         req.param === toN,
-        Mux(req.fromProbeHelper, stateAfterProbe, INVALID),
+        Mux(req.fromProbeHelper, Mux(nestedReleaseToN, dirResult.meta.state, stateAfterProbe), INVALID),
         Mux(
           req.param === toB,
           BRANCH,
           meta.state
         )
-      )
+      ),
+      clientStates = VecInit(Seq.fill(clientBits)(INVALID))
     )
-    mp_probeack.metaWen := true.B
+    mp_probeack.metaWen := dirResult.hit // true.B
     mp_probeack.tagWen := false.B
 //    mp_probeack.dsWen := req.param =/= toN && probeDirty
     mp_probeack.dsWen := highestClientState === TIP && probeDirty
@@ -631,9 +632,13 @@ class MSHR(implicit p: Parameters) extends L3Module {
 //                      probeDirty && req_get ||
 //                      probeDirty && dirResult.hit
     mp_grant.dsWen := Mux(
-                        dirResult.hit,
-                        gotGrantData || probeDirty,
-                        gotGrantData && hasClientHit || probeDirty
+                        nestedReleaseToN, 
+                        false.B,
+                        Mux(
+                          dirResult.hit,
+                          gotGrantData || probeDirty,
+                          gotGrantData && hasClientHit || probeDirty
+                        )
                       )
 
     mp_grant
@@ -816,6 +821,11 @@ class MSHR(implicit p: Parameters) extends L3Module {
     }
     when(d_resp.bits.opcode === ReleaseAck) {
       state.w_releaseack := true.B
+
+      val dirAddrMatch = req.set === io.nestedwb.set && dirResult.tag === io.nestedwb.tag
+      when(nestedWbMatch && io.nestedwb.fromB && io.nestedwb.b_toN && dirAddrMatch) {
+        state.w_releaseack  := false.B
+      }
     }
   }
 
@@ -845,7 +855,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
   
   val no_schedule = state.s_refill && state.s_probeack// && state.s_triggerprefetch.getOrElse(true.B)
   val no_wait = state.w_rprobeacklast && state.w_pprobeacklast && state.w_grantlast && state.w_releaseack && state.w_grantack && state.w_probehelper_done && state.w_release_sent 
-  val will_free = no_schedule && no_wait && !waitNestedC
+  val will_free = no_schedule && no_wait && !waitNestedC && !nestedWbMatch
   when (will_free && status_reg.valid) {
     status_reg.valid := false.B
     timer := 0.U
@@ -862,7 +872,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
   io.status.bits.nestB := status_reg.valid && state.w_releaseack && state.w_rprobeacklast && state.w_pprobeacklast && (!state.w_grantfirst || !state.w_probehelper_done) // allow nested probehelper req
   io.status.bits.nestC := status_reg.valid && MuxCase(false.B, Seq(
     req.fromA -> (!state.s_refill && !mp_grant_valid),
-    req.fromB -> false.B, // TODO:
+    req.fromB -> (!mp_probeack_valid && !mp_release_valid && !(state.s_release && !state.w_releaseack)),
     req.fromC -> false.B
   ))
 
@@ -918,9 +928,9 @@ class MSHR(implicit p: Parameters) extends L3Module {
     * 
     */
   val reqAddrMatch = req.set === io.nestedwb.set && req.tag === io.nestedwb.tag
-  val dirAddrMatch = dirResult.set === io.nestedwb.set && dirResult.tag === io.nestedwb.tag
-  val clientDirAddrMatch = clientDirResult.set === io.nestedwb.set && clientDirResult.tag === io.nestedwb.tag && state.w_probehelper_done
-  val nestedAddrMatch = dirAddrMatch || clientDirAddrMatch
+  val dirAddrMatch = req.set === io.nestedwb.set && dirResult.tag === io.nestedwb.tag
+  val clientDirAddrMatch = req.set === io.nestedwb.set && clientDirResult.tag === io.nestedwb.tag //&& state.w_probehelper_done
+  val nestedAddrMatch = dirAddrMatch || clientDirAddrMatch || reqAddrMatch
   dontTouch(reqAddrMatch)
   dontTouch(dirAddrMatch)
   dontTouch(clientDirAddrMatch)
@@ -928,39 +938,53 @@ class MSHR(implicit p: Parameters) extends L3Module {
   // Cache line is not occupied when meta.state === INVALID.
   // Nested condition can only happen when the address match the other valid address(meta.state =/= INVALID) hold by MSHR.
   // If nested happen, we should update our own meta info, then we will not need to read directory again and still keep our meta updated.
-  val nestedWbMatch = status_reg.valid && nestedAddrMatch && io.nestedwb.valid
+  nestedWbMatch := status_reg.valid && nestedAddrMatch && io.nestedwb.valid
   nestedReleaseValid := nestedWbMatch
   when(io.alloc.valid) {
     waitNestedC := false.B
     nestedSourceIdC := DontCare
     nestedReleaseNeedRelease := false.B
+    nestedReleaseToN := false.B
+    nestedProbeToN := false.B
   }
 
   when(probeGotNtoN && !nestedReleaseToN) {
     waitNestedC := true.B
   }
 
-  when (nestedWbMatch) {
+  when(nestedWbMatch) {
     // Nest B
     //    B nest A
     // Not happen in noninclusive-L3 since L3 is Last Level Cache(LLC), probe req from outside the L3 cannot reach.
     when(io.nestedwb.fromB) {
+      // assert(!state.w_probehelper_done)
       // TODO: consider ProbeHelper nest
-      when(io.nestedwb.b_toN) { // accept outer probe (for L3, probe only from ProbeHelper, which is an inner req)
-        when(dirAddrMatch) {
-          dirResult.hit := false.B
+      when(dirAddrMatch) {
+        nestedProbeToN := true.B
+
+        when(io.nestedwb.b_toN) {
+          val clientsHasTIP = Cat(dirResult.meta.clientStates.map( state => state === TIP )).orR
+          // val clientsHasBRANCH = Cat(dirResult.meta.clientStates.map( state => state === BRANCH )).orR
+          val stateAfterProbeHelper = Mux(clientsHasTIP, TIP, BRANCH)
+          dirResult.meta.state := stateAfterProbeHelper
+          dirResult.meta.dirty := true.B
+
+          state.s_release := false.B
+          state.w_releaseack := false.B
         }
-      }
-      when(io.nestedwb.b_toB) {
-        assert(!io.nestedwb.b_toB) // noninclusive-L3 not happen
-        when(dirAddrMatch) {
-          meta.state := BRANCH
-        }
-      }
-      when(io.nestedwb.b_clr_dirty) {
-        when(dirAddrMatch) {
-          meta.dirty := false.B
-        }
+
+        // when(io.nestedwb.b_toN) { // accept outer probe (for L3, probe only from ProbeHelper, which is an inner req)
+        //   dirResult.hit := false.B
+        // }
+
+        // when(io.nestedwb.b_toB) {
+        //   assert(!io.nestedwb.b_toB) // noninclusive-L3 not happen
+        //   meta.state := BRANCH
+        // }
+
+        // when(io.nestedwb.b_clr_dirty) {
+        //   meta.dirty := false.B
+        // }
       }
     } // fromB
 
@@ -972,34 +996,14 @@ class MSHR(implicit p: Parameters) extends L3Module {
       waitNestedC := io.nestedwb.needMSHR // If a nested request does not need MSHR, then we just update nested info.
       nestedSourceIdC := io.nestedwb.sourceId
 
-      // TODO: Hit or Miss ??
-      val nestedwbMatchReqState = io.tasks.source_b.bits.param === toB && (io.nestedwb.c_toB || io.nestedwb.c_toN) ||
-                                  io.tasks.source_b.bits.param === toN && io.nestedwb.c_toN
-      when(!state.s_rprobe && nestedwbMatchReqState && clientDirAddrMatch) {
-        state.s_rprobe := true.B
-        state.w_rprobeackfirst := true.B
-        state.w_rprobeacklast := true.B
-      }
+      when(dirAddrMatch) {
+        nestedReleaseToN := dirResult.hit
 
-      when(!state.s_pprobe && nestedwbMatchReqState && clientDirAddrMatch) {
-        state.s_pprobe := true.B
-        state.w_pprobeackfirst := true.B
-        state.w_pprobeacklast := true.B
-      }
-
-      when(io.nestedwb.c_set_dirty) { // Accept ReleaseData will set this flag
-        when(dirAddrMatch) {
+        when(io.nestedwb.c_set_dirty) { // Accept ReleaseData will set this flag
           meta.dirty := true.B
         }
-      }
 
-      when(io.nestedwb.c_toN) {
-        when(reqAddrMatch) {
-          req.way := io.nestedwb.way
-          nestedReleaseToN := true.B
-        }
-
-        when(dirAddrMatch) {
+        when(io.nestedwb.c_toN) {
           dirResult.way := io.nestedwb.way
 
           when(dirResult.meta.state === TRUNK) {
@@ -1022,10 +1026,13 @@ class MSHR(implicit p: Parameters) extends L3Module {
                 clientState := Mux(en, INVALID, clientState)
             }
           }
-        }
 
-        // TODO: Only nested probehelper
-        when(clientDirAddrMatch) { // Only hit clientResult can be modified
+        } // io.nestedwb.c_toN
+      } // dirAddrMatch
+
+      // TODO: Only nested probehelper
+      when(clientDirAddrMatch) { // Only hit clientResult can be modified
+        when(io.nestedwb.c_toN) {
           clientDirResult.hits.zip(io.nestedwb.c_client.asBools).foreach {
             case (clientHit, en) =>
               when(io.nestedwb.c_toN) {
@@ -1043,17 +1050,56 @@ class MSHR(implicit p: Parameters) extends L3Module {
                 clientMeta.state := Mux(en, BRANCH, clientMeta.state)
               }
           }
-        }
-      } // c_toN
+        } // io.nestedwb.c_toN
 
-      when(io.nestedwb.c_toB) {
-        when(clientDirAddrMatch) { // Only hit clientResult can be modified
+        when(io.nestedwb.c_toB) { // Only hit clientResult can be modified
           clientDirResult.metas.zip(io.nestedwb.c_client.asBools).foreach {
             case (clientMeta, en) =>
               clientMeta.state := Mux(en, BRANCH, clientMeta.state)
           }
+        } // io.nestedwb.c_toB
+
+        val nestedwbMatchReqState = io.tasks.source_b.bits.param === toB && (io.nestedwb.c_toB || io.nestedwb.c_toN) ||
+                                    io.tasks.source_b.bits.param === toN && io.nestedwb.c_toN
+        when(!state.s_rprobe && nestedwbMatchReqState) {
+          state.s_rprobe := true.B
+          state.w_rprobeackfirst := true.B
+          state.w_rprobeacklast := true.B
         }
-      } // c_toB
+
+        when(!state.s_pprobe && nestedwbMatchReqState) {
+          state.s_pprobe := true.B
+          state.w_pprobeackfirst := true.B
+          state.w_pprobeacklast := true.B
+        }
+
+      } // clientDirAddrMatch
+
+      when(reqAddrMatch && !dirAddrMatch) {
+        // assert(hasClientHit)
+        nestedReleaseToN := true.B
+
+        when(io.nestedwb.c_toN) {
+          dirResult.hit := true.B
+          dirResult.way := io.nestedwb.way
+          dirResult.tag := io.nestedwb.tag
+          dirResult.meta.dirty := true.B
+          dirResult.meta.state := clientDirResult.metas(OHToUInt(io.nestedwb.c_client)).state
+          dirResult.meta.clientStates.zipWithIndex.foreach{
+            case(clientMeta, client) =>
+              clientMeta := Mux(io.nestedwb.c_client === UIntToOH(client.U), INVALID, clientDirResult.metas(client).state)
+          }
+          req.way := io.nestedwb.way
+          
+          when(!state.s_release) {
+            state.s_release := true.B
+            state.w_releaseack := true.B
+
+            // ProbeHelper need probeack to write meta
+            state.s_probeack := !req.fromProbeHelper
+          }
+        }
+      } // reqAddrMatch
     } // fromC
    } // nested match
 
