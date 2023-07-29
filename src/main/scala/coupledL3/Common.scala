@@ -263,6 +263,7 @@ class NestedWriteback(implicit p: Parameters) extends L3Bundle with HasChannelBi
 
   val wakeupValid = Bool()
   val wakeupSourceId = UInt(sourceIdBits.W)
+  val fromProbeHelper = Bool()
 }
 
 class ProbeHelperWakeupInfo(implicit p: Parameters) extends L3Bundle {

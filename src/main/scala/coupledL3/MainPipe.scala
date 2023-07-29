@@ -34,6 +34,8 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   val io = IO(new Bundle() {
     /* receive task from arbiter at stage 2 */
     val taskFromArb_s2 = Flipped(ValidIO(new TaskBundle()))
+    // val taskFromArb_s2 = Flipped(DecoupledIO(new TaskBundle()))
+
     /* status from arbiter at stage1  */
     val taskInfo_s1 = Flipped(ValidIO(new TaskBundle()))
 
@@ -170,12 +172,13 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   io.putBufRead.bits.idx := task_s2.bits.pbIdx
   io.putBufRead.bits.isMSHRTask := task_s2.bits.mshrTask
 
-  
+  // task_s2.ready := true.B
 
   // --------------------------------------------------------------------------
   //  Stage3: 
   // --------------------------------------------------------------------------
   val task_s3 = RegInit(0.U.asTypeOf(Valid(new TaskBundle())))
+  // val task_s3 = RegInit(0.U.asTypeOf(Decoupled(new TaskBundle())))
   task_s3.valid := task_s2.valid
   when(task_s2.valid) {
     task_s3.bits := task_s2.bits
@@ -251,7 +254,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   val need_mshr_s3_a     = cohChecker.io.out.flags.aNeedMSHR
   val need_mshr_s3_b     = cohChecker.io.out.flags.bNeedMSHR
   val need_mshr_s3_c     = cohChecker.io.out.flags.cNeedMSHR
-  cohChecker.io.in <> DontCare
+  // cohChecker.io.in <> DontCare
   cohChecker.io.in.task <> task_s3
   cohChecker.io.in.dirResult := dirResult_s3
   cohChecker.io.in.clientDirResult := clientDirResult_s3
@@ -637,7 +640,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   io.nestedwb.channel := req_s3.channel
   io.nestedwb.set := req_s3.set
   io.nestedwb.tag := req_s3.tag
-  io.nestedwb.sourceId := req_s3.sourceId
+  io.nestedwb.sourceId := Mux(req_s3.fromProbeHelper, io.fromMSHRCtl.mshr_alloc_ptr, req_s3.sourceId)
   io.nestedwb.needMSHR := need_mshr_s3
   io.nestedwb.way := dirResult_s3.way
 
@@ -651,8 +654,9 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   io.nestedwb.c_toB := isToB(task_s3.bits.param)
   io.nestedwb.c_client := reqClientOH
 
-  io.nestedwb.wakeupValid := req_s3.mshrTask && task_s3.valid && req_s3.fromC
-  io.nestedwb.wakeupSourceId := req_s3.sourceId
+  io.nestedwb.wakeupValid := req_s3.mshrTask && task_s3.valid && (req_s3.fromC || req_s3.fromB)
+  io.nestedwb.wakeupSourceId := Mux(req_s3.fromProbeHelper, req_s3.mshrId, req_s3.sourceId)
+  io.nestedwb.fromProbeHelper := req_s3.fromProbeHelper
 
   io.nestedwbData := bufResp_s3.asTypeOf(new DSBlock)
 
