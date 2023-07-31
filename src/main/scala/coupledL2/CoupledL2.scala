@@ -209,6 +209,8 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
       Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
     case Some(_: HyperPrefetchParams) =>
       Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
+    case Some(_: FakePrefetchPrarameters) =>
+      Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
     case _ => None
   }
 

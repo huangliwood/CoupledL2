@@ -185,7 +185,35 @@ class Prefetcher(implicit p: Parameters) extends PrefetchModule {
         case None =>
         hybrid_pfts.io.evict := DontCare
       }
-
+    case fake: FakePrefetchPrarameters =>
+      val fakePF = Module(new FakePrefetch())
+      val l1_pf = Module(new PrefetchReceiver())
+      val pftQueue = Module(new PrefetchQueue)
+      val pipe = Module(new Pipeline(io.req.bits.cloneType, 1))
+      val l2pf_en = RegNextN(io_l2_pf_en, 2, Some(true.B))
+      // l1 prefetch
+      l1_pf.io.recv_addr := ValidIODelay(io.recv_addr, 2)
+      l1_pf.io.train <> DontCare
+      l1_pf.io.resp <> DontCare
+      // l2 prefetch
+      fakePF.io.clock := this.clock
+      fakePF.io.reset := this.reset
+      fakePF.io.pf.recv_addr <> io.recv_addr
+      fakePF.io.pf.train <> io.train
+      fakePF.io.pf.resp <> io.resp
+      l2pf_en := true.B
+      pftQueue.io.enq.valid := l1_pf.io.req.valid || (l2pf_en && fakePF.io.pf.req.valid)
+      pftQueue.io.enq.bits := Mux(l1_pf.io.req.valid,
+        l1_pf.io.req.bits,
+        fakePF.io.pf.req.bits
+      )
+      l1_pf.io.req.ready := true.B
+      fakePF.io.pf.req.ready := true.B
+      pipe.io.in <> pftQueue.io.deq
+      io.req <> pipe.io.out
+      XSPerfAccumulate(cacheParams, "prefetch_req_fromL1", l1_pf.io.req.valid)
+      XSPerfAccumulate(cacheParams, "prefetch_req_fromL2", l2pf_en && pftQueue.io.deq.valid)
+      XSPerfAccumulate(cacheParams, "prefetch_req_L1L2_overlapped", l1_pf.io.req.valid && l2pf_en && fakePF.io.pf.req.valid)
     case _ => assert(cond = false, "Unknown prefetcher")
   }
 }
