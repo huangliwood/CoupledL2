@@ -25,6 +25,8 @@ import freechips.rocketchip.tilelink.TLMessages._
 import chipsalliance.rocketchip.config.Parameters
 import coupledL3.utils.XSPerfAccumulate
 import coupledL3.noninclusive.ClientDirRead
+import chisel3.util.experimental.BoringUtils
+
 
 class RequestArb(implicit p: Parameters) extends L3Module {
   val io = IO(new Bundle() {
@@ -47,7 +49,8 @@ class RequestArb(implicit p: Parameters) extends L3Module {
     val clientDirRead_s1 = DecoupledIO(new ClientDirRead())
 
     // send task to mainpipe
-    val taskToPipe_s2 = ValidIO(new TaskBundle())
+    // val taskToPipe_s2 = ValidIO(new TaskBundle())
+    val taskToPipe_s2 = DecoupledIO(new TaskBundle())
     // send s1 task info to mainpipe to help hint
     val taskInfo_s1 = ValidIO(new TaskBundle())
 
@@ -74,6 +77,16 @@ class RequestArb(implicit p: Parameters) extends L3Module {
     })
   })
 
+  // --------------------------------------------------------------------------
+  //  Pipeline handshake signals
+  // --------------------------------------------------------------------------
+  val s0_valid, s0_ready, s0_fire = Wire(Bool())
+  val s1_valid, s1_ready, s1_fire = Wire(Bool())
+  val s2_valid, s2_ready, s2_fire = Wire(Bool())
+
+  val s1_full = RegInit(false.B)
+  val s2_full = RegInit(false.B)
+
 
   // --------------------------------------------------------------------------
   //  Reset
@@ -93,11 +106,15 @@ class RequestArb(implicit p: Parameters) extends L3Module {
   // --------------------------------------------------------------------------
   //  Stage0: 
   // --------------------------------------------------------------------------
-  io.mshrTask.ready  := !io.fromGrantBuffer.blockMSHRReqEntrance
+  // io.mshrTask.ready  := !io.fromGrantBuffer.blockMSHRReqEntrance
+  io.mshrTask.ready  := !io.fromGrantBuffer.blockMSHRReqEntrance && s0_ready
   val mshr_task_s0    = Wire(Valid(new TaskBundle()))
   mshr_task_s0.valid := io.mshrTask.fire()
   mshr_task_s0.bits  := io.mshrTask.bits
 
+  s0_valid := io.mshrTask.valid
+  s0_ready := s1_ready
+  s0_fire := s0_valid && s1_ready
 
   // --------------------------------------------------------------------------
   //  Stage1: 
@@ -125,10 +142,10 @@ class RequestArb(implicit p: Parameters) extends L3Module {
 
   // latch mshr_task from s0 to s1
   val mshrTask_s1 = RegInit(0.U.asTypeOf(Valid(new TaskBundle())))
-  mshrTask_s1.valid := mshr_task_s0.valid
-  when(mshr_task_s0.valid) {
-    mshrTask_s1.bits := mshr_task_s0.bits
-  }
+  // mshrTask_s1.valid := mshr_task_s0.valid
+  // when(mshr_task_s0.valid) {
+  //   mshrTask_s1.bits := mshr_task_s0.bits
+  // }
 
   // Channel interaction from s1
   val taskSinkA           = io.sinkA.bits
@@ -147,7 +164,7 @@ class RequestArb(implicit p: Parameters) extends L3Module {
   val sinkValids       = VecInit(Seq(sinkC_valid, probeHelperValid, sinkB_valid, sinkA_valid)).asUInt
 
 
-  val sinkReadyBasic        = io.dirRead_s1.ready && io.clientDirRead_s1.ready && resetFinish && !mshrTask_s1.valid
+  val sinkReadyBasic        = io.dirRead_s1.ready && io.clientDirRead_s1.ready && resetFinish && !mshrTask_s1.valid && s2_ready
   val sinkB_ready           = sinkReadyBasic && !blockB && !sinkC_valid
   val probeHelperFire       = probeHelperValid & sinkB_ready
   io.sinkA.ready           := sinkReadyBasic && !blockA && !sinkB_valid && !sinkC_valid && !probeHelperValid // SinkC prior to SinkA & SinkB
@@ -163,12 +180,15 @@ class RequestArb(implicit p: Parameters) extends L3Module {
   // mshrTask_s1 is s1_[reg]
   // task_s1 is [wire] to s2_reg
   val task_s1 = Mux(mshrTask_s1.valid, mshrTask_s1, chnlTask_s1)
+  dontTouch(task_s1)
+  dontTouch(chnlTask_s1)
 
   io.taskInfo_s1 := mshrTask_s1
 
   // Meta read request
   // only sinkA/B/C tasks need to read directory
-  io.dirRead_s1.valid                       := chnlTask_s1.valid && !mshrTask_s1.valid
+  // io.dirRead_s1.valid                       := chnlTask_s1.valid && !mshrTask_s1.valid
+  io.dirRead_s1.valid                       := s1_fire && !mshrTask_s1.valid
   io.dirRead_s1.bits.set                    := task_s1.bits.set
   io.dirRead_s1.bits.tag                    := task_s1.bits.tag
   io.dirRead_s1.bits.wayMask                := task_s1.bits.wayMask
@@ -176,7 +196,8 @@ class RequestArb(implicit p: Parameters) extends L3Module {
   io.dirRead_s1.bits.replacerInfo.channel   := task_s1.bits.channel
   io.dirRead_s1.bits.replacerInfo.reqSource := task_s1.bits.reqSource
 
-  io.clientDirRead_s1.valid                       := chnlTask_s1.valid && !mshrTask_s1.valid
+  // io.clientDirRead_s1.valid                       := chnlTask_s1.valid && !mshrTask_s1.valid
+  io.clientDirRead_s1.valid                       := s1_fire && !mshrTask_s1.valid
   io.clientDirRead_s1.bits.set                    := task_s1.bits.set
   io.clientDirRead_s1.bits.tag                    := task_s1.bits.tag
   io.clientDirRead_s1.bits.replacerInfo.opcode    := task_s1.bits.opcode
@@ -198,15 +219,56 @@ class RequestArb(implicit p: Parameters) extends L3Module {
   io.sinkEntrance.bits.tag  := sink_tag
   io.sinkEntrance.bits.set  := sink_set
 
+  val dirReady = io.dirRead_s1.ready && io.clientDirRead_s1.ready
+  s1_valid := mshrTask_s1.valid || chnlTask_s1.valid && dirReady
+  s1_ready := !s1_full || s1_fire
+  s1_fire := s1_valid && s2_ready
+
+  when(s0_fire) {
+    s1_full := true.B
+  }.elsewhen(s1_fire && task_s1.bits.mshrTask) {
+    s1_full := false.B
+  }
+
+  when(s0_fire) {
+    mshrTask_s1.valid := true.B
+    mshrTask_s1.bits := mshr_task_s0.bits
+  }.elsewhen(s1_fire && task_s1.bits.mshrTask) {
+    mshrTask_s1.valid := false.B
+  }
 
   // --------------------------------------------------------------------------
   //  Stage2: 
   // --------------------------------------------------------------------------
   val task_s2 = RegInit(0.U.asTypeOf(task_s1))
-  task_s2.valid := task_s1.valid
-  when(task_s1.valid) { task_s2.bits := task_s1.bits }
+  // task_s2.valid := task_s1.valid
+  // when(task_s1.valid) { task_s2.bits := task_s1.bits }
   
-  io.taskToPipe_s2 := task_s2
+  // io.taskToPipe_s2 := task_s2
+  io.taskToPipe_s2.valid := task_s2.valid
+  io.taskToPipe_s2.bits := task_s2.bits
+
+  s2_valid := s2_full
+  s2_ready := !s2_full || s2_fire
+  when(s1_fire) {
+    s2_full := true.B
+  }.elsewhen(s2_fire) {
+    s2_full := false.B
+  }
+
+  io.taskToPipe_s2.valid := s2_valid
+  when(s1_fire) {
+    task_s2.valid := true.B
+    task_s2.bits := task_s1.bits
+  }.elsewhen(s2_fire) {
+    task_s2.valid := false.B
+  } 
+
+  s2_fire := s2_valid && io.taskToPipe_s2.ready
+
+  val pipeFlow_s1 = Wire(Bool())
+  pipeFlow_s1 := s1_fire
+  BoringUtils.addSource(pipeFlow_s1, "pipeFlow_s1")
 
   // MSHR task
   val mshrTask_s2 = task_s2.valid && task_s2.bits.mshrTask
@@ -220,7 +282,7 @@ class RequestArb(implicit p: Parameters) extends L3Module {
   // Caution: GrantData-alias may read DataStorage or ReleaseBuf instead
   val selfHasData = task_s2.bits.selfHasData
   
-  io.refillBufRead_s2.valid := mshrTask_s2 && !task_s2.bits.useProbeData && mshrTask_s2_a_upwards && !selfHasData
+  io.refillBufRead_s2.valid := mshrTask_s2 && !task_s2.bits.useProbeData && mshrTask_s2_a_upwards && !selfHasData && s2_fire
   io.refillBufRead_s2.id    := task_s2.bits.mshrId
   // For ReleaseData or ProbeAckData, read releaseBuffer
   // channel is used to differentiate GrantData and ProbeAckData
@@ -228,13 +290,13 @@ class RequestArb(implicit p: Parameters) extends L3Module {
     task_s2.bits.opcode === ReleaseData ||
     task_s2.bits.fromB && task_s2.bits.opcode === ProbeAckData || 
     task_s2.bits.fromA && task_s2.bits.useProbeData && mshrTask_s2_a_upwards && !selfHasData
-  )
+  )  && s2_fire
   io.releaseBufRead_s2.id := task_s2.bits.mshrId
   assert(!io.refillBufRead_s2.valid || io.refillBufRead_s2.ready)
   assert(!io.releaseBufRead_s2.valid || io.releaseBufRead_s2.ready)
 
   // For PutPartialData, read putDataBuffer
-  io.putDataBufRead_s2.valid := mshrTask_s2 && task_s2.bits.opcode === PutPartialData && task_s2.bits.fromA && task_s2.bits.putHit && task_s2.bits.opcodeIsReq
+  io.putDataBufRead_s2.valid := mshrTask_s2 && task_s2.bits.opcode === PutPartialData && task_s2.bits.fromA && task_s2.bits.putHit && task_s2.bits.opcodeIsReq && s2_fire
   io.putDataBufRead_s2.id    := task_s2.bits.reqSource
 
   require(beatSize == 2)
@@ -251,10 +313,18 @@ class RequestArb(implicit p: Parameters) extends L3Module {
     case (status, task) =>
       status.valid := task.valid
       status.bits.channel := task.bits.channel
+      status.bits.set := task.bits.set
+      status.bits.mshrTask := task.bits.mshrTask
   }
 
   dontTouch(io)
 
+  // TODO: move to io
+  val fromReqBufSinkA_valid = io.sinkA.valid
+  val fromReqBufSinkA_set = io.sinkA.bits.set
+  BoringUtils.addSource(fromReqBufSinkA_valid, "fromReqBufSinkA_valid")
+  BoringUtils.addSource(fromReqBufSinkA_set, "fromReqBufSinkA_set")
+  
 
   // --------------------------------------------------------------------------
   //  Performance counters 

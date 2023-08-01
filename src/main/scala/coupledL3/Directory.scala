@@ -26,6 +26,7 @@ import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.tilelink.TLMessages
 import xs.utils.sram._
 import xs.utils.Code
+import xs.utils.RegNextN
 
 class MetaEntry(implicit p: Parameters) extends L3Bundle {
   val dirty = Bool()
@@ -95,13 +96,11 @@ class Directory(implicit p: Parameters) extends L3Module with DontCareInnerLogic
   val io = IO(new Bundle() {
     val read = Flipped(DecoupledIO(new DirRead))
     val resp = Output(new DirResult)
-    val metaWReq = Flipped(ValidIO(new MetaWrite))
-    val tagWReq = Flipped(ValidIO(new TagWrite))
+    // val metaWReq = Flipped(ValidIO(new MetaWrite))
+    // val tagWReq = Flipped(ValidIO(new TagWrite))
+    val metaWReq = Flipped(DecoupledIO(new MetaWrite))
+    val tagWReq = Flipped(DecoupledIO(new TagWrite))
   })
-
-//  if(cacheParams.name == "l3" && cacheParams.inclusionPolicy == "NINE") {
-//    assert(io.metaWReq.bits.wmeta.clients === 0.U, "L3 NINE will not care meta clients so should assign 0.U for simplicity.")
-//  }
 
   def invalid_way_sel(metaVec: Seq[MetaEntry], repl: UInt) = {
     val invalid_vec = metaVec.map(_.state === MetaData.INVALID)
@@ -301,9 +300,50 @@ class Directory(implicit p: Parameters) extends L3Module with DontCareInnerLogic
   dontTouch(metaArray.io)
   dontTouch(tagArray.io)
 
-  io.read.ready := !io.metaWReq.valid && !io.tagWReq.valid && !replacerWen // TODO: ??
+  // io.read.ready := !io.metaWReq.valid && !io.tagWReq.valid && !replacerWen // TODO: ??
   val replacerRready = if(cacheParams.replacement == "random") true.B else replacer_sram_opt.get.io.r.req.ready
-  io.read.ready := tagArray.io.r.req.ready && metaArray.io.r.req.ready && replacerRready // TODO: ??
+  // io.read.ready := tagArray.io.r.req.ready && metaArray.io.r.req.ready && replacerRready // TODO: ??
+
+  if(enableHalfFreq) {
+    val readFull = RegInit(false.B)
+    val writeFullMeta = RegInit(false.B)
+    val writeFullTag = RegInit(false.B)
+
+    io.read.ready := tagArray.io.r.req.ready && metaArray.io.r.req.ready && replacerRready && !readFull
+    when(io.read.fire) {
+      readFull := true.B
+    }.otherwise{
+      readFull := false.B
+    }
+    
+    io.metaWReq.ready := !writeFullMeta
+    io.tagWReq.ready := !writeFullTag
+
+    when(io.metaWReq.fire) {
+      writeFullMeta := true.B
+    }.otherwise{
+      writeFullMeta := false.B
+    }
+
+    when(io.tagWReq.fire) {
+      writeFullTag := true.B
+    }.otherwise{
+      writeFullTag := false.B
+    }
+
+    when(RegNext(!reset.asBool)) {
+      assert(!(RegNext(io.read.fire) && io.read.fire), "[half freq] Consecutively read!")
+      assert(!(RegNext(io.metaWReq.fire) && io.metaWReq.fire), "[half freq] Consecutively metaW!")
+      assert(!(RegNext(io.tagWReq.fire) && io.tagWReq.fire), "[half freq] Consecutively tagW!")
+    }
+  } else {
+    io.read.ready := tagArray.io.r.req.ready && metaArray.io.r.req.ready && replacerRready
+    io.metaWReq.ready := true.B
+    io.tagWReq.ready := true.B 
+  }
+
+
+
 
   val update = reqReg.replacerInfo.channel(0) && (reqReg.replacerInfo.opcode === TLMessages.AcquirePerm || reqReg.replacerInfo.opcode === TLMessages.AcquireBlock)
   when(reqValidReg && update) {

@@ -238,7 +238,7 @@ class CohChecker(implicit p: Parameters) extends L3Module {
 
 
   assert(
-    RegNext(!(sinkReqC && !clientDirResult.hits.asUInt.orR)),
+    RegNext(!(task.valid && sinkReqC && !clientDirResult.hits.asUInt.orR)),
     "C Release should have some clients hit, Tag:0x%x Set:0x%x Addr:0x%x Source:%d isMSHRTask:%d MSHR:%d",
     RegNext(req.tag), RegNext(req.set), RegNext(debugAddr), RegNext(req.sourceId), RegNext(req.mshrTask), RegNext(req.mshrId)
   )

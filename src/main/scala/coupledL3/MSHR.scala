@@ -58,6 +58,8 @@ class MSHR(implicit p: Parameters) extends L3Module {
     val nestedwbData = Output(Bool())
 
     val probeHelperWakeup = Input(new ProbeHelperWakeupInfo) // Only for NINE
+
+    val block = Input(Bool())
   })
 
   val initState = Wire(new FSMState())
@@ -84,6 +86,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
   val nestedSourceIdB = RegInit(0.U(sourceIdBits.W))
 
   // nested C info
+  val needWaitNestedC = RegInit(false.B)
   val waitNestedC = RegInit(false.B)
   val nestedReleaseToN = RegInit(false.B)
   val nestedSourceIdC = RegInit(0.U(sourceIdBits.W))
@@ -207,12 +210,12 @@ class MSHR(implicit p: Parameters) extends L3Module {
   io.tasks.source_b.valid := (!state.s_pprobe || !state.s_rprobe) && state.w_release_sent
     
   // val mp_release_valid = !state.s_release && state.w_rprobeacklast && state.w_pprobeacklast && !waitNestedC && !waitNestedB && !nestedValid // && state.w_probehelper_done // && !waitNestedC && !waitNestedB && !nestedValid
-  val mp_release_valid = !state.s_release && state.w_pprobeacklast && !waitNestedC && !waitNestedB && !nestedValid
+  val mp_release_valid = !state.s_release && state.w_pprobeacklast && !waitNestedC && !waitNestedB && !nestedValid && !needWaitNestedC
   val mp_releaseack_valid = !state.s_releaseack && state.w_release_sent
-  val mp_probeack_valid = !state.s_probeack && state.w_pprobeacklast && !waitNestedC && !waitNestedB
-  val mp_grant_valid = !state.s_refill && state.w_grantlast && state.w_rprobeacklast && state.s_release && state.w_probehelper_done && !req_put && !waitNestedC && !waitNestedB && !nestedValid
-  val mp_put_wb_valid = !state.s_put_wb && state.w_rprobeacklast && state.w_releaseack && state.w_pprobeacklast && state.w_grantlast && state.s_release && !waitNestedC && !waitNestedB && !nestedValid // && state.s_refill
-  io.tasks.mainpipe.valid := mp_release_valid || mp_probeack_valid || mp_releaseack_valid || mp_grant_valid || mp_put_wb_valid
+  val mp_probeack_valid = !state.s_probeack && state.w_pprobeacklast && !waitNestedC && !waitNestedB && !needWaitNestedC
+  val mp_grant_valid = !state.s_refill && state.w_grantlast && state.w_rprobeacklast && state.s_release && state.w_probehelper_done && !req_put && !waitNestedC && !waitNestedB && !nestedValid && !needWaitNestedC
+  val mp_put_wb_valid = !state.s_put_wb && state.w_rprobeacklast && state.w_releaseack && state.w_pprobeacklast && state.w_grantlast && state.s_release && !waitNestedC && !waitNestedB && !nestedValid && !needWaitNestedC// && state.s_refill
+  io.tasks.mainpipe.valid := mp_release_valid || mp_probeack_valid || mp_releaseack_valid || mp_grant_valid && !io.block || mp_put_wb_valid
 
 
   def shrinkNextState(param: UInt): UInt = {
@@ -796,14 +799,15 @@ class MSHR(implicit p: Parameters) extends L3Module {
     when(c_resp.bits.param === NtoN) {
       probeGotNtoNReg := true.B
     }
-    probeGotNtoN := Mux(
-      c_resp.bits.param === NtoN && c_resp.valid && io.status.bits.w_c_resp && io.status.valid,
-      true.B,
-      probeGotNtoNReg
-    )
   }.elsewhen(c_resp.valid) { // Other probe sub request with same addr
     // TODO:
   }
+
+  probeGotNtoN := Mux(
+    c_resp.bits.param === NtoN && c_resp.valid && io.status.bits.w_c_resp && io.status.valid,
+    true.B,
+    probeGotNtoNReg
+  )
 
 
   // --------------------------------------------------------------------------
@@ -869,7 +873,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
   
   val no_schedule = state.s_refill && state.s_probeack
   val no_wait = state.w_rprobeacklast && state.w_pprobeacklast && state.w_grantlast && state.w_releaseack && state.w_grantack && state.w_probehelper_done && state.w_release_sent 
-  val will_free = no_schedule && no_wait && !waitNestedC && !waitNestedB && !nestedWbMatch
+  val will_free = no_schedule && no_wait && !waitNestedC && !waitNestedB && !nestedWbMatch && !needWaitNestedC
   when (will_free && status_reg.valid) {
     status_reg.valid := false.B
     timer := 0.U
@@ -943,9 +947,9 @@ class MSHR(implicit p: Parameters) extends L3Module {
     */
   val reqAddrMatch = req.set === io.nestedwb.set && req.tag === io.nestedwb.tag
   val dirAddrMatch = req.set === io.nestedwb.set && dirResult.tag === io.nestedwb.tag
-  val clientDirAddrMatch = req.set === io.nestedwb.set && clientDirResult.tag === io.nestedwb.tag //&& state.w_probehelper_done
+  val clientTag = Cat(clientDirResult.tag, clientDirResult.set) >> setBits.U
+  val clientDirAddrMatch = req.set === io.nestedwb.set && clientTag === io.nestedwb.tag
   val nestedAddrMatch = dirAddrMatch || clientDirAddrMatch || reqAddrMatch
-  // val nestedAddrMatch = dirAddrMatch
   dontTouch(reqAddrMatch)
   dontTouch(dirAddrMatch)
   dontTouch(clientDirAddrMatch)
@@ -963,10 +967,12 @@ class MSHR(implicit p: Parameters) extends L3Module {
     waitNestedB := false.B
     nestedSourceIdB := DontCare
     nestedProbeToN := false.B
+    needWaitNestedC := false.B
   }
-
+  
   when(probeGotNtoN && !nestedReleaseToN) {
     waitNestedC := true.B
+    needWaitNestedC := true.B
   }
 
   when(nestedWbMatch) {
@@ -974,7 +980,6 @@ class MSHR(implicit p: Parameters) extends L3Module {
     //    B nest A
     // Not happen in noninclusive-L3 since L3 is Last Level Cache(LLC), probe req from outside the L3 cannot reach.
     when(io.nestedwb.fromB) {
-      // assert(!state.w_probehelper_done)
       waitNestedB := io.nestedwb.needMSHR
       nestedSourceIdB := io.nestedwb.sourceId
 
@@ -984,7 +989,6 @@ class MSHR(implicit p: Parameters) extends L3Module {
 
         when(io.nestedwb.b_toN) {
           val clientsHasTIP = Cat(dirResult.meta.clientStates.map( state => state === TIP )).orR
-          // val clientsHasBRANCH = Cat(dirResult.meta.clientStates.map( state => state === BRANCH )).orR
           val stateAfterProbeHelper = Mux(clientsHasTIP, TIP, BRANCH)
           dirResult.meta.state := stateAfterProbeHelper
           dirResult.meta.dirty := true.B
@@ -995,19 +999,6 @@ class MSHR(implicit p: Parameters) extends L3Module {
             state.w_releaseack := false.B
           }
         }
-
-        // when(io.nestedwb.b_toN) { // accept outer probe (for L3, probe only from ProbeHelper, which is an inner req)
-        //   dirResult.hit := false.B
-        // }
-
-        // when(io.nestedwb.b_toB) {
-        //   assert(!io.nestedwb.b_toB) // noninclusive-L3 not happen
-        //   meta.state := BRANCH
-        // }
-
-        // when(io.nestedwb.b_clr_dirty) {
-        //   meta.dirty := false.B
-        // }
       } // dirAddrMatch
 
       when(clientDirAddrMatch) {
@@ -1068,6 +1059,8 @@ class MSHR(implicit p: Parameters) extends L3Module {
 
       // TODO: Only nested probehelper
       when(clientDirAddrMatch) { // Only hit clientResult can be modified
+        needWaitNestedC := false.B
+
         when(io.nestedwb.c_toN) {
           clientDirResult.hits.zip(io.nestedwb.c_client.asBools).foreach {
             case (clientHit, en) =>

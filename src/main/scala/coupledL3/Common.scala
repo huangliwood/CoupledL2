@@ -100,7 +100,10 @@ class TaskBundle(implicit p: Parameters) extends L3Bundle with HasChannelBits wi
   def hasData = opcode(0)
 }
 
-class PipeStatus(implicit p: Parameters) extends L3Bundle with HasChannelBits
+class PipeStatus(implicit p: Parameters) extends L3Bundle with HasChannelBits {
+  val set = UInt(setBits.W)
+  val mshrTask = Bool()
+}
 
 class PipeEntranceStatus(implicit p: Parameters) extends L3Bundle {
   val tags = Vec(3, UInt(tagBits.W))

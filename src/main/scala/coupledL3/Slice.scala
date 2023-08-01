@@ -66,14 +66,14 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   reqArb.io.fromProbeHelper.blockSinkA := probeHelper.io.full
   reqArb.io.probeHelperTask <> probeHelper.io.task
 
-  mainPipe.io.clientDirConflict.get := probeHelper.io.dirConflict
+  mainPipe.io.clientDirConflict := probeHelper.io.dirConflict
 
 
   clientDirectory.io.read <> reqArb.io.clientDirRead_s1
-  clientDirectory.io.tagWReq <> mainPipe.io.clientTagWReq.get
-  clientDirectory.io.metaWReq <> mainPipe.io.clientMetaWReq.get
+  clientDirectory.io.tagWReq <> mainPipe.io.clientTagWReq
+  clientDirectory.io.metaWReq <> mainPipe.io.clientMetaWReq
 
-  mainPipe.io.clientDirResult_s3.get <> clientDirectory.io.resp
+  mainPipe.io.clientDirResult_s3 <> clientDirectory.io.resp
   
 
   val prbq = Module(new ProbeQueue())
@@ -164,8 +164,11 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   grantBuf.io.d_task <> mainPipe.io.toSourceD
   grantBuf.io.fromReqArb.status_s1 := reqArb.io.status_s1
   grantBuf.io.pipeStatusVec := reqArb.io.status_vec ++ mainPipe.io.status_vec
-  mshrCtl.io.pipeStatusVec(0) := reqArb.io.status_vec(1) // s2 status
-  mshrCtl.io.pipeStatusVec(1) := mainPipe.io.status_vec(0) // s3 status
+  // mshrCtl.io.pipeStatusVec(0) := reqArb.io.status_vec(1) // s2 status
+  // mshrCtl.io.pipeStatusVec(1) := mainPipe.io.status_vec(0) // s3 status
+  mshrCtl.io.pipeStatusVec(0) := reqArb.io.status_vec(0) // s1 status
+  mshrCtl.io.pipeStatusVec(1) := reqArb.io.status_vec(1) // s2 status
+  mshrCtl.io.pipeStatusVec(2) := mainPipe.io.status_vec(0) // s3 status
 
   io.prefetch.foreach {
     p =>

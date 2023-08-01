@@ -6,6 +6,7 @@ import chisel3._
 import chisel3.util._
 import coupledL3.utils._
 import utility._
+import chisel3.util.experimental.BoringUtils
 
 class ReqEntry(entries: Int = 4)(implicit p: Parameters) extends L3Bundle() {
   val valid    = Bool()
@@ -216,6 +217,16 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
 
 
   /* ======== Update rdy and masks ======== */
+  // TODO: move to io
+  val pipeFlow_s1, pipeFlow_s2, pipeFlow_s3 = WireInit(false.B)
+  val pipeFlow = pipeFlow_s1 || pipeFlow_s2 || pipeFlow_s3
+  BoringUtils.addSink(pipeFlow_s1, "pipeFlow_s1")
+  BoringUtils.addSink(pipeFlow_s2, "pipeFlow_s2")
+  BoringUtils.addSink(pipeFlow_s3, "pipeFlow_s3")
+  dontTouch(pipeFlow_s1)
+  dontTouch(pipeFlow_s2)
+  dontTouch(pipeFlow_s3)
+
   for (e <- buffer) {
     when(e.valid) {
       val waitMSUpdate  = WireInit(e.waitMS)
@@ -237,7 +248,12 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
       //    so when waitMP(1) is 0 and waitMP(0) is 1, desired cycleCnt reached
       //    we recalculate waitMS and occWays, overriding old mask
       //    to take new allocated MSHR into account
-      e.waitMP := e.waitMP >> 1.U
+      // e.waitMP := e.waitMP >> 1.U
+      e.waitMP := MuxLookup(e.waitMP, e.waitMP >> pipeFlow.asUInt, Seq(
+        "b1000".U -> (e.waitMP >> pipeFlow_s1.asUInt),
+        "b0100".U -> (e.waitMP >> pipeFlow_s2.asUInt),
+        "b0010".U -> (e.waitMP >> pipeFlow_s3.asUInt),
+      ))
       when(e.waitMP(1) === 0.U && e.waitMP(0) === 1.U) {
         waitMSUpdate  := conflictMask(e.task)
         occWaysUpdate := occWays(e.task)

@@ -60,6 +60,7 @@ trait HasCoupledL3Parameters {
   val tagEccEnable = tagEccCode != None && tagEccCode != Some("none")
 
   val enableDebug = cacheParams.enableDebug
+  val enableHalfFreq = cacheParams.enableHalfFreq
 
 
   // 1 cycle for sram read, and latch for another cycle

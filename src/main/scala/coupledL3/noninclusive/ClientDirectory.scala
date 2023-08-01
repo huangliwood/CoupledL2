@@ -93,8 +93,10 @@ class ClientDirectory(implicit p: Parameters) extends L3Module with DontCareInne
   val io = IO(new Bundle() {
     val read = Flipped(DecoupledIO(new ClientDirRead))
     val resp = Output(new ClientDirResult)
-    val metaWReq = Flipped(ValidIO(new ClientMetaWrite))
-    val tagWReq = Flipped(ValidIO(new ClientTagWrite))
+    // val metaWReq = Flipped(ValidIO(new ClientMetaWrite))
+    // val tagWReq = Flipped(ValidIO(new ClientTagWrite))
+    val metaWReq = Flipped(DecoupledIO(new ClientMetaWrite))
+    val tagWReq = Flipped(DecoupledIO(new ClientTagWrite))
   })
 
   println(s"clientInfo:")
@@ -201,7 +203,6 @@ class ClientDirectory(implicit p: Parameters) extends L3Module with DontCareInne
   val tagAll_s3 = RegEnable(tagRead, 0.U.asTypeOf(tagRead), valid_s2)
   val meta_s3 = metaAll_s3(way_s3)
   val tag_s3 = tagAll_s3(way_s3) 
-  // val tag_s3 = RegEnable(tag_s2, valid_s2) // TODO:
   val set_s3 = RegEnable(set_s2, valid_s2)
   val replacerInfo_s3 = RegEnable(req_s2.replacerInfo, valid_s2)
 
@@ -219,5 +220,43 @@ class ClientDirectory(implicit p: Parameters) extends L3Module with DontCareInne
   // io.read.ready := (!io.metaWReq.valid && !io.tagWReq.valid && !replacerWen) &&
   //                   (tagArray.io.r.req.ready && metaArray.io.r.req.ready)
   io.read.ready := (tagArray.io.r.req.ready && metaArray.io.r.req.ready)
+
+  if(enableHalfFreq) {
+    val readFull = RegInit(false.B)
+    val writeFullMeta = RegInit(false.B)
+    val writeFullTag = RegInit(false.B)
+
+    io.read.ready := tagArray.io.r.req.ready && metaArray.io.r.req.ready && !readFull
+    when(io.read.fire) {
+      readFull := true.B
+    }.otherwise{
+      readFull := false.B
+    }
+
+    io.metaWReq.ready := !writeFullMeta
+    io.tagWReq.ready := !writeFullTag
+
+    when(io.metaWReq.fire) {
+      writeFullMeta := true.B
+    }.otherwise{
+      writeFullMeta := false.B
+    }
+
+    when(io.tagWReq.fire) {
+      writeFullTag := true.B
+    }.otherwise{
+      writeFullTag := false.B
+    }
+
+    when(RegNext(!reset.asBool)) {
+      assert(!(RegNext(io.read.fire) && io.read.fire), "[half freq] Consecutively read!")
+      assert(!(RegNext(io.metaWReq.fire) && io.metaWReq.fire), "[half freq] Consecutively metaW!")
+      assert(!(RegNext(io.tagWReq.fire) && io.tagWReq.fire), "[half freq] Consecutively tagW!")
+    }
+  } else {
+    io.read.ready := tagArray.io.r.req.ready && metaArray.io.r.req.ready
+    io.metaWReq.ready := true.B
+    io.tagWReq.ready := true.B 
+  }
 
 }

@@ -23,9 +23,11 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import chipsalliance.rocketchip.config.Parameters
 import coupledL3.utils.XSPerfAccumulate
+import utility.FastArbiter
 
 class PipeBufferRead(implicit p: Parameters) extends L3Bundle {
   val bufIdx = UInt(bufIdxBits.W)
+  val bufInvalid = Bool()
 }
 
 class PipeBufferResp(implicit p: Parameters) extends L3Bundle {
@@ -185,7 +187,7 @@ class SinkC_1(implicit p: Parameters) extends L3Module {
   val dataValids = VecInit(beatValids.map(_.asUInt.orR)).asUInt
   val taskBuf = Reg(Vec(bufBlocks, new TaskBundle))
   val taskValids = RegInit(VecInit(Seq.fill(bufBlocks)(false.B)))
-  val taskArb = Module(new RRArbiter(new TaskBundle, bufBlocks))
+  val taskArb = Module(new FastArbiter(new TaskBundle, bufBlocks))
   val bufValids = taskValids.asUInt | dataValids
 
   val full = bufValids.andR
@@ -261,7 +263,8 @@ class SinkC_1(implicit p: Parameters) extends L3Module {
   }
 
   when (io.bufRead.valid) {
-    beatValids(io.bufRead.bits.bufIdx).foreach(_ := false.B)
+    // beatValids(io.bufRead.bits.bufIdx).foreach(_ := false.B)
+    beatValids(io.bufRead.bits.bufIdx).foreach(_ := !io.bufRead.bits.bufInvalid)
   }
 
   val cValid = io.c.valid && isRelease && last

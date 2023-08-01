@@ -46,11 +46,29 @@ class DataStorage(implicit p: Parameters) extends L3Module with DontCareInnerLog
   val io = IO(new Bundle() {
     // there is only 1 read or write request in the same cycle,
     // so only 1 req port is necessary
-    val req = Flipped(ValidIO(new DSRequest))
+    // val req = Flipped(ValidIO(new DSRequest))
+    val req = Flipped(DecoupledIO(new DSRequest))
     val rdata = Output(new DSBlock)
     val wdata = Input(new DSBlock)
     val error = Output(Bool())
   })
+
+  if(enableHalfFreq) {
+    val full = RegInit(false.B)
+    
+    io.req.ready := !full
+    
+    when(io.req.fire) {
+      full := true.B
+    }.otherwise{
+      full := false.B
+    }
+
+    assert(!(RegNext(io.req.fire) && io.req.fire), "[half freq] Consecutively access!")
+  } else {
+    io.req.ready := true.B
+  }
+  
 
   // Seperate the whole block of data into several banks, each bank contains 8 bytes(64-bit).
   // For every bank, we attach ECC protection bits.
@@ -132,10 +150,14 @@ class DataStorage(implicit p: Parameters) extends L3Module with DontCareInnerLog
 
     io.error := Cat(Cat(dataEccErrVec) & ~Cat(dataEccCorrVec)).orR
     io.rdata := toDSBlock(corrDataVec)
+    // io.rdata.bits := toDSBlock(corrDataVec)
   } else {
     io.error := false.B
     io.rdata := RegNextN(array.io.r.resp.data(0), sramLatency - 1)
+    // io.rdata.bits := RegNextN(array.io.r.resp.data(0), sramLatency - 1)
   }
+
+  // io.rdata.valid := RegNextN(io.req.valid, sramLatency - 1, Some(false.B))
 
   assert(RegNext(!io.error), "For now, we won't ECC error happen in DataStorage...")
 }

@@ -84,7 +84,9 @@ class MSHRCtl(implicit p: Parameters) extends L3Module {
 //    val pbResp = Flipped(ValidIO(new PutBufferEntry))
 
     /* status of s2 and s3 */
-    val pipeStatusVec = Flipped(Vec(2, ValidIO(new PipeStatus)))
+    // val pipeStatusVec = Flipped(Vec(2, ValidIO(new PipeStatus)))
+    val pipeStatusVec = Flipped(Vec(3, ValidIO(new PipeStatus)))
+
 
     /* to ReqBuffer / SinkC, to solve conflict */
     val toReqBuf = Vec(mshrsAll, ValidIO(new MSHRBlockAInfo))
@@ -99,7 +101,10 @@ class MSHRCtl(implicit p: Parameters) extends L3Module {
   val mshrs = Seq.fill(mshrsAll) { Module(new MSHR()) }
   val mshrValids = VecInit(mshrs.map(m => m.io.status.valid))
 
-  val pipeReqCount = PopCount(Cat(io.pipeStatusVec.map(_.valid))) // TODO: consider add !mshrTask to optimize
+  val s2s3PipeStatusVec = VecInit(Seq(io.pipeStatusVec(1), io.pipeStatusVec(2)))
+  // val pipeReqCount = PopCount(Cat(io.pipeStatusVec.map(_.valid))) // TODO: consider add !mshrTask to optimize
+  // val pipeReqCount = PopCount(Cat(s2s3PipeStatusVec.map(status => status.valid && !status.bits.mshrTask))) // TODO: consider add !mshrTask to optimize
+  val pipeReqCount = PopCount(Cat(s2s3PipeStatusVec.map(status => status.valid))) // TODO: consider add !mshrTask to optimize
   val mshrCount = PopCount(Cat(mshrs.map(_.io.status.valid)))
   val mshrFull = pipeReqCount + mshrCount >= mshrsAll.U
   val a_mshrFull = pipeReqCount + mshrCount >= (mshrsAll-1).U // the last idle mshr should not be allocated for channel A req
@@ -114,6 +119,13 @@ class MSHRCtl(implicit p: Parameters) extends L3Module {
     mshr_valid &&
       io.resps.sinkC.set === mshr.io.status.bits.set &&
       io.resps.sinkC.tag === mshr.io.status.bits.tag
+  }
+
+  val blockMatchVec = mshrs.map{ mshr => 
+    val pipeSetMatch = Cat(io.pipeStatusVec.map{ pipeStatus => 
+        pipeStatus.valid && !pipeStatus.bits.mshrTask && pipeStatus.bits.set === mshr.io.status.bits.set && pipeStatus.bits.fromC
+    }).orR
+    mshr.io.status.valid && pipeSetMatch
   }
 
   mshrs.zipWithIndex.foreach {
@@ -133,6 +145,8 @@ class MSHRCtl(implicit p: Parameters) extends L3Module {
       
       m.io.nestedwb := io.nestedwb
       m.io.probeHelperWakeup := io.probeHelperWakeup
+
+      m.io.block := blockMatchVec(i)
 
       io.toReqBuf(i) := m.io.toReqBuf
   }
