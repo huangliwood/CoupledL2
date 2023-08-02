@@ -129,16 +129,6 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   val canFlow = flow.B && !full && !conflict(in) && !chosenQValid && !Cat(io.mainPipeBlock).orR && !noFreeWay(in)
   val doFlow  = canFlow && io.out.ready
 
-  // remove duplicate prefetch if same-addr A req in MSHR or ReqBuf
-  val isPrefetch = in.fromA && in.opcode === Hint
-  val dupMask    = VecInit(
-    io.mshrStatus.map(s =>
-      s.valid && s.bits.isAcqOrPrefetch && sameAddr(in, s.bits)) ++
-    buffer.map(e =>
-      e.valid && sameAddr(in, e.task)
-    )
-  ).asUInt
-  val dup        = io.in.valid && isPrefetch && dupMask.orR
 
   //!! TODO: we can also remove those that duplicate with mainPipe
 
@@ -149,7 +139,7 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   io.in.ready   := !full || doFlow
 
   val insertIdx = PriorityEncoder(buffer.map(!_.valid))
-  val alloc = !full && io.in.valid && !doFlow && !dup
+  val alloc = !full && io.in.valid && !doFlow
   when(alloc){
     val entry = buffer(insertIdx)
     val mpBlock = Cat(io.mainPipeBlock).orR
@@ -298,14 +288,11 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   
   // add XSPerf to see how many cycles the req is held in Buffer
   if(cacheParams.enablePerf) {
-    XSPerfAccumulate(cacheParams, "drop_prefetch", dup)
     if(flow){
       XSPerfAccumulate(cacheParams, "req_buffer_flow", doFlow)
     }
     XSPerfAccumulate(cacheParams, "req_buffer_alloc", alloc)
     XSPerfAccumulate(cacheParams, "req_buffer_full", full)
-    XSPerfAccumulate(cacheParams, "recv_prefetch", io.in.fire && isPrefetch)
-    XSPerfAccumulate(cacheParams, "recv_normal", io.in.fire && !isPrefetch)
     XSPerfAccumulate(cacheParams, "chosenQ_cancel", chosenQValid && cancel)
     for(i <- 0 until entries){
       val cntEnable = PopCount(buffer.map(_.valid)) === i.U

@@ -49,10 +49,7 @@ class RequestArb(implicit p: Parameters) extends L3Module {
     val clientDirRead_s1 = DecoupledIO(new ClientDirRead())
 
     // send task to mainpipe
-    // val taskToPipe_s2 = ValidIO(new TaskBundle())
     val taskToPipe_s2 = DecoupledIO(new TaskBundle())
-    // send s1 task info to mainpipe to help hint
-    val taskInfo_s1 = ValidIO(new TaskBundle())
 
     // send mshrBuf read request
     val refillBufRead_s2 = Flipped(new MSHRBufRead)
@@ -133,8 +130,6 @@ class RequestArb(implicit p: Parameters) extends L3Module {
     task.size := b.size
     task.needProbeAckData := b.data(0) // TODO: parameterize this
     task.mshrTask := false.B
-    task.fromL3pft.foreach(_ := false.B)
-    task.needHint.foreach(_ := false.B)
     task.wayMask := Fill(cacheParams.ways, "b1".U)
     task.reqSource := MemReqSource.NoWhere.id.U // Ignore
     task
@@ -182,8 +177,6 @@ class RequestArb(implicit p: Parameters) extends L3Module {
   val task_s1 = Mux(mshrTask_s1.valid, mshrTask_s1, chnlTask_s1)
   dontTouch(task_s1)
   dontTouch(chnlTask_s1)
-
-  io.taskInfo_s1 := mshrTask_s1
 
   // Meta read request
   // only sinkA/B/C tasks need to read directory
@@ -266,6 +259,7 @@ class RequestArb(implicit p: Parameters) extends L3Module {
 
   s2_fire := s2_valid && io.taskToPipe_s2.ready
 
+  // TODO: move to io
   val pipeFlow_s1 = Wire(Bool())
   pipeFlow_s1 := s1_fire
   BoringUtils.addSource(pipeFlow_s1, "pipeFlow_s1")
@@ -275,7 +269,6 @@ class RequestArb(implicit p: Parameters) extends L3Module {
   val mshrTask_s2_a_upwards = task_s2.bits.fromA && (
       task_s2.bits.opcode === GrantData || task_s2.bits.opcode === Grant ||
       task_s2.bits.opcode === AccessAckData || 
-      task_s2.bits.opcode === HintAck && task_s2.bits.dsWen || 
       task_s2.bits.opcode === PutPartialData && !task_s2.bits.putHit && task_s2.bits.opcodeIsReq
   )
   // For GrantData, read refillBuffer

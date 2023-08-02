@@ -214,8 +214,6 @@ class SinkC_1(implicit p: Parameters) extends L3Module {
     task.aliasTask.foreach(_ := false.B)
     task.useProbeData := false.B
     task.pbIdx := 0.U(mshrBits.W)
-    task.fromL3pft.foreach(_ := false.B)
-    task.needHint.foreach(_ := false.B)
     task.dirty := false.B
     task.way := 0.U(wayBits.W)
     task.meta := 0.U.asTypeOf(new MetaEntry)

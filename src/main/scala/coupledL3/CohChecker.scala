@@ -266,8 +266,6 @@ class CohChecker(implicit p: Parameters) extends L3Module {
   mshrTask.useProbeData := false.B  
   mshrTask.pbIdx := req.pbIdx // SinkA buf index
   mshrTask.bufIdx := req.bufIdx // SinkC buf index
-  mshrTask.fromL3pft.foreach(_ := req.fromL3pft.get)
-  mshrTask.needHint.foreach(_ := req.needHint.get)
   mshrTask.fromProbeHelper := req.fromProbeHelper
   mshrTask.way := dirResult.way
   mshrTask.reqSource := req.reqSource

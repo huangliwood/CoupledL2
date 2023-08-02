@@ -56,13 +56,13 @@ case class AliasField(width: Int) extends BundleField(AliasKey) {
 }
 
 // Indicate whether Hint is needed by upper level cache
-case object PrefetchKey extends ControlKey[Bool](name = "needHint")
-case class PrefetchField() extends BundleField(PrefetchKey) {
-  override def data: Bool = Output(Bool())
-  override def default(x: Bool): Unit = {
-    x := false.B
-  }
-}
+// case object PrefetchKey extends ControlKey[Bool](name = "needHint")
+// case class PrefetchField() extends BundleField(PrefetchKey) {
+//   override def data: Bool = Output(Bool())
+//   override def default(x: Bool): Unit = {
+//     x := false.B
+//   }
+// }
 
 // Indicate whether this block is dirty or not (only used in handle Release/ReleaseData)
 // Now it only works for non-inclusive cache (ignored in inclusive cache)
@@ -106,7 +106,8 @@ case class L3Param
   reqField: Seq[BundleFieldBase] = Nil, 
   respKey: Seq[BundleKeyBase] = Nil,
   // Manager
-  reqKey: Seq[BundleKeyBase] = Seq(AliasKey, PrefetchKey, ReqSourceKey),
+  // reqKey: Seq[BundleKeyBase] = Seq(AliasKey, PrefetchKey, ReqSourceKey),
+  reqKey: Seq[BundleKeyBase] = Seq(AliasKey, ReqSourceKey),
   respField: Seq[BundleFieldBase] = Nil,
 
   innerBuf: TLBufferParams = TLBufferParams(),

@@ -52,17 +52,12 @@ class SourceB(implicit p: Parameters) extends L3Module {
     b.opcode  := task.opcode
     b.param   := task.param
     b.size    := offsetBits.U
-    if (cacheParams.name  == "l3") {
-      println("Is L3")
-      b.source  := getSourceId(task.clients)
+    b.source  := getSourceId(task.clients)
 
-      when(io.sourceB.valid) {
-        assert(PopCount(task.clients) === 1.U)
-      }
-    } else { // L3
-      println("Is L3")
-      b.source  := 0.U // make sure there are only 1 client
+    when(io.sourceB.valid) {
+      assert(PopCount(task.clients) === 1.U)
     }
+
     b.address := Cat(task.tag, task.set, 0.U(offsetBits.W))
     b.mask    := Fill(beatBytes, 1.U(1.W))
     b.data := Cat(task.alias.getOrElse(0.U), task.needData) // this is the same as HuanCun // TODO: for L3
@@ -70,17 +65,20 @@ class SourceB(implicit p: Parameters) extends L3Module {
     b
   }
 
-  /* ======== Data Structure ======== */
+
+  // --------------------------------------------------------------------------
+  //  Data Structure
+  // --------------------------------------------------------------------------
   // TODO: check XSPerf whether 4 entries is enough
   val entries = if(cacheParams.name == "l3") 8 else 4
   val probes  = RegInit(VecInit(
     Seq.fill(entries)(0.U.asTypeOf(new ProbeEntry))
   ))
-//  val workVecs = RegInit(VecInit(
-//    Seq.fill(entries)(0.U.asTypeOf(UInt(clientBits.W)))
-//  ))
 
-  /* ======== Enchantment ======== */
+
+  // --------------------------------------------------------------------------
+  //  Enchantment
+  // --------------------------------------------------------------------------
   val full  = Cat(probes.map(_.valid)).andR
 
   // comparing with #sourceIdAll entries might have timing issues
@@ -94,7 +92,10 @@ class SourceB(implicit p: Parameters) extends L3Module {
   val canFlow      = noReadyEntry && !conflict && PopCount(io.task.bits.clients) === 1.U
   val flow         = canFlow && io.sourceB.ready
 
-  /* ======== Alloc ======== */
+
+  // --------------------------------------------------------------------------
+  //  Alloc
+  // --------------------------------------------------------------------------
   io.task.ready   := !full || flow
 
   val insertIdx = PriorityEncoder(probes.map(!_.valid))
@@ -107,11 +108,12 @@ class SourceB(implicit p: Parameters) extends L3Module {
     p.task  := io.task.bits
     assert(PopCount(conflictMask) <= 1.U)
     assert(PopCount(io.task.bits.clients) =/= 0.U, "Non-clients probe! set:0x%x tag:0x%x", io.task.bits.set, io.task.bits.tag)
-//    val workVec = workVecs(insertIdx)
-//    workVec := io.task.bits.clients
   }
 
-  /* ======== Issue ======== */
+  
+  // --------------------------------------------------------------------------
+  //  Issue
+  // --------------------------------------------------------------------------
   val issueArb = Module(new FastArbiter(new SourceBReq, entries))
   issueArb.io.in zip probes foreach{
     case (i, p) =>
@@ -136,20 +138,29 @@ class SourceB(implicit p: Parameters) extends L3Module {
   issueArb.io.out.ready := io.sourceB.ready
   noReadyEntry := !issueArb.io.out.valid
 
-  /* ======== Update rdy ======== */
+
+  // --------------------------------------------------------------------------
+  //  Update rdy
+  // --------------------------------------------------------------------------
   probes foreach { p =>
     when(p.valid && !io.grantStatus(p.waitG).valid) {
       p.rdy := RegNext(true.B) // cuz GrantData has 2 beats, can move RegNext elsewhere
     }
   }
 
-  /* ======== Output ======== */
+
+  // --------------------------------------------------------------------------
+  //  Output
+  // --------------------------------------------------------------------------
   io.sourceB.valid := issueArb.io.out.valid || (io.task.valid && canFlow)
   io.sourceB.bits  := toTLBundleB(
     Mux(canFlow, io.task.bits, issueArb.io.out.bits)
   )
 
-  /* ======== Perf ======== */
+
+  // --------------------------------------------------------------------------
+  //  Perf
+  // --------------------------------------------------------------------------
   for(i <- 0 until entries){
     val update = PopCount(probes.map(_.valid)) === i.U
     XSPerfAccumulate(cacheParams, s"probe_buffer_util_$i", update)

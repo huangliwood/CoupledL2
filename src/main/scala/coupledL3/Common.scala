@@ -72,9 +72,9 @@ class TaskBundle(implicit p: Parameters) extends L3Bundle with HasChannelBits wi
   val opcodeIsReq = Bool() // opcode is req opcode not resp opcode
 
   // For Intent
-  val fromL3pft = prefetchOpt.map(_ => Bool()) // Is the prefetch req from L3(BOP) or from L1 prefetch?
-                                          // If true, MSHR should send an ack to L3 prefetcher.
-  val needHint = prefetchOpt.map(_ => Bool())
+  // val fromL3pft = prefetchOpt.map(_ => Bool()) // Is the prefetch req from L3(BOP) or from L1 prefetch?
+  //                                         // If true, MSHR should send an ack to L3 prefetcher.
+  // val needHint = prefetchOpt.map(_ => Bool())
 
   // For DirtyKey in Release
   val dirty = Bool()

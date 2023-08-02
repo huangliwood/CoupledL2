@@ -26,15 +26,13 @@ import chipsalliance.rocketchip.config.Parameters
 import coupledL3.utils._
 import coupledL3.debug._
 import coupledL3.noninclusive.ProbeHelper
-import coupledL3.prefetch.PrefetchIO
 import utility.RegNextN
+import chisel3.util.experimental.BoringUtils
 
 class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   val io = IO(new Bundle {
     val in = Flipped(TLBundle(edgeIn.bundle))
     val out = TLBundle(edgeOut.bundle)
-    val l1Hint = Decoupled(new L3ToL1Hint())
-    val prefetch = prefetchOpt.map(_ => Flipped(new PrefetchIO))
     val msStatus = topDownOpt.map(_ => Vec(mshrsAll, ValidIO(new MSHRStatus)))
     val dirResult = topDownOpt.map(_ => ValidIO(new DirResult))
   })
@@ -63,30 +61,22 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   probeHelper.io.clientDirResult.valid := RegNextN(reqArb.io.dirRead_s1.valid, 2, Some(false.B)) // TODO: Optimize for clock gate
   probeHelper.io.clientDirResult.bits := clientDirectory.io.resp
 
-  reqArb.io.fromProbeHelper.blockSinkA := probeHelper.io.full
-  reqArb.io.probeHelperTask <> probeHelper.io.task
-
-  mainPipe.io.clientDirConflict := probeHelper.io.dirConflict
-
 
   clientDirectory.io.read <> reqArb.io.clientDirRead_s1
   clientDirectory.io.tagWReq <> mainPipe.io.clientTagWReq
   clientDirectory.io.metaWReq <> mainPipe.io.clientMetaWReq
 
-  mainPipe.io.clientDirResult_s3 <> clientDirectory.io.resp
-  
-
-  val prbq = Module(new ProbeQueue())
-  prbq.io <> DontCare // @XiaBin TODO
 
   a_reqBuf.io.in <> sinkA.io.toReqArb
   a_reqBuf.io.mshrStatus := mshrCtl.io.toReqBuf
   a_reqBuf.io.mainPipeBlock := mainPipe.io.toReqBuf
   a_reqBuf.io.sinkEntrance := reqArb.io.sinkEntrance
 
+
   reqArb.io.sinkA <> a_reqBuf.io.out
   reqArb.io.ATag := a_reqBuf.io.ATag
   reqArb.io.ASet := a_reqBuf.io.ASet
+
 
   reqArb.io.sinkC <> sinkC.io.toReqArb
   reqArb.io.dirRead_s1 <> directory.io.read
@@ -98,6 +88,9 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   reqArb.io.fromMSHRCtl := mshrCtl.io.toReqArb
   reqArb.io.fromMainPipe := mainPipe.io.toReqArb
   reqArb.io.fromGrantBuffer := grantBuf.io.toReqArb
+  reqArb.io.fromProbeHelper.blockSinkA := probeHelper.io.full
+  reqArb.io.probeHelperTask <> probeHelper.io.task
+
 
   mshrCtl.io.fromReqArb.status_s1 := reqArb.io.status_s1
   mshrCtl.io.resps.sinkC := sinkC.io.resp
@@ -128,14 +121,15 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   mainPipe.io.putDataBufResp_s3.valid := RegNext(putDataBuf.io.r.valid, false.B)
   mainPipe.io.putDataBufResp_s3.bits := putDataBuf.io.r.data
   mainPipe.io.fromReqArb.status_s1 := reqArb.io.status_s1
-  mainPipe.io.grantBufferHint := grantBuf.io.l1Hint
-  mainPipe.io.globalCounter := grantBuf.io.globalCounter
-  mainPipe.io.taskInfo_s1 <> reqArb.io.taskInfo_s1
   mainPipe.io.putBufRead <> sinkA.io.pbRead
   mainPipe.io.putBufResp <> sinkA.io.pbResp
+  mainPipe.io.clientDirConflict := probeHelper.io.dirConflict
+  mainPipe.io.clientDirResp_s3 <> clientDirectory.io.resp
+
 
   sinkA.io.fromMainPipe.putReqGood_s3 := mainPipe.io.toSinkA.putReqGood_s3
   sinkA.io.fromPutDataBuf.full := putDataBuf.io.full
+
 
   releaseBuf.io.w(0) <> sinkC.io.releaseBufWrite
   releaseBuf.io.w(0).id := mshrCtl.io.releaseBufWriteId // id is given by MSHRCtl by comparing address to the MSHRs (only for ProbeAckData)
@@ -146,8 +140,10 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   releaseBuf.io.w(2).id := mshrCtl.io.nestedwbDataId.bits
   releaseBuf.io.w(2).corrupt := false.B
 
+
   refillBuf.io.w(0) <> refillUnit.io.refillBufWrite
   refillBuf.io.w(1) <> mainPipe.io.refillBufWrite
+
 
   putDataBuf.io <> DontCare
 //  putDataBuf.io.full // TODO: block sinkA
@@ -156,27 +152,15 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   putDataBuf.io.r.id := reqArb.io.putDataBufRead_s2.id
 
   sourceC.io.in <> mainPipe.io.toSourceC
-  
-  io.l1Hint.valid := mainPipe.io.l1Hint.valid
-  io.l1Hint.bits := mainPipe.io.l1Hint.bits
+
   mshrCtl.io.grantStatus := grantBuf.io.grantStatus
 
   grantBuf.io.d_task <> mainPipe.io.toSourceD
   grantBuf.io.fromReqArb.status_s1 := reqArb.io.status_s1
   grantBuf.io.pipeStatusVec := reqArb.io.status_vec ++ mainPipe.io.status_vec
-  // mshrCtl.io.pipeStatusVec(0) := reqArb.io.status_vec(1) // s2 status
-  // mshrCtl.io.pipeStatusVec(1) := mainPipe.io.status_vec(0) // s3 status
   mshrCtl.io.pipeStatusVec(0) := reqArb.io.status_vec(0) // s1 status
   mshrCtl.io.pipeStatusVec(1) := reqArb.io.status_vec(1) // s2 status
   mshrCtl.io.pipeStatusVec(2) := mainPipe.io.status_vec(0) // s3 status
-
-  io.prefetch.foreach {
-    p =>
-      p.train <> mainPipe.io.prefetchTrain.get
-      sinkA.io.prefetchReq.get <> p.req
-      p.resp <> grantBuf.io.prefetchResp.get
-      p.recv_addr := DontCare
-  }
 
   sinkC.io.mshrStatus <> mshrCtl.io.toReqBuf
   sinkC.io.mshrFull := mshrCtl.io.toSinkC.mshrFull
@@ -230,10 +214,21 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
     XSPerfHistogram(cacheParams, "a_to_d_delay", delay, delay_sample, 500, 1000, 100, true, false)
   }
 
-  if (cacheParams.enableMonitor) {
-    val monitor = Module(new Monitor())
-    mainPipe.io.toMonitor <> monitor.io.fromMainPipe
-  } else {
-    mainPipe.io.toMonitor <> DontCare
+  if(enableHalfFreq) {
+    val dirRespBuffer = Module(new DirRespBuffer)
+    val dirRespValid = RegNextN(reqArb.io.dirRead_s1.valid, 2, Some(false.B))
+    dirRespBuffer.io.in.valid := dirRespValid
+    dirRespBuffer.io.in.dirResp := directory.io.resp
+    dirRespBuffer.io.in.clientDirResp := clientDirectory.io.resp
+    dirRespBuffer.io.in.clientDirConflict := probeHelper.io.dirConflict
+    val pipeFlow_s3 = WireInit(false.B)
+    BoringUtils.addSink(pipeFlow_s3, "pipeFlow_s3") // TODO: move to io
+    dirRespBuffer.io.in.accept := pipeFlow_s3
+    dontTouch(dirRespBuffer.io.out)
+
+    mainPipe.io.dirResp_s3 <> Mux(dirRespValid, directory.io.resp, dirRespBuffer.io.out.dirResp)
+    mainPipe.io.clientDirResp_s3 <> Mux(dirRespValid, clientDirectory.io.resp, dirRespBuffer.io.out.clientDirResp)
+    mainPipe.io.clientDirConflict := Mux(dirRespValid, probeHelper.io.dirConflict, dirRespBuffer.io.out.clientDirConflict)
   }
+
 }

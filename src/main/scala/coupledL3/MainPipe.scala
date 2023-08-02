@@ -34,11 +34,7 @@ import chisel3.util.experimental.BoringUtils
 class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasClientInfo {
   val io = IO(new Bundle() {
     /* receive task from arbiter at stage 2 */
-    // val taskFromArb_s2 = Flipped(ValidIO(new TaskBundle()))
     val taskFromArb_s2 = Flipped(DecoupledIO(new TaskBundle()))
-
-    /* status from arbiter at stage1  */
-    val taskInfo_s1 = Flipped(ValidIO(new TaskBundle()))
 
     /* handle set conflict in req arb */
     val fromReqArb = Input(new Bundle() {
@@ -57,7 +53,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     val dirResp_s3 = Input(new DirResult)
 
     /* get client dir result at stage 3 */
-    val clientDirResult_s3 = Input(new noninclusive.ClientDirResult)
+    val clientDirResp_s3 = Input(new noninclusive.ClientDirResult)
 
     /* get ProbeHelper info */
     val clientDirConflict = Input(Bool())
@@ -91,7 +87,6 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
 
     /* read or write data storage */
     val toDS = new Bundle() {
-      // val req_s3 = ValidIO(new DSRequest)
       val req_s3 = DecoupledIO(new DSRequest)
       val rdata_s5 = Input(new DSBlock)
       val error_s5 = Input(Bool())
@@ -105,15 +100,11 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     })
 
     /* write dir, including reset dir */
-    // val metaWReq = ValidIO(new MetaWrite)
-    // val tagWReq = ValidIO(new TagWrite)
     val metaWReq = DecoupledIO(new MetaWrite)
     val tagWReq = DecoupledIO(new TagWrite)
 
 
     /* write client dir */
-    // val clientMetaWReq = Valid(new noninclusive.ClientMetaWrite)
-    // val clientTagWReq = Valid(new noninclusive.ClientTagWrite)
     val clientMetaWReq = DecoupledIO(new noninclusive.ClientMetaWrite)
     val clientTagWReq = DecoupledIO(new noninclusive.ClientTagWrite)
 
@@ -130,14 +121,6 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     val nestedwbData = Output(new DSBlock)
 
     val probeHelperWakeup = Output(new ProbeHelperWakeupInfo) // Only for NINE
-
-    val l1Hint = ValidIO(new L3ToL1Hint())
-    val grantBufferHint = Flipped(ValidIO(new L3ToL1Hint()))
-    val globalCounter = Input(UInt(log2Ceil(mshrsAll).W))
-    /* send prefetchTrain to Prefetch to trigger a prefetch req */
-    val prefetchTrain = prefetchOpt.map(_ => DecoupledIO(new PrefetchTrain))
-
-    val toMonitor = Output(new MainpipeMoni())
   })
 
   val resetFinish = RegInit(false.B)
@@ -217,6 +200,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     s3_full := false.B
   }
   
+  // TODO: move to io
   val pipeFlow_s2, pipeFlow_s3 = Wire(Bool())
   pipeFlow_s2 := s2_fire
   pipeFlow_s3 := s3_fire
@@ -264,8 +248,8 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
 
   // client dir result (Only for NINE)
   val gotClientDirResult_s3 = RegInit(false.B)
-  val clientDirResultReg_s3 = RegInit(0.U.asTypeOf(io.clientDirResult_s3))
-  val clientDirResult_s3 = Mux(gotClientDirResult_s3, clientDirResultReg_s3, io.clientDirResult_s3)
+  val clientDirResultReg_s3 = RegInit(0.U.asTypeOf(io.clientDirResp_s3))
+  val clientDirResult_s3 = Mux(gotClientDirResult_s3, clientDirResultReg_s3, io.clientDirResp_s3)
   val clientMetas_s3 = clientDirResult_s3.metas
   val hasClientHit = clientDirResult_s3.hits.asUInt.orR
   dontTouch(clientDirResult_s3) // TODO: NINE
@@ -274,11 +258,12 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     gotClientDirResult_s3 := false.B
   }.elsewhen(RegNext(s2_fire)) {
     gotClientDirResult_s3 := true.B
-    clientDirResultReg_s3 := io.clientDirResult_s3
+    clientDirResultReg_s3 := io.clientDirResp_s3
   }
 
 
   val gotClientDirConflict_s3 = RegInit(false.B)
+  val clientDirConflict_s3 = Mux(gotClientDirResult_s3, gotClientDirConflict_s3, io.clientDirConflict)
   when(s3_fire) {
     gotClientDirConflict_s3 := false.B
   }.elsewhen(RegNext(s2_fire)) {
@@ -295,7 +280,6 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   val req_needT_s3 = needT(req_s3.opcode, req_s3.param) // require T status to handle req
   val req_acquire_s3 = sinkA_req_s3 && (req_s3.opcode === AcquireBlock || req_s3.opcode === AcquirePerm)
   val req_acquireBlock_s3 = sinkA_req_s3 && req_s3.opcode === AcquireBlock
-  val req_prefetch_s3 = sinkA_req_s3 && req_s3.opcode === Hint
   val req_get_s3 = sinkA_req_s3 && req_s3.opcode === Get
   val req_put_full_s3 = sinkA_req_s3 && req_s3.opcode === PutFullData
   val req_put_partial_s3 = sinkA_req_s3 && req_s3.opcode === PutPartialData
@@ -305,7 +289,6 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   val mshr_grantdata_s3 = mshr_req_s3 && req_s3.fromA && req_s3.opcode === GrantData
   val mshr_accessackdata_s3 = mshr_req_s3 && req_s3.fromA && req_s3.opcode === AccessAckData
   val mshr_accessack_s3 = mshr_req_s3 && req_s3.fromA && req_s3.opcode === AccessAck
-  val mshr_hintack_s3 = mshr_req_s3 && req_s3.fromA && req_s3.opcode === HintAck
   val mshr_probeack_s3 = mshr_req_s3 && req_s3.fromB && req_s3.opcode(2, 1) === ProbeAck(2, 1) // ProbeAck or ProbeAckData from mshr
   val mshr_probeackdata_s3 = mshr_req_s3 && req_s3.fromB && req_s3.opcode === ProbeAckData
   val mshr_release_s3 = mshr_req_s3 && req_s3.opcode(2, 1) === Release(2, 1) // voluntary Release or ReleaseData from mshr
@@ -339,7 +322,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   cohChecker.io.in.task <> task_s3
   cohChecker.io.in.dirResult := dirResult_s3
   cohChecker.io.in.clientDirResult := clientDirResult_s3
-  cohChecker.io.in.clientDirConflict := io.clientDirConflict || gotClientDirConflict_s3
+  cohChecker.io.in.clientDirConflict := clientDirConflict_s3
   io.toMSHRCtl.mshr_alloc_s3 <> cohChecker.io.out.mshrAlloc
   willAllocMSHR := cohChecker.io.out.mshrAlloc.valid
   io.toMSHRCtl.mshr_alloc_s3.valid := willAllocMSHR && s3_fire
@@ -483,7 +466,8 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
 
   val wen_a = req_put_full_s3 && io.toSinkA.putReqGood_s3
   val wen_c = sinkC_req_s3 && req_s3.opcode(0) && !need_mshr_s3
-  val wen = wen_c || wen_a || req_s3.dsWen && (mshr_grant_s3 || mshr_accessackdata_s3 || mshr_probeack_s3 || mshr_hintack_s3 || mshr_put_s3 || mshr_releaseack_s3)
+  val wen = wen_c || wen_a || req_s3.dsWen && (mshr_grant_s3 || mshr_accessackdata_s3 || mshr_probeack_s3 || mshr_put_s3 || mshr_releaseack_s3)
+
 
   val need_data_on_hit_a = req_get_s3 || req_acquireBlock_s3 || req_put_partial_s3
   val need_data_on_miss_a = a_need_replacement // read data ahead of time to prepare for ReleaseData later
@@ -548,19 +532,16 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   // B: need_write_refillBuf when L1 AcquireBlock BtoT
   //    L3 sends AcquirePerm to L3, so GrantData to L1 needs to read DS ahead of time and store in RefillBuffer
   // TODO: how about AcquirePerm BtoT interaction with refill buffer?
-  val need_write_refillBuf = sinkA_req_s3 && req_needT_s3 && dirResult_s3.hit && meta_s3.state === BRANCH && !req_put_s3 && !req_prefetch_s3
+  val need_write_refillBuf = sinkA_req_s3 && req_needT_s3 && dirResult_s3.hit && meta_s3.state === BRANCH && !req_put_s3
   val need_write_putDataBuf = sinkA_req_s3 && req_put_partial_s3 && dirResult_s3.hit
 
   /* ======== Write Directory ======== */
-  val metaW_valid_s3_a = sinkA_req_s3 && !need_mshr_s3_a && !req_get_s3 && !req_prefetch_s3 && !req_put_s3 // get & prefetch that hit will not write meta
+  val metaW_valid_s3_a = sinkA_req_s3 && !need_mshr_s3_a && !req_get_s3 && !req_put_s3 // get & prefetch that hit will not write meta
   val metaW_valid_s3_b = sinkB_req_s3 && !need_mshr_s3_b && dirResult_s3.hit && (meta_s3.state === TIP || meta_s3.state === BRANCH && req_s3.param === toN) && !req_s3.fromProbeHelper
   val metaW_valid_s3_c = sinkC_req_s3 && !need_mshr_s3_c
   val metaW_valid_s3_repl = false.B // !mshr_req_s3 && mainpipe_release
   val metaW_valid_s3_mshr = mshr_req_s3 && req_s3.metaWen
   assert(PopCount(Seq(metaW_valid_s3_a, metaW_valid_s3_b, metaW_valid_s3_c, metaW_valid_s3_repl, metaW_valid_s3_mshr)) <= 1.U, "a:%d b:%d c:%d repl:%d mshr:%d", metaW_valid_s3_a, metaW_valid_s3_b, metaW_valid_s3_c, metaW_valid_s3_repl, metaW_valid_s3_mshr)
-  if (cacheParams.name != "l3") { // L3
-    require(clientBits == 1)
-  }
   println(s"clientBits: ${clientBits}")
 
 
@@ -619,7 +600,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   }
 
 
-  val clientMetaW_valid_s3_a = sinkA_req_s3 && !need_mshr_s3_a && !req_get_s3 && !req_prefetch_s3 && !req_put_s3 && (hasClientHit || !hasClientHit && !io.clientDirConflict) // get & prefetch that hit will not write meta
+  val clientMetaW_valid_s3_a = sinkA_req_s3 && !need_mshr_s3_a && !req_get_s3 && !req_put_s3 && (hasClientHit || !hasClientHit && !io.clientDirConflict) // get & prefetch that hit will not write meta
   val clientMetaW_valid_s3_c = sinkC_req_s3 && !need_mshr_s3_c && (hasClientHit || !hasClientHit && !io.clientDirConflict)
   val clientMetaW_valid_s3_mshr = mshr_req_s3 && req_s3.clientMetaWen
 
@@ -662,7 +643,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   )
 
   willAccessDirTag := task_s3.valid && (
-                            (mshr_grant_s3 || mshr_accessack_s3 || mshr_accessackdata_s3 || mshr_hintack_s3 || mshr_releaseack_s3) && req_s3.tagWen ||
+                            (mshr_grant_s3 || mshr_accessack_s3 || mshr_accessackdata_s3 || mshr_releaseack_s3) && req_s3.tagWen ||
                             metaW_valid_s3_c
                           )
   io.tagWReq.valid     := willAccessDirTag && s3_fire
@@ -690,7 +671,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   
   // Write client tag
   val clientTagW_valid_s3_a = clientMetaW_valid_s3_a && !clientDirResult_s3.tagMatch
-  val clientTagW_valid_s3_mshr = (mshr_grant_s3 || mshr_accessack_s3 || mshr_accessackdata_s3 || mshr_hintack_s3) && req_s3.clientTagWen
+  val clientTagW_valid_s3_mshr = (mshr_grant_s3 || mshr_accessack_s3 || mshr_accessackdata_s3) && req_s3.clientTagWen
   willAccessClientDirTag := task_s3.valid && (clientTagW_valid_s3_mshr || clientTagW_valid_s3_a)
   io.clientTagWReq.valid := willAccessClientDirTag && s3_fire
   io.clientTagWReq.bits.apply(
@@ -723,7 +704,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   
   d_s3.valid := s3_fire && task_s3.valid && Mux(
     mshr_req_s3,
-    mshr_grant_s3 & !task_s3.bits.selfHasData || mshr_accessackdata_s3 || mshr_accessack_s3 || mshr_hintack_s3 || mshr_putpartial_s3 || mshr_releaseack_s3,
+    mshr_grant_s3 & !task_s3.bits.selfHasData || mshr_accessackdata_s3 || mshr_accessack_s3 || mshr_putpartial_s3 || mshr_releaseack_s3,
     req_s3.fromC && !need_mshr_s3 || req_s3.fromA && !need_mshr_s3 && !mainpipe_release &&(!data_unready_s3 || req_put_full_s3)
   )
 
@@ -763,19 +744,6 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   io.nestedwbData := bufResp_s3.asTypeOf(new DSBlock)
 
 
-
-  io.prefetchTrain.foreach {
-    train =>
-//      train.valid := task_s3.valid && (req_acquire_s3 || req_get_s3) && req_s3.needHint.getOrElse(false.B) &&
-//        (!dirResult_s3.hit || meta_s3.prefetch.get)
-//      train.bits.tag := req_s3.tag
-//      train.bits.set := req_s3.set
-//      train.bits.needT := req_needT_s3
-//      train.bits.source := req_s3.sourceId
-      train <> DontCare
-  }
-
-
   // Wake up MSHR that waitting for the ProbeHelper task. (Only for NINE)
   io.probeHelperWakeup.valid := (mshr_req_s3 && req_s3.fromProbeHelper || !mshr_req_s3 && req_s3.fromProbeHelper && !need_mshr_s3) && s3_fire
   io.probeHelperWakeup.set := req_s3.set
@@ -811,8 +779,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   val isD_s4 =  task_s4.bits.opcode(2, 1) =/= Release(2, 1) && task_s4.bits.fromC || 
                   task_s4.bits.fromA && (
                     task_s4.bits.opcode(2, 1) === Grant(2, 1) ||
-                    task_s4.bits.opcode(2, 1) === AccessAck(2, 1) ||
-                    task_s4.bits.opcode === HintAck
+                    task_s4.bits.opcode(2, 1) === AccessAck(2, 1)
                   )
 
   val chnl_fire_s4 = c_s4.fire() || d_s4.fire()
@@ -851,28 +818,6 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   task_s5.bits.corrupt := Mux(ren_s5, io.toDS.error_s5, false.B)
   val merged_data_s5 = Mux(ren_s5, rdata_s5, data_s5)
   val chnl_fire_s5 = c_s5.fire() || d_s5.fire()
-
-  val customL1Hint = Module(new CustomL1Hint)
-
-  customL1Hint.io.s1 := io.taskInfo_s1
-  customL1Hint.io.s2 := task_s2
-  
-  customL1Hint.io.s3.task      := task_s3
-  customL1Hint.io.s3.d         := d_s3.valid
-  customL1Hint.io.s3.need_mshr := need_mshr_s3
-
-  customL1Hint.io.s4.task                  := task_s4
-  customL1Hint.io.s4.d                     := d_s4.valid
-  customL1Hint.io.s4.need_write_releaseBuf := need_write_releaseBuf_s4
-  customL1Hint.io.s4.need_write_refillBuf  := need_write_refillBuf_s4
-
-  customL1Hint.io.s5.task      := task_s5
-  customL1Hint.io.s5.d         := d_s5.valid
-
-  customL1Hint.io.globalCounter   := io.globalCounter
-  customL1Hint.io.grantBufferHint <> io.grantBufferHint
-
-  customL1Hint.io.l1Hint <> io.l1Hint
 
   io.releaseBufWrite.valid      := task_s5.valid && need_write_releaseBuf_s5
   io.releaseBufWrite.beat_sel   := Fill(beatSize, 1.U(1.W))
@@ -1009,7 +954,6 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   XSPerfAccumulate(cacheParams, "mshr_grantdata_req", task_s3.valid && mshr_grantdata_s3)
   XSPerfAccumulate(cacheParams, "mshr_accessackdata_req", task_s3.valid && mshr_accessackdata_s3)
   XSPerfAccumulate(cacheParams, "mshr_accessack_req", task_s3.valid && mshr_accessack_s3)
-  XSPerfAccumulate(cacheParams, "mshr_hintack_req", task_s3.valid && mshr_hintack_s3)
   XSPerfAccumulate(cacheParams, "mshr_probeack_req", task_s3.valid && mshr_probeack_s3)
   XSPerfAccumulate(cacheParams, "mshr_probeackdata_req", task_s3.valid && mshr_probeackdata_s3)
   XSPerfAccumulate(cacheParams, "mshr_release_req", task_s3.valid && mshr_release_s3)
@@ -1057,25 +1001,4 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     enable = io.toSourceC.fire(), start = 3, stop = 5+1, step = 1)
   XSPerfHistogram(cacheParams, "sourceD_pipeline_stages", sourceD_pipe_len,
     enable = io.toSourceD.fire(), start = 3, stop = 5+1, step = 1)
-
-  // XSPerfAccumulate(cacheParams, "a_req_tigger_prefetch", io.prefetchTrain.)
-  prefetchOpt.foreach {
-    _ =>
-      XSPerfAccumulate(cacheParams, "a_req_trigger_prefetch", io.prefetchTrain.get.fire())
-      XSPerfAccumulate(cacheParams, "a_req_trigger_prefetch_not_ready", io.prefetchTrain.get.valid && !io.prefetchTrain.get.ready)
-      XSPerfAccumulate(cacheParams, "acquire_trigger_prefetch_on_miss", io.prefetchTrain.get.fire() && req_acquire_s3 && !dirResult_s3.hit)
-//      XSPerfAccumulate(cacheParams, "acquire_trigger_prefetch_on_hit_pft", io.prefetchTrain.get.fire() && req_acquire_s3 && dirResult_s3.hit && meta_s3.prefetch.get)
-//      XSPerfAccumulate(cacheParams, "release_all", mshr_release_s3)
-//      XSPerfAccumulate(cacheParams, "release_prefetch_accessed", mshr_release_s3 && meta_s3.prefetch.get && meta_s3.accessed)
-//      XSPerfAccumulate(cacheParams, "release_prefetch_not_accessed", mshr_release_s3 && meta_s3.prefetch.get && !meta_s3.accessed)
-//      XSPerfAccumulate(cacheParams, "get_trigger_prefetch_on_miss", io.prefetchTrain.get.fire() && req_get_s3 && !dirResult_s3.hit)
-//      XSPerfAccumulate(cacheParams, "get_trigger_prefetch_on_hit_pft", io.prefetchTrain.get.fire() && req_get_s3 && dirResult_s3.hit && meta_s3.prefetch.get)
-  }
-
-  /* ===== Monitor ===== */
-  io.toMonitor.task_s2 := task_s2
-  io.toMonitor.task_s3 := task_s3
-  io.toMonitor.task_s4 := task_s4
-  io.toMonitor.task_s5 := task_s5
-  io.toMonitor.dirResult_s3 := dirResult_s3
 }

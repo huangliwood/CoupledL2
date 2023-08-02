@@ -46,7 +46,6 @@ class DataStorage(implicit p: Parameters) extends L3Module with DontCareInnerLog
   val io = IO(new Bundle() {
     // there is only 1 read or write request in the same cycle,
     // so only 1 req port is necessary
-    // val req = Flipped(ValidIO(new DSRequest))
     val req = Flipped(DecoupledIO(new DSRequest))
     val rdata = Output(new DSBlock)
     val wdata = Input(new DSBlock)

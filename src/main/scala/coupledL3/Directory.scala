@@ -96,8 +96,6 @@ class Directory(implicit p: Parameters) extends L3Module with DontCareInnerLogic
   val io = IO(new Bundle() {
     val read = Flipped(DecoupledIO(new DirRead))
     val resp = Output(new DirResult)
-    // val metaWReq = Flipped(ValidIO(new MetaWrite))
-    // val tagWReq = Flipped(ValidIO(new TagWrite))
     val metaWReq = Flipped(DecoupledIO(new MetaWrite))
     val tagWReq = Flipped(DecoupledIO(new TagWrite))
   })
@@ -300,9 +298,7 @@ class Directory(implicit p: Parameters) extends L3Module with DontCareInnerLogic
   dontTouch(metaArray.io)
   dontTouch(tagArray.io)
 
-  // io.read.ready := !io.metaWReq.valid && !io.tagWReq.valid && !replacerWen // TODO: ??
   val replacerRready = if(cacheParams.replacement == "random") true.B else replacer_sram_opt.get.io.r.req.ready
-  // io.read.ready := tagArray.io.r.req.ready && metaArray.io.r.req.ready && replacerRready // TODO: ??
 
   if(enableHalfFreq) {
     val readFull = RegInit(false.B)

@@ -341,48 +341,8 @@ class CoupledL3(implicit p: Parameters) extends LazyModule with HasCoupledL3Para
         out.a.bits.address := restoreAddress(slice.io.out.a.bits.address, i)
         out.c.bits.address := restoreAddress(slice.io.out.c.bits.address, i)
 
-        slice.io.prefetch.zip(prefetcher).foreach {
-          case (s, p) =>
-            s.req.valid := p.io.req.valid && bank_eq(p.io.req.bits.set, i, bankBits)
-            s.req.bits := p.io.req.bits
-            prefetchReqsReady(i) := s.req.ready && bank_eq(p.io.req.bits.set, i, bankBits)
-            val train = Pipeline(s.train)
-            val resp = Pipeline(s.resp)
-            prefetchTrains.get(i) <> train
-            prefetchResps.get(i) <> resp
-            // restore to full address
-            if(bankBits != 0){
-              val train_full_addr = Cat(
-                train.bits.tag, train.bits.set, i.U(bankBits.W), 0.U(offsetBits.W)
-              )
-              val (train_tag, train_set, _) = s.parseFullAddress(train_full_addr)
-              val resp_full_addr = Cat(
-                resp.bits.tag, resp.bits.set, i.U(bankBits.W), 0.U(offsetBits.W)
-              )
-              val (resp_tag, resp_set, _) = s.parseFullAddress(resp_full_addr)
-              prefetchTrains.get(i).bits.tag := train_tag
-              prefetchTrains.get(i).bits.set := train_set
-              prefetchResps.get(i).bits.tag := resp_tag
-              prefetchResps.get(i).bits.set := resp_set
-            }
-        }
-
         slice
     }
-    val l1Hint_arb = Module(new Arbiter(new L3ToL1Hint(), slices.size))
-    val slices_l1Hint = slices.zipWithIndex.map {
-      case (s, i) => Pipeline(s.io.l1Hint, depth = 1, pipe = false, name = Some(s"l1Hint_buffer_$i"))
-    }
-    val (client_sourceId_match_oh, client_sourceId_start) = node.in.head._2.client.clients
-                                                          .map(c => {
-                                                                (c.sourceId.contains(l1Hint_arb.io.out.bits.sourceId).asInstanceOf[Bool], c.sourceId.start.U)
-                                                              })
-                                                          .unzip
-    l1Hint_arb.io.in <> VecInit(slices_l1Hint)
-    io.l2_hint.valid := l1Hint_arb.io.out.fire()
-    io.l2_hint.bits := l1Hint_arb.io.out.bits.sourceId - Mux1H(client_sourceId_match_oh, client_sourceId_start)
-    // always ready for grant hint
-    l1Hint_arb.io.out.ready := true.B
 
     val topDown = topDownOpt.map(_ => Module(new TopDownMonitor()(p.alterPartial {
       case EdgeInKey => node.in.head._2
@@ -400,7 +360,6 @@ class CoupledL3(implicit p: Parameters) extends LazyModule with HasCoupledL3Para
       }
     }
 
-    XSPerfAccumulate(cacheParams, "hint_fire", io.l2_hint.valid)
     val grant_fire = slices.map{ slice => {
                         val (_, _, grant_fire_last, _) = node.in.head._2.count(slice.io.in.d)
                         slice.io.in.d.fire() && grant_fire_last && slice.io.in.d.bits.opcode === GrantData

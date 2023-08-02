@@ -47,20 +47,13 @@ abstract class BaseGrantBuffer(implicit p: Parameters) extends L3Module {
       val status_s1 = new PipeEntranceStatus
     })
 
-    val l1Hint = ValidIO(new L3ToL1Hint())
-    val globalCounter = Output(UInt(log2Ceil(mshrsAll).W))
-
     val pipeStatusVec = Flipped(Vec(5, ValidIO(new PipeStatus)))
     val toReqArb = Output(new Bundle() {
       val blockSinkReqEntrance = new BlockInfo()
       val blockMSHRReqEntrance = Bool()
     })
-    val prefetchResp = prefetchOpt.map(_ => DecoupledIO(new PrefetchResp))
     val grantStatus  = Output(Vec(sourceIdAll, new GrantStatus))
   })
-
-  io.l1Hint := DontCare
-  io.globalCounter := DontCare
 }
 
 // Communicate with L1
@@ -127,14 +120,12 @@ class GrantBuffer(implicit p: Parameters) extends BaseGrantBuffer {
 
   selectOH.asBools.zipWithIndex.foreach {
     case (sel, i) =>
-      when (sel && io.d_task.fire() && !(io.d_task.bits.task.opcode === HintAck && !io.d_task.bits.task.fromL3pft.getOrElse(false.B))) {
+      when (sel && io.d_task.fire()) {
         beat_valids(i).foreach(_ := true.B)
         taskAll(i) := io.d_task.bits.task
         dataAll(i) := io.d_task.bits.data
       }
   }
-  // If no prefetch, there never should be HintAck
-  assert(prefetchOpt.nonEmpty.B || !io.d_task.valid || io.d_task.bits.task.opcode =/= HintAck)
 
   def toTLBundleD(task: TaskBundle, data: UInt = 0.U) = {
     val d = Wire(new TLBundleD(edgeIn.bundle))
@@ -183,20 +174,6 @@ class GrantBuffer(implicit p: Parameters) extends BaseGrantBuffer {
       }
   }
 
-  val pft_resps = prefetchOpt.map(_ => Wire(Vec(mshrsAll, DecoupledIO(new PrefetchResp))))
-  io.prefetchResp.zip(pft_resps).foreach {
-    case (out, ins) =>
-      ins.zipWithIndex.foreach {
-        case (in, i) =>
-          in.valid := block_valids(i) && taskAll(i).opcode === HintAck
-          in.bits.tag := taskAll(i).tag
-          in.bits.set := taskAll(i).set
-          when (in.fire()) {
-            beat_valids(i).foreach(_ := false.B)
-          }
-      }
-      fastArb(ins, out, Some("pft_resp_arb"))
-  }
 
   TLArbiter.robin(edgeIn, io.d, out_bundles:_*)
 

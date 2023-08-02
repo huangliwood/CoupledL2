@@ -64,37 +64,6 @@ class GrantBufferFIFO(implicit p: Parameters) extends BaseGrantBuffer with HasCi
     false.B
   }))
 
-  // hint interface: l2 will send hint to l1 before sending grantData (3 cycle ahead)
-  val globalCounter = RegInit(0.U(log2Ceil(mshrsAll).W))
-  val beat_counters = RegInit(VecInit(Seq.fill(mshrsAll) {
-    0.U(log2Ceil(mshrsAll).W)
-  }))
-  io.globalCounter := globalCounter
-
-  when(io.d_task.fire()) {
-    val hasData = io.d_task.bits.task.opcode(0)
-    when(hasData) {
-      globalCounter := globalCounter + 1.U // counter = counter + 2 - 1
-    }.otherwise {
-      globalCounter := globalCounter // counter = counter + 1 - 1
-    }
-  }.otherwise {
-    globalCounter := Mux(globalCounter === 0.U, 0.U, globalCounter - 1.U) // counter = counter - 1
-  }
-
-  // GrantData
-  val hint_valid_vec = beat_counters.zip(tasks).map{case (counter, task) => { counter === hintCycleAhead.U && task.opcode === GrantData && !task.fromL3pft.getOrElse(false.B) }}
-  val sourceid_vec = tasks.map{case task => task.sourceId}
-
-  io.l1Hint.valid := VecInit(hint_valid_vec).asUInt.orR
-  io.l1Hint.bits.sourceId := ParallelMux(hint_valid_vec zip sourceid_vec)
-  assert(PopCount(VecInit(hint_valid_vec)) <= 1.U)
-
-  beat_counters.foreach {
-    case (counter) => {
-      counter := Mux(counter === 0.U, 0.U, counter - 1.U)
-    }
-  }
 
   // sourceIdAll (= L1 Ids) entries
   // Caution: blocks choose an empty entry to insert, which has #mshrsAll entries
@@ -145,15 +114,13 @@ class GrantBufferFIFO(implicit p: Parameters) extends BaseGrantBuffer with HasCi
   io.toReqArb.blockSinkReqEntrance.blockC_s1 := noSpaceForSinkReq
   io.toReqArb.blockMSHRReqEntrance := noSpaceForMSHRReq
 
-  when(io.d_task.fire() && !(io.d_task.bits.task.opcode === HintAck && !io.d_task.bits.task.fromL3pft.getOrElse(false.B))) {
+  when(io.d_task.fire()) {
     beat_valids(enqPtr).foreach(_ := true.B)
     tasks(enqPtr) := io.d_task.bits.task
     datas(enqPtr) := io.d_task.bits.data
-    beat_counters(enqPtr) := globalCounter
+    // beat_counters(enqPtr) := globalCounter
     enqPtrExt := enqPtrExt + 1.U
   }
-  // If no prefetch, there never should be HintAck
-  assert(prefetchOpt.nonEmpty.B || !io.d_task.valid || io.d_task.bits.task.opcode =/= HintAck)
 
   def toTLBundleD(task: TaskBundle, data: UInt = 0.U) = {
     val d = Wire(new TLBundleD(edgeIn.bundle))
@@ -206,22 +173,6 @@ class GrantBufferFIFO(implicit p: Parameters) extends BaseGrantBuffer with HasCi
         }
       }
     }
-  }
-
-  val pft_resps = prefetchOpt.map(_ => Wire(Vec(mshrsAll, DecoupledIO(new PrefetchResp))))
-  io.prefetchResp.zip(pft_resps).foreach {
-    case (out, ins) =>
-      ins.zipWithIndex.foreach {
-        case (in, i) =>
-          in.valid := block_valids(i) && tasks(i).opcode === HintAck
-          in.bits.tag := tasks(i).tag
-          in.bits.set := tasks(i).set
-          when (in.fire()) {
-            beat_valids(i).foreach(_ := false.B)
-            flush(i) := true.B
-          }
-      }
-      fastArb(ins, out, Some("pft_resp_arb"))
   }
 
   io.d_task.ready := !full

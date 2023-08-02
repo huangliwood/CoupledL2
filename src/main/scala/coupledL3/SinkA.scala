@@ -29,7 +29,6 @@ import coupledL3.utils.XSPerfAccumulate
 class SinkA(implicit p: Parameters) extends L3Module {
   val io = IO(new Bundle() {
     val a = Flipped(DecoupledIO(new TLBundleA(edgeIn.bundle)))
-    val prefetchReq = prefetchOpt.map(_ => Flipped(DecoupledIO(new PrefetchReq)))
     val toReqArb = DecoupledIO(new TaskBundle)
 
     val pbRead = Flipped(ValidIO(new PutBufferRead))
@@ -103,31 +102,7 @@ class SinkA(implicit p: Parameters) extends L3Module {
     task.sourceId := a.source
     task.mshrTask := false.B
     task.pbIdx := insertIdx
-    task.fromL3pft.foreach(_ := false.B)
-    task.needHint.foreach(_ := a.user.lift(PrefetchKey).getOrElse(false.B))
     task.reqSource := a.user.lift(utility.ReqSourceKey).getOrElse(MemReqSource.NoWhere.id.U)
-    task
-  }
-
-  def fromPrefetchReqtoTaskBundle(req: PrefetchReq): TaskBundle = {
-    val task = Wire(new TaskBundle)
-    val fullAddr = Cat(req.tag, req.set, 0.U(offsetBits.W))
-    task := DontCare
-    task.channel := "b001".U
-    task.tag := parseAddress(fullAddr)._1
-    task.set := parseAddress(fullAddr)._2
-    task.off := 0.U
-    task.alias.foreach(_ := 0.U)
-    task.opcode := Hint
-    task.param := Mux(req.needT, PREFETCH_WRITE, PREFETCH_READ)
-    task.size := offsetBits.U
-    task.sourceId := req.source
-    task.needProbeAckData := false.B
-    task.mshrTask := false.B
-    task.aliasTask.foreach(_ := false.B)
-    task.fromL3pft.foreach(_ := req.isBOP)
-    task.needHint.foreach(_ := false.B)
-    task.reqSource := MemReqSource.L3Prefetch.id.U
     task
   }
 
@@ -165,14 +140,7 @@ class SinkA(implicit p: Parameters) extends L3Module {
   val req = Mux(putValid, s0_req, fromTLAtoTaskBundle(io.a.bits))
   commonReq.bits := req
 
-  if (prefetchOpt.nonEmpty) {
-    prefetchReq.get.valid := io.prefetchReq.get.valid
-    prefetchReq.get.bits := fromPrefetchReqtoTaskBundle(io.prefetchReq.get.bits)
-    io.prefetchReq.get.ready := prefetchReq.get.ready
-    fastArb(Seq(commonReq, prefetchReq.get), io.toReqArb)
-  } else {
-    io.toReqArb <> commonReq
-  }
+  io.toReqArb <> commonReq
 
 
   io.pbResp.zipWithIndex.foreach{
@@ -190,7 +158,6 @@ class SinkA(implicit p: Parameters) extends L3Module {
     (io.toReqArb.bits.opcode === PutFullData || io.toReqArb.bits.opcode === PutPartialData))
   XSPerfAccumulate(cacheParams, "sinkA_put_beat", io.a.fire() &&
     (io.a.bits.opcode === PutFullData || io.a.bits.opcode === PutPartialData))
-  prefetchOpt.foreach { _ => XSPerfAccumulate(cacheParams, "sinkA_prefetch_req", io.prefetchReq.get.fire()) }
 
   // cycels stalled by mainpipe
   val stall = io.toReqArb.valid && !io.toReqArb.ready
@@ -200,7 +167,6 @@ class SinkA(implicit p: Parameters) extends L3Module {
   XSPerfAccumulate(cacheParams, "sinkA_get_stall_by_mainpipe", stall && io.toReqArb.bits.opcode === Get)
   XSPerfAccumulate(cacheParams, "sinkA_put_stall_by_mainpipe", stall &&
     (io.toReqArb.bits.opcode === PutFullData || io.toReqArb.bits.opcode === PutPartialData))
-  prefetchOpt.foreach { _ => XSPerfAccumulate(cacheParams, "sinkA_prefetch_stall_by_mainpipe", stall && io.toReqArb.bits.opcode === Hint) }
 
   // cycles stalled for no space
   XSPerfAccumulate(cacheParams, "sinkA_put_stall_for_noSpace", io.a.valid && first_1 && noSpace)

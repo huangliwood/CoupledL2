@@ -39,7 +39,6 @@ class ProbeHelper(entries: Int = 5, enqDelay: Int = 1)(implicit p: Parameters) e
   probeTask.set := set
   probeTask.off := 0.U
   probeTask.bufIdx := DontCare
-  probeTask.needHint.foreach(_ := false.B)
   probeTask.alias.foreach(_ := 0.U)
   probeTask.needProbeAckData := true.B
   probeTask.wayMask := Fill(cacheParams.ways, "b1".U)

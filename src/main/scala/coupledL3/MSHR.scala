@@ -165,7 +165,6 @@ class MSHR(implicit p: Parameters) extends L3Module {
     req.aliasTask.foreach(_ := msTask.aliasTask.getOrElse(false.B))
     req.pbIdx   := msTask.pbIdx
     req.bufIdx  := msTask.bufIdx
-    req.fromL3pft.foreach(_ := msTask.fromL3pft.get)
     req.reqSource := msTask.reqSource
     req.fromProbeHelper := msTask.fromProbeHelper
     gotT        := false.B
@@ -505,7 +504,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
     mp_grant.sourceId := req.source
     mp_grant.opcode := odOpGen(req.opcode)
     mp_grant.param := Mux(
-      req_get || req_prefetch,
+      req_get,
       0.U, // Get/Put -> AccessAckData/AccessAck
       MuxLookup( // Acquire -> Grant
         req.param,
@@ -913,7 +912,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
   io.toReqBuf.bits.needRelease := !state.w_release_sent
   io.toReqBuf.bits.metaTag := dirResult.tag
   io.toReqBuf.bits.willFree := will_free
-  io.toReqBuf.bits.isAcqOrPrefetch := req_acquire || req_prefetch
+  io.toReqBuf.bits.isAcqOrPrefetch := req_acquire
   io.toReqBuf.bits.isChannelC := req.fromC
 
   assert(!(c_resp.valid && !io.status.bits.w_c_resp), "mshrId:%d", io.id)
