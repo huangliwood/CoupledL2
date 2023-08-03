@@ -60,6 +60,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
     val probeHelperWakeup = Input(new ProbeHelperWakeupInfo) // Only for NINE
 
     val block = Input(Bool())
+    val mshrTaskIsFire = Input(Bool())
   })
 
   val initState = Wire(new FSMState())
@@ -873,7 +874,16 @@ class MSHR(implicit p: Parameters) extends L3Module {
   val no_schedule = state.s_refill && state.s_probeack
   val no_wait = state.w_rprobeacklast && state.w_pprobeacklast && state.w_grantlast && state.w_releaseack && state.w_grantack && state.w_probehelper_done && state.w_release_sent 
   val will_free = no_schedule && no_wait && !waitNestedC && !waitNestedB && !nestedWbMatch && !needWaitNestedC
-  when (will_free && status_reg.valid) {
+  
+  val mshrTaskIsFireReg = RegInit(false.B)
+  val mshrTaskIsFire = Mux(io.mshrTaskIsFire, true.B, mshrTaskIsFireReg)
+  when (io.alloc.valid) {
+    mshrTaskIsFireReg := false.B
+  }.elsewhen(io.mshrTaskIsFire) {
+    mshrTaskIsFireReg := true.B
+  }
+
+  when (will_free && status_reg.valid && mshrTaskIsFire) {
     status_reg.valid := false.B
     timer := 0.U
   }

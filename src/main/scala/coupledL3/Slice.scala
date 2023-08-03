@@ -161,6 +161,7 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   mshrCtl.io.pipeStatusVec(0) := reqArb.io.status_vec(0) // s1 status
   mshrCtl.io.pipeStatusVec(1) := reqArb.io.status_vec(1) // s2 status
   mshrCtl.io.pipeStatusVec(2) := mainPipe.io.status_vec(0) // s3 status
+  mshrCtl.io.fromReqArb.mshrTaskInfo <> reqArb.io.mshrTaskInfo
 
   sinkC.io.mshrStatus <> mshrCtl.io.toReqBuf
   sinkC.io.mshrFull := mshrCtl.io.toSinkC.mshrFull

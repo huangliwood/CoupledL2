@@ -53,10 +53,12 @@ class TestTop_L3()(implicit p: Parameters) extends LazyModule {
         sets = 32,
         inclusionPolicy = "NINE",
         
-        clientCaches = Seq(L2ClientParam(
+        clientCaches = Seq(CacheParameters(
           sets = 32,
           ways = 8,
           aliasBitsOpt = None,
+          name = "l2",
+          blockGranularity = 64
         )),
         echoField = Seq(DirtyField())
       )
@@ -103,7 +105,7 @@ object TestTop_L3 extends App {
       ways = 4,
       // sets = 128,
       sets = 32,
-      clientCaches = Seq(L2ClientParam(aliasBitsOpt = Some(0))),
+      clientCaches = Nil,
       echoField = Seq(DirtyField())
     )
   })

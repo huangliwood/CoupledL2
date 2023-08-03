@@ -37,11 +37,17 @@ class MSHRSelector(implicit p: Parameters) extends L3Module {
   })
 }
 
+class MSHRTaskInfo(implicit p: Parameters) extends L3Bundle {
+  val valid = Bool()
+  val mshrId = UInt(mshrBits.W)
+}
+
 class MSHRCtl(implicit p: Parameters) extends L3Module {
   val io = IO(new Bundle() {
     /* interact with req arb */
     val fromReqArb = Input(new Bundle() {
       val status_s1 = new PipeEntranceStatus
+      val mshrTaskInfo = new MSHRTaskInfo
     })
     val toReqArb = Output(new BlockInfo())
 
@@ -128,6 +134,10 @@ class MSHRCtl(implicit p: Parameters) extends L3Module {
     mshr.io.status.valid && pipeSetMatch
   }
 
+  val mshrTaskInfoMatchVec = mshrs.map{ mshr =>
+    mshr.io.status.valid && mshr.io.id === io.fromReqArb.mshrTaskInfo.mshrId && io.fromReqArb.mshrTaskInfo.valid
+  }
+
   mshrs.zipWithIndex.foreach {
     case (m, i) =>
       m.io.id := i.U
@@ -147,6 +157,7 @@ class MSHRCtl(implicit p: Parameters) extends L3Module {
       m.io.probeHelperWakeup := io.probeHelperWakeup
 
       m.io.block := blockMatchVec(i)
+      m.io.mshrTaskIsFire := mshrTaskInfoMatchVec(i)
 
       io.toReqBuf(i) := m.io.toReqBuf
   }

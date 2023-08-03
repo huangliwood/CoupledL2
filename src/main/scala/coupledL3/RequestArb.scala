@@ -72,6 +72,8 @@ class RequestArb(implicit p: Parameters) extends L3Module {
     val fromProbeHelper = Input(new Bundle{
       val blockSinkA = Bool()
     })
+
+    val mshrTaskInfo = Output(new MSHRTaskInfo)
   })
 
   // --------------------------------------------------------------------------
@@ -258,6 +260,9 @@ class RequestArb(implicit p: Parameters) extends L3Module {
   } 
 
   s2_fire := s2_valid && io.taskToPipe_s2.ready
+
+  io.mshrTaskInfo.valid := s2_fire && task_s2.valid && task_s2.bits.mshrTask
+  io.mshrTaskInfo.mshrId := task_s2.bits.mshrId
 
   // TODO: move to io
   val pipeFlow_s1 = Wire(Bool())

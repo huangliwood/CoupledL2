@@ -84,7 +84,7 @@ case class L3Param
   blockBytes: Int = 64,
   pageBytes: Int = 4096,
   channelBytes: TLChannelBeatBytes = TLChannelBeatBytes(32),
-  clientCaches: Seq[L2ClientParam] = Nil,
+  clientCaches: Seq[CacheParameters] = Nil,
   replacement: String = "plru",
   mshrs: Int = 16,
   enableClockGate: Boolean = true,
