@@ -62,6 +62,10 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
       val tag = UInt(tagBits.W)
       val set = UInt(setBits.W)
     }))
+
+    val pipeFlow_s1 = Input(Bool())
+    val pipeFlow_s2 = Input(Bool())
+    val pipeFlow_s3 = Input(Bool())
   })
 
   io.ATag := io.in.bits.tag
@@ -83,11 +87,11 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   def sameSet (a: TaskBundle, b: TaskBundle):     Bool = a.set === b.set
   def sameSet (a: TaskBundle, b: MSHRBlockAInfo): Bool = a.set === b.set
   def addrConflict(a: TaskBundle, s: MSHRBlockAInfo): Bool = {
-    if (cacheParams.name == "l3") {
-      a.set === s.set // && (a.tag === s.reqTag || a.tag === s.metaTag && s.needRelease) // TODO: reduce set blocking for L3 ?
-    } else {
-      a.set === s.set && (a.tag === s.reqTag || a.tag === s.metaTag && s.needRelease)
-    }
+    // if (cacheParams.name == "l3") {
+    a.set === s.set // && (a.tag === s.reqTag || a.tag === s.metaTag && s.needRelease) // TODO: reduce set blocking for L3 ?
+    // } else {
+      // a.set === s.set && (a.tag === s.reqTag || a.tag === s.metaTag && s.needRelease)
+    // }
   }
   def conflictMask(a: TaskBundle): UInt = VecInit(io.mshrStatus.map(s =>
     s.valid && addrConflict(a, s.bits) && !s.bits.willFree)).asUInt
@@ -210,12 +214,16 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   // TODO: move to io
   val pipeFlow_s1, pipeFlow_s2, pipeFlow_s3 = WireInit(false.B)
   val pipeFlow = pipeFlow_s1 || pipeFlow_s2 || pipeFlow_s3
-  BoringUtils.addSink(pipeFlow_s1, "pipeFlow_s1")
-  BoringUtils.addSink(pipeFlow_s2, "pipeFlow_s2")
-  BoringUtils.addSink(pipeFlow_s3, "pipeFlow_s3")
-  dontTouch(pipeFlow_s1)
-  dontTouch(pipeFlow_s2)
-  dontTouch(pipeFlow_s3)
+  // BoringUtils.addSink(pipeFlow_s1, "pipeFlow_s1")
+  // BoringUtils.addSink(pipeFlow_s2, "pipeFlow_s2")
+  // BoringUtils.addSink(pipeFlow_s3, "pipeFlow_s3")
+  // dontTouch(pipeFlow_s1)
+  // dontTouch(pipeFlow_s2)
+  // dontTouch(pipeFlow_s3)
+
+  pipeFlow_s1 := io.pipeFlow_s1
+  pipeFlow_s2 := io.pipeFlow_s2
+  pipeFlow_s3 := io.pipeFlow_s3
 
   for (e <- buffer) {
     when(e.valid) {
@@ -225,12 +233,14 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
       // when mshr will_free, clear it in other reqs' waitMS and occWays
       val willFreeMask = VecInit(io.mshrStatus.map(s => s.valid && s.bits.willFree)).asUInt
       waitMSUpdate  := e.waitMS  & (~willFreeMask).asUInt
-      if(cacheParams.name == "l3") {
-        occWaysUpdate := e.occWays & (~willFreeWays(e.task)).asUInt
-      } else {
-        occWaysUpdate := e.occWays & (~willFreeWays_1(e.task)).asUInt
-        // occWaysUpdate := e.occWays & (~willFreeWays(e.task)).asUInt
-      }
+      
+      // if(cacheParams.name == "l3") {
+      occWaysUpdate := e.occWays & (~willFreeWays(e.task)).asUInt
+      // } else {
+      //   occWaysUpdate := e.occWays & (~willFreeWays_1(e.task)).asUInt
+      //   // occWaysUpdate := e.occWays & (~willFreeWays(e.task)).asUInt
+      // }
+
       // Initially,
       //    waitMP(2) = s2 blocking, wait 2 cycles
       //    waitMP(1) = s3 blocking, wait 1 cycle
@@ -238,12 +248,22 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
       //    so when waitMP(1) is 0 and waitMP(0) is 1, desired cycleCnt reached
       //    we recalculate waitMS and occWays, overriding old mask
       //    to take new allocated MSHR into account
-      // e.waitMP := e.waitMP >> 1.U
-      e.waitMP := MuxLookup(e.waitMP, e.waitMP >> pipeFlow.asUInt, Seq(
-        "b1000".U -> (e.waitMP >> pipeFlow_s1.asUInt),
-        "b0100".U -> (e.waitMP >> pipeFlow_s2.asUInt),
-        "b0010".U -> (e.waitMP >> pipeFlow_s3.asUInt),
-      ))
+       if(enableHalfFreq) {
+         // TODO:
+         // e.waitMP := MuxLookup(e.waitMP, e.waitMP >> pipeFlow.asUInt, Seq(
+         //   "b1000".U -> (e.waitMP >> pipeFlow_s1.asUInt),
+         //   "b0100".U -> (e.waitMP >> pipeFlow_s2.asUInt),
+         //   "b0010".U -> (e.waitMP >> pipeFlow_s3.asUInt),
+         // ))
+         e.waitMP := MuxLookup(e.waitMP, e.waitMP >> pipeFlow.asUInt, Seq(
+           "b1000".U -> (e.waitMP >> pipeFlow_s2.asUInt),
+           "b0100".U -> (e.waitMP >> pipeFlow_s3.asUInt),
+           "b0010".U -> (e.waitMP >> pipeFlow_s3.asUInt),
+         ))
+       } else {
+         e.waitMP := e.waitMP >> 1.U
+       }
+
       when(e.waitMP(1) === 0.U && e.waitMP(0) === 1.U) {
         waitMSUpdate  := conflictMask(e.task)
         occWaysUpdate := occWays(e.task)

@@ -150,6 +150,9 @@ class DataStorage(implicit p: Parameters) extends L3Module with DontCareInnerLog
     io.error := Cat(Cat(dataEccErrVec) & ~Cat(dataEccCorrVec)).orR
     io.rdata := toDSBlock(corrDataVec)
     // io.rdata.bits := toDSBlock(corrDataVec)
+    when(~reset.asBool) {
+      assert(RegNext(!io.error), "For now, we won't ECC error happen in DataStorage...")
+    }
   } else {
     io.error := false.B
     io.rdata := RegNextN(array.io.r.resp.data(0), sramLatency - 1)
@@ -158,5 +161,4 @@ class DataStorage(implicit p: Parameters) extends L3Module with DontCareInnerLog
 
   // io.rdata.valid := RegNextN(io.req.valid, sramLatency - 1, Some(false.B))
 
-  assert(RegNext(!io.error), "For now, we won't ECC error happen in DataStorage...")
 }

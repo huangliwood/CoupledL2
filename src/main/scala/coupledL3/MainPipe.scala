@@ -121,12 +121,20 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     val nestedwbData = Output(new DSBlock)
 
     val probeHelperWakeup = Output(new ProbeHelperWakeupInfo) // Only for NINE
+
+    val pipeFlow_s2 = Output(Bool())
+    val pipeFlow_s3 = Output(Bool())
+
+    val fromReqBufSinkA = Input(new Bundle{
+      val valid = Bool()
+      val set = UInt(setBits.W)
+    })
   })
 
   val resetFinish = RegInit(false.B)
   val resetIdx = RegInit((cacheParams.sets - 1).U)
   val resetFinishClient = RegInit(false.B)
-  val resetIdxClient = RegInit((clientWays - 1).U)
+  val resetIdxClient = RegInit((clientSets - 1).U)
   /* block reqs when reset */
   when(!resetFinish && io.metaWReq.fire) {
     resetIdx := resetIdx - 1.U
@@ -183,7 +191,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   val willAccessClientDirMeta = Wire(Bool())
   val willAccessClientDirTag = Wire(Bool())
 
-  val s2_fire = task_s2.valid && s3_ready
+  val s2_fire = task_s2.fire // task_s2.valid && s3_ready
   s3_ready := !s3_full || s3_fire
   s3_valid := s3_full && (
     !(willAccessDS            && !io.toDS.req_s3.ready   ) && 
@@ -193,19 +201,16 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     !(willAccessClientDirTag  && !io.clientTagWReq.ready )
   )
   val s4_ready = true.B
-  s3_fire := s3_valid // && ( s4_ready && !req_drop_s3 || req_drop_s3)
+  s3_fire := s3_valid
   when(s2_fire) {
     s3_full := true.B 
   }.elsewhen(s3_fire) {
     s3_full := false.B
   }
   
-  // TODO: move to io
-  val pipeFlow_s2, pipeFlow_s3 = Wire(Bool())
-  pipeFlow_s2 := s2_fire
-  pipeFlow_s3 := s3_fire
-  BoringUtils.addSource(pipeFlow_s2, "pipeFlow_s2")
-  BoringUtils.addSource(pipeFlow_s3, "pipeFlow_s3")
+
+  io.pipeFlow_s2 := s2_fire
+  io.pipeFlow_s3 := s3_fire
 
 
   val task_s3 = RegInit(0.U.asTypeOf(Valid(new TaskBundle())))
@@ -595,9 +600,6 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   val metaW_s3_repl = MetaEntry()
   val metaW_s3_mshr = req_s3.meta
 
-  if(cacheParams.inclusionPolicy == "NINE") {
-    require(cacheParams.name == "l3", "Only L3 support NINE inclusion policy!")
-  }
 
 
   val clientMetaW_valid_s3_a = sinkA_req_s3 && !need_mshr_s3_a && !req_get_s3 && !req_put_s3 && (hasClientHit || !hasClientHit && !io.clientDirConflict) // get & prefetch that hit will not write meta
@@ -673,12 +675,23 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   val clientTagW_valid_s3_a = clientMetaW_valid_s3_a && !clientDirResult_s3.tagMatch
   val clientTagW_valid_s3_mshr = (mshr_grant_s3 || mshr_accessack_s3 || mshr_accessackdata_s3) && req_s3.clientTagWen
   willAccessClientDirTag := task_s3.valid && (clientTagW_valid_s3_mshr || clientTagW_valid_s3_a)
-  io.clientTagWReq.valid := willAccessClientDirTag && s3_fire
-  io.clientTagWReq.bits.apply(
-    Cat(req_s3.tag, req_s3.set),
-    Mux(clientTagW_valid_s3_mshr, req_s3.clientWay, clientDirResult_s3.way)
-  )
+  // io.clientTagWReq.valid := willAccessClientDirTag && s3_fire
+  // io.clientTagWReq.bits.apply(
+  //   Cat(req_s3.tag, req_s3.set),
+  //   Mux(clientTagW_valid_s3_mshr, req_s3.clientWay, clientDirResult_s3.way)
+  // )
 
+  io.clientTagWReq.valid := willAccessClientDirTag && s3_fire || !resetFinishClient
+  when(resetFinishClient) {
+    io.clientTagWReq.bits.apply(
+      Cat(req_s3.tag, req_s3.set),
+      Mux(clientTagW_valid_s3_mshr, req_s3.clientWay, clientDirResult_s3.way)
+    )
+  }.otherwise{
+    io.clientTagWReq.bits.set := resetIdxClient
+    io.clientTagWReq.bits.tag := 0.U
+    io.clientTagWReq.bits.way := Fill(clientWays, true.B)
+  }
 
 
   /* ======== Interact with Channels (C & D) ======== */
@@ -871,9 +884,8 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   val fromReqBufSinkA_set = WireInit(0.U.asTypeOf(task_s2.bits.set))
   val fromReqBufSinkA_blockFromS2 = fromReqBufSinkA_valid && task_s2.valid && fromReqBufSinkA_set === task_s2.bits.set
   val fromReqBufSinkA_blockFromS3 = fromReqBufSinkA_valid && task_s3.valid && fromReqBufSinkA_set === task_s3.bits.set
-  // TODO: move to io
-  BoringUtils.addSink(fromReqBufSinkA_valid, "fromReqBufSinkA_valid")
-  BoringUtils.addSink(fromReqBufSinkA_set, "fromReqBufSinkA_set")
+  fromReqBufSinkA_valid := io.fromReqBufSinkA.valid
+  fromReqBufSinkA_set := io.fromReqBufSinkA.set
 
   io.toReqArb.blockC_s1 :=
     task_s2.valid && task_s2.bits.set === io.fromReqArb.status_s1.c_set ||

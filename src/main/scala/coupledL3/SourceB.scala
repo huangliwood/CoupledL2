@@ -70,7 +70,7 @@ class SourceB(implicit p: Parameters) extends L3Module {
   //  Data Structure
   // --------------------------------------------------------------------------
   // TODO: check XSPerf whether 4 entries is enough
-  val entries = if(cacheParams.name == "l3") 8 else 4
+  val entries = 8
   val probes  = RegInit(VecInit(
     Seq.fill(entries)(0.U.asTypeOf(new ProbeEntry))
   ))

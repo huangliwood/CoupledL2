@@ -74,6 +74,7 @@ class RequestArb(implicit p: Parameters) extends L3Module {
     })
 
     val mshrTaskInfo = Output(new MSHRTaskInfo)
+    val pipeFlow_s1 = Output(Bool())
   })
 
   // --------------------------------------------------------------------------
@@ -217,7 +218,7 @@ class RequestArb(implicit p: Parameters) extends L3Module {
   val dirReady = io.dirRead_s1.ready && io.clientDirRead_s1.ready
   s1_valid := mshrTask_s1.valid || chnlTask_s1.valid && dirReady
   s1_ready := !s1_full || s1_fire
-  s1_fire := s1_valid && s2_ready
+  s1_fire := s1_valid && s2_ready 
 
   when(s0_fire) {
     s1_full := true.B
@@ -264,10 +265,7 @@ class RequestArb(implicit p: Parameters) extends L3Module {
   io.mshrTaskInfo.valid := s2_fire && task_s2.valid && task_s2.bits.mshrTask
   io.mshrTaskInfo.mshrId := task_s2.bits.mshrId
 
-  // TODO: move to io
-  val pipeFlow_s1 = Wire(Bool())
-  pipeFlow_s1 := s1_fire
-  BoringUtils.addSource(pipeFlow_s1, "pipeFlow_s1")
+  io.pipeFlow_s1 := s1_fire
 
   // MSHR task
   val mshrTask_s2 = task_s2.valid && task_s2.bits.mshrTask
@@ -317,12 +315,6 @@ class RequestArb(implicit p: Parameters) extends L3Module {
 
   dontTouch(io)
 
-  // TODO: move to io
-  val fromReqBufSinkA_valid = io.sinkA.valid
-  val fromReqBufSinkA_set = io.sinkA.bits.set
-  BoringUtils.addSource(fromReqBufSinkA_valid, "fromReqBufSinkA_valid")
-  BoringUtils.addSource(fromReqBufSinkA_set, "fromReqBufSinkA_set")
-  
 
   // --------------------------------------------------------------------------
   //  Performance counters 

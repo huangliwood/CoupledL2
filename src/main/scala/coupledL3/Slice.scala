@@ -71,7 +71,9 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   a_reqBuf.io.mshrStatus := mshrCtl.io.toReqBuf
   a_reqBuf.io.mainPipeBlock := mainPipe.io.toReqBuf
   a_reqBuf.io.sinkEntrance := reqArb.io.sinkEntrance
-
+  a_reqBuf.io.pipeFlow_s1 := reqArb.io.pipeFlow_s1
+  a_reqBuf.io.pipeFlow_s2 := mainPipe.io.pipeFlow_s2
+  a_reqBuf.io.pipeFlow_s3 := mainPipe.io.pipeFlow_s3
 
   reqArb.io.sinkA <> a_reqBuf.io.out
   reqArb.io.ATag := a_reqBuf.io.ATag
@@ -125,6 +127,9 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   mainPipe.io.putBufResp <> sinkA.io.pbResp
   mainPipe.io.clientDirConflict := probeHelper.io.dirConflict
   mainPipe.io.clientDirResp_s3 <> clientDirectory.io.resp
+  mainPipe.io.fromReqBufSinkA.valid := a_reqBuf.io.out.valid
+  mainPipe.io.fromReqBufSinkA.set := a_reqBuf.io.out.bits.set
+  
 
 
   sinkA.io.fromMainPipe.putReqGood_s3 := mainPipe.io.toSinkA.putReqGood_s3
@@ -222,9 +227,7 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
     dirRespBuffer.io.in.dirResp := directory.io.resp
     dirRespBuffer.io.in.clientDirResp := clientDirectory.io.resp
     dirRespBuffer.io.in.clientDirConflict := probeHelper.io.dirConflict
-    val pipeFlow_s3 = WireInit(false.B)
-    BoringUtils.addSink(pipeFlow_s3, "pipeFlow_s3") // TODO: move to io
-    dirRespBuffer.io.in.accept := pipeFlow_s3
+    dirRespBuffer.io.in.accept := mainPipe.io.pipeFlow_s3
     dontTouch(dirRespBuffer.io.out)
 
     mainPipe.io.dirResp_s3 <> Mux(dirRespValid, directory.io.resp, dirRespBuffer.io.out.dirResp)

@@ -187,21 +187,29 @@ class CoupledL3(implicit p: Parameters) extends LazyModule with HasCoupledL3Para
         supports = TLSlaveToMasterTransferSizes(
           probe = xfer
         ),
-        sourceId = if(cacheParams.name == "l3"){
+        sourceId = {
           println(s"[Diplomacy stage] ${cacheParams.name} client num: ${m.masters.length}")
           println(s"[Diplomacy stage] ${cacheParams.name} client sourceId:")
           m.masters.zipWithIndex.foreach{case(m, i) => println(s"[Diplomacy stage] \t[${i}]${m.name} => start: ${m.sourceId.start} end: ${m.sourceId.end}")}
           val idEnd = idsAll
           println(s"[Diplomacy stage] ${cacheParams.name} sourceId idRange(0, ${idEnd})\n")
           IdRange(0, idEnd)
-        } else {
-          println(s"[Diplomacy stage] ${cacheParams.name} client num: ${m.masters.length}")
-          println(s"[Diplomacy stage] ${cacheParams.name} client sourceId:")
-          m.masters.zipWithIndex.foreach{case(m, i) => println(s"[Diplomacy stage] \t[${i}]${m.name} => start: ${m.sourceId.start} end: ${m.sourceId.end}")}
-          val idEnd = 64 // TODO：Parameterize
-          println(s"[Diplomacy stage] ${cacheParams.name} sourceId idRange(0, ${idEnd})\n")
-          IdRange(0, idEnd)
         }
+        // if(cacheParams.name == "l3"){
+        //   println(s"[Diplomacy stage] ${cacheParams.name} client num: ${m.masters.length}")
+        //   println(s"[Diplomacy stage] ${cacheParams.name} client sourceId:")
+        //   m.masters.zipWithIndex.foreach{case(m, i) => println(s"[Diplomacy stage] \t[${i}]${m.name} => start: ${m.sourceId.start} end: ${m.sourceId.end}")}
+        //   val idEnd = idsAll
+        //   println(s"[Diplomacy stage] ${cacheParams.name} sourceId idRange(0, ${idEnd})\n")
+        //   IdRange(0, idEnd)
+        // } else {
+        //   println(s"[Diplomacy stage] ${cacheParams.name} client num: ${m.masters.length}")
+        //   println(s"[Diplomacy stage] ${cacheParams.name} client sourceId:")
+        //   m.masters.zipWithIndex.foreach{case(m, i) => println(s"[Diplomacy stage] \t[${i}]${m.name} => start: ${m.sourceId.start} end: ${m.sourceId.end}")}
+        //   val idEnd = 64 // TODO：Parameterize
+        //   println(s"[Diplomacy stage] ${cacheParams.name} sourceId idRange(0, ${idEnd})\n")
+        //   IdRange(0, idEnd)
+        // }
       )
     ),
     channelBytes = cacheParams.channelBytes,
@@ -282,31 +290,6 @@ class CoupledL3(implicit p: Parameters) extends LazyModule with HasCoupledL3Para
       }
     }
 
-    // connection between prefetcher and the slices
-    val pftParams: Parameters = p.alterPartial {
-      case EdgeInKey => node.in.head._2
-      case EdgeOutKey => node.out.head._2
-      case BankBitsKey => bankBits
-    }
-    val prefetcher = prefetchOpt.map(_ => Module(new Prefetcher()(pftParams)))
-    val prefetchTrains = prefetchOpt.map(_ => Wire(Vec(banks, DecoupledIO(new PrefetchTrain()(pftParams)))))
-    val prefetchResps = prefetchOpt.map(_ => Wire(Vec(banks, DecoupledIO(new PrefetchResp()(pftParams)))))
-    val prefetchReqsReady = WireInit(VecInit(Seq.fill(banks)(false.B)))
-    prefetchOpt.foreach {
-      _ =>
-        fastArb(prefetchTrains.get, prefetcher.get.io.train, Some("prefetch_train"))
-        prefetcher.get.io.req.ready := Cat(prefetchReqsReady).orR
-        fastArb(prefetchResps.get, prefetcher.get.io.resp, Some("prefetch_resp"))
-    }
-    pf_recv_node match {
-      case Some(x) =>
-        prefetcher.get.io.recv_addr.valid := x.in.head._1.addr_valid
-        prefetcher.get.io.recv_addr.bits := x.in.head._1.addr
-        prefetcher.get.io_l2_pf_en := x.in.head._1.l2_pf_en
-      case None =>
-        prefetcher.foreach(_.io.recv_addr := DontCare)
-        prefetcher.foreach(_.io_l2_pf_en := DontCare)
-    }
 
     def restoreAddress(x: UInt, idx: Int) = {
       restoreAddressUInt(x, idx.U)

@@ -88,8 +88,11 @@ case class L3Param
   replacement: String = "plru",
   mshrs: Int = 16,
   enableClockGate: Boolean = true,
-  dataEccCode: Option[String] = Some("secded"), // Option: "none", "identity", "parity", "sec", "secded"
-  tagEccCode: Option[String] = Some("secded"),
+  // dataEccCode: Option[String] = Some("secded"), // Option: "none", "identity", "parity", "sec", "secded"
+  // tagEccCode: Option[String] = Some("secded"),
+  dataEccCode: Option[String] = None, // Option: "none", "identity", "parity", "sec", "secded"
+  tagEccCode: Option[String] = None,
+  
   inclusionPolicy: String = "NINE", // inclusive, NINE(Non-inclusive Non-exclusive)
   releaseData: Int = 3,
   /* 0 for dirty alone
@@ -99,7 +102,7 @@ case class L3Param
    */
 
   enableDebug: Boolean = true,
-  enableHalfFreq: Boolean = true,
+  enableHalfFreq: Boolean = false,
 
   // Client (these are set in Configs.scala in XiangShan)
   echoField: Seq[BundleFieldBase] = Nil,
@@ -107,7 +110,8 @@ case class L3Param
   respKey: Seq[BundleKeyBase] = Nil,
   // Manager
   // reqKey: Seq[BundleKeyBase] = Seq(AliasKey, PrefetchKey, ReqSourceKey),
-  reqKey: Seq[BundleKeyBase] = Seq(AliasKey, ReqSourceKey),
+  // reqKey: Seq[BundleKeyBase] = Seq(AliasKey, ReqSourceKey),
+  reqKey: Seq[BundleKeyBase] = Seq(AliasKey),
   respField: Seq[BundleFieldBase] = Nil,
 
   innerBuf: TLBufferParams = TLBufferParams(),

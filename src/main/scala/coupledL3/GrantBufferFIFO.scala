@@ -68,6 +68,7 @@ class GrantBufferFIFO(implicit p: Parameters) extends BaseGrantBuffer with HasCi
   // sourceIdAll (= L1 Ids) entries
   // Caution: blocks choose an empty entry to insert, which has #mshrsAll entries
   // while inflight_grant use sourceId as index, which has #sourceIdAll entries
+  println(s"sourceIdAll: ${sourceIdAll}")
   val inflight_grant = RegInit(VecInit(Seq.fill(sourceIdAll){
     0.U.asTypeOf(Valid(new InflightGrantEntry))
   }))
