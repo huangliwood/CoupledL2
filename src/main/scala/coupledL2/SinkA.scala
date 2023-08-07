@@ -96,6 +96,7 @@ class SinkA(implicit p: Parameters) extends L2Module {
     task.dsWen := false.B
     task.wayMask := 0.U(cacheParams.ways.W)
     task.reqSource := a.user.lift(utility.ReqSourceKey).getOrElse(MemReqSource.NoWhere.id.U)
+    task.reqSource := DontCare
     task
   }
   def fromPrefetchReqtoTaskBundle(req: PrefetchReq): TaskBundle = {
