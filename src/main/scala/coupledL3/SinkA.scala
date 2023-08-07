@@ -43,7 +43,7 @@ class SinkA(implicit p: Parameters) extends L3Module {
     })
   })
 
-  val putBuffer = Reg(Vec(mshrsAll, Vec(beatSize, new PutBufferEntry)))
+  val putBuffer = RegInit(VecInit(Seq.fill(mshrsAll)(0.U.asTypeOf(Vec(beatSize, new PutBufferEntry)))))
   val beatValids = RegInit(VecInit(Seq.fill(mshrsAll)(VecInit(Seq.fill(beatSize)(false.B)))))
   val valids = VecInit(beatValids.map(_.asUInt.orR())).asUInt
   
@@ -116,7 +116,7 @@ class SinkA(implicit p: Parameters) extends L3Module {
   val s0_latch = io.a.valid & s0_ready & first_1 & hasData
   val s0_fire = s0_valid & s1_ready
   val s0_req = RegEnable(fromTLAtoTaskBundle(io.a.bits), s0_latch)
-  val s0_hasData = RegEnable(hasData, s0_latch)
+  val s0_hasData = RegEnable(hasData, false.B, s0_latch)
 
   s0_ready := (s0_fire || !s0_full) && !noSpace
   when(s0_latch) { s0_full := true.B }

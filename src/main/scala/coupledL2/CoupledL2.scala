@@ -178,7 +178,11 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
     ),
     channelBytes = cacheParams.channelBytes,
     minLatency = 1,
-    echoFields = cacheParams.echoField,
+    echoFields = {
+      println(f"HHHH => ${cacheParams.echoField}")
+
+      cacheParams.echoField
+    },
     requestFields = cacheParams.reqField,
     responseKeys = cacheParams.respKey
   )

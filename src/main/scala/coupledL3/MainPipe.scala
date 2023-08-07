@@ -304,8 +304,8 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
 
   
   // Clients releted signal
-  val reqClient   = Reg(UInt((log2Up(clientBits) + 1).W)) // Which client does this req come from?
-  val reqClientOH = Reg(UInt(clientBits.W)) // getClientBitOH(task_s3.bits.sourceId) // ! This is only for channel task
+  val reqClient   = RegInit(0.U((log2Up(clientBits) + 1).W)) // Which client does this req come from?
+  val reqClientOH = RegInit(0.U(clientBits.W)) // getClientBitOH(task_s3.bits.sourceId) // ! This is only for channel task
   when(s2_fire) {
     val reqClientOHWire = getClientBitOH(task_s2.bits.sourceId)
     reqClientOH := reqClientOHWire
@@ -769,7 +769,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   // --------------------------------------------------------------------------
   val task_s4 = RegInit(0.U.asTypeOf(Valid(new TaskBundle())))
   val data_unready_s4 = RegInit(false.B)
-  val data_s4 = Reg(UInt((blockBytes * 8).W))
+  val data_s4 = RegInit(0.U((blockBytes * 8).W))
   val ren_s4 = RegInit(false.B)
   val need_write_releaseBuf_s4 = RegInit(false.B)
   val need_write_refillBuf_s4 = RegInit(false.B)

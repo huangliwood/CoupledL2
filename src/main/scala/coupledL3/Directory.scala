@@ -121,6 +121,7 @@ class Directory(implicit p: Parameters) extends L3Module with DontCareInnerLogic
 
   val tagArray  = Module(new BankedSRAM(UInt(tagBits.W), sets, ways, banks, singlePort = true, enableClockGate = enableClockGate))
   val metaArray = Module(new BankedSRAM(new MetaEntry, sets, ways, banks, singlePort = true, enableClockGate = enableClockGate))
+  val metaValidArray = RegInit(VecInit.tabulate(sets, ways)((_, _) => false.B))
   val tagEccArray = if(tagEccBits > 0) Some(Module(new BankedSRAM(UInt(tagEccBits.W), sets, ways, banks, singlePort = true, enableClockGate = false))) else None
   val tagRead = Wire(Vec(ways, UInt(tagBits.W)))
   val metaRead = Wire(Vec(ways, new MetaEntry()))
@@ -280,33 +281,42 @@ class Directory(implicit p: Parameters) extends L3Module with DontCareInnerLogic
   val tagAll_s3 = RegEnable(tagRead, 0.U.asTypeOf(tagRead), reqValidReg)
   val meta_s3 = metaAll_s3(way_s3)
   val tag_s3 = tagAll_s3(way_s3)
-  val set_s3 = RegEnable(reqReg.set, reqValidReg)
-  val replacerInfo_s3 = RegEnable(reqReg.replacerInfo, reqValidReg)
-  val err_s3 = RegEnable(err_s2, reqValidReg)
+  val set_s3 = RegEnable(reqReg.set, 0.U, reqValidReg)
+  val replacerInfo_s3 = RegEnable(reqReg.replacerInfo, 0.U.asTypeOf(reqReg.replacerInfo), reqValidReg)
+  val err_s3 = RegEnable(err_s2, 0.U.asTypeOf(err_s2), reqValidReg)
 
-  io.resp.hit   := hit_s3
-  io.resp.way   := way_s3
-  io.resp.meta  := meta_s3
-  io.resp.tag   := tag_s3
-  io.resp.set   := set_s3
-  // io.resp.error := false.B  // depends on ECC
-  if (tagEccBits > 0) {
-    io.resp.error := io.resp.hit && err_s3(way_s3)
+  when(metaValidArray(set_s3)(way_s3)) {
+    io.resp.hit   := hit_s3
+    io.resp.way   := way_s3
+    io.resp.meta  := meta_s3
+    io.resp.tag   := tag_s3
+    io.resp.set   := set_s3
+    // io.resp.error := false.B  // depends on ECC
+    if (tagEccBits > 0) {
+      io.resp.error := io.resp.hit && err_s3(way_s3)
 
-    when(~reset.asBool) {
-      assert(RegNext(!io.resp.error), "For now, we won't ECC error happen in Directory...")
+      when(~reset.asBool) {
+        assert(RegNext(!io.resp.error), "For now, we won't ECC error happen in Directory...")
+      }
+
+    } else {
+      io.resp.error := false.B
     }
-
-  } else {
-    io.resp.error := false.B
+    io.resp.replacerInfo := replacerInfo_s3
+  }.otherwise{
+    io.resp := DontCare
   }
-  io.resp.replacerInfo := replacerInfo_s3
 
   dontTouch(io)
   dontTouch(metaArray.io)
   dontTouch(tagArray.io)
 
   val replacerRready = if(cacheParams.replacement == "random") true.B else replacer_sram_opt.get.io.r.req.ready
+
+
+  when(io.metaWReq.fire) {
+    metaValidArray(io.metaWReq.bits.set)(OHToUInt(io.metaWReq.bits.wayOH)) := true.B
+  }
 
   if(enableHalfFreq) {
     val readFull = RegInit(false.B)

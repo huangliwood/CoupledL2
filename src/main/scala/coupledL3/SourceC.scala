@@ -116,8 +116,8 @@ class SourceC(implicit p: Parameters) extends L3Module {
     VecInit(Seq.fill(beatSize)(false.B))
   }))
   val block_valids = VecInit(beat_valids.map(_.asUInt.orR)).asUInt
-  val tasks = Reg(Vec(mshrsAll, new TaskBundle))
-  val datas = Reg(Vec(mshrsAll, new DSBlock))
+  val tasks = RegInit(VecInit(Seq.fill(mshrsAll)(0.U.asTypeOf(new TaskBundle))))
+  val datas = RegInit(VecInit(Seq.fill(mshrsAll)(0.U.asTypeOf(new DSBlock))))
   val full = block_valids.andR
   val selectOH = ParallelPriorityMux(~block_valids, (0 until mshrsAll).map(i => (1 << i).U))
 

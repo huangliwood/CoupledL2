@@ -107,8 +107,8 @@ class MSHR(implicit p: Parameters) extends L3Module {
   // --------------------------------------------------------------------------
   val status_reg = RegInit(0.U.asTypeOf(Valid(new MSHRStatus())))
   val req        = status_reg.bits
-  val reqClient = Reg(UInt((log2Up(clientBits) + 1).W)) // Which client does this req come from?
-  val reqClientOH = Reg(UInt(clientBits.W)) 
+  val reqClient   = RegInit(0.U((log2Up(clientBits) + 1).W)) // Which client does this req come from?
+  val reqClientOH = RegInit(0.U(clientBits.W))
   when(io.alloc.fire) {
     val regClientOHWire = getClientBitOH(io.alloc.bits.task.sourceId)
     reqClientOH := regClientOHWire
