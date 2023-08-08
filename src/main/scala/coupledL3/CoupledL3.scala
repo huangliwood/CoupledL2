@@ -88,8 +88,9 @@ trait HasCoupledL3Parameters {
   lazy val sourceIdAll = edgeIn.master.masters.last.sourceId.end
 
   val mshrsAll = cacheParams.mshrs
-  val idsAll = 256// ids of L3 //TODO: Paramterize like this: max(mshrsAll * 2, sourceIdAll * 2)
-  val mshrBits = log2Up(idsAll)
+  val idsAll = 1024 // ids of L3 //TODO: Paramterize like this: max(mshrsAll * 2, sourceIdAll * 2)
+  // lazy val idsAll = sourceIdAll + mshrsAll
+  lazy val mshrBits = log2Up(idsAll)
   // id of 0XXXX refers to mshrId
   // id of 1XXXX refers to reqs that do not enter mshr
   // require(isPow2(idsAll))

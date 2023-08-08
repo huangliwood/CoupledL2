@@ -348,7 +348,8 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   sink_resp_s3.bits.mshrId := Mux(
                                   mainpipe_release, 
                                   io.fromMSHRCtl.mshr_alloc_ptr, // for NINE, mainpipe release will alloc a MSHR
-                                  (1 << (mshrBits - 1)).U + sink_resp_s3.bits.sourceId // extra id for reqs that do not enter mshr
+                                  mshrsAll.U + sink_resp_s3.bits.sourceId // extra id for reqs that do not enter mshr
+                                  // (1 << (mshrBits - 1)).U + sink_resp_s3.bits.sourceId // extra id for reqs that do not enter mshr
                                 )
     
 
@@ -892,7 +893,8 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     (stage3IsBlocked || willAllocMSHR) && task_s3.bits.set === io.fromReqArb.status_s1.c_set
   io.toReqArb.blockB_s1 :=
     task_s2.valid && pipelineBlock('b', task_s2.bits, allTask = true) ||
-    task_s3.valid && pipelineBlock('b', task_s3.bits)                 ||
+    task_s3.valid && pipelineBlock('b', task_s3.bits, allTask = true) || // TODO: tag match ?
+    // task_s3.valid && pipelineBlock('b', task_s3.bits)                 ||
     task_s4.valid && pipelineBlock('b', task_s4.bits, tag = true)     ||
     task_s5.valid && pipelineBlock('b', task_s5.bits, tag = true)
   io.toReqArb.blockA_s1 := io.toReqBuf(0) || io.toReqBuf(1) || fromReqBufSinkA_blockFromS2 || fromReqBufSinkA_blockFromS3
