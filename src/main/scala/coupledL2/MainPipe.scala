@@ -422,7 +422,7 @@ class MainPipe(implicit p: Parameters) extends L2Module {
     case Some(evict) =>
       evict.bits.tag := ms_task.tag
       evict.bits.set := ms_task.set
-      evict.valid := !a_need_replacement
+      evict.valid := a_need_replacement
     case None => 
   }
 
