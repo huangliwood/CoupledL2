@@ -51,7 +51,7 @@ class MSHRBuffer(wPorts: Int = 1)(implicit p: Parameters) extends L2Module {
 
   val buffer = Seq.fill(mshrsAll) {
     Seq.fill(beatSize) {
-      Module(new SRAMTemplate(new DSBeat(), set = 1, way = 1, singlePort = true, hasMbist = false))
+      Module(new SRAMTemplate(new DSBeat(), set = 1, way = 1, singlePort = true, hasMbist = false, hasClkGate = false))
     }
   }
   val valids = RegInit(VecInit(Seq.fill(mshrsAll) {
