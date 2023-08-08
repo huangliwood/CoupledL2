@@ -84,7 +84,8 @@ trait HasCoupledL3Parameters {
   lazy val clientBits = edgeIn.client.clients.count(_.supports.probe)
   lazy val sourceIdBits = edgeIn.bundle.sourceBits // ids of L1
   lazy val msgSizeBits = edgeIn.bundle.sizeBits
-  lazy val sourceIdAll = 1 << sourceIdBits
+//  lazy val sourceIdAll = 1 << sourceIdBits
+  lazy val sourceIdAll = edgeIn.master.masters.last.sourceId.end
 
   val mshrsAll = cacheParams.mshrs
   val idsAll = 256// ids of L3 //TODO: Paramterize like this: max(mshrsAll * 2, sourceIdAll * 2)
@@ -191,25 +192,11 @@ class CoupledL3(implicit p: Parameters) extends LazyModule with HasCoupledL3Para
           println(s"[Diplomacy stage] ${cacheParams.name} client num: ${m.masters.length}")
           println(s"[Diplomacy stage] ${cacheParams.name} client sourceId:")
           m.masters.zipWithIndex.foreach{case(m, i) => println(s"[Diplomacy stage] \t[${i}]${m.name} => start: ${m.sourceId.start} end: ${m.sourceId.end}")}
-          val idEnd = idsAll
+          // val idEnd = idsAll
+          val idEnd = m.masters.last.sourceId.end
           println(s"[Diplomacy stage] ${cacheParams.name} sourceId idRange(0, ${idEnd})\n")
           IdRange(0, idEnd)
         }
-        // if(cacheParams.name == "l3"){
-        //   println(s"[Diplomacy stage] ${cacheParams.name} client num: ${m.masters.length}")
-        //   println(s"[Diplomacy stage] ${cacheParams.name} client sourceId:")
-        //   m.masters.zipWithIndex.foreach{case(m, i) => println(s"[Diplomacy stage] \t[${i}]${m.name} => start: ${m.sourceId.start} end: ${m.sourceId.end}")}
-        //   val idEnd = idsAll
-        //   println(s"[Diplomacy stage] ${cacheParams.name} sourceId idRange(0, ${idEnd})\n")
-        //   IdRange(0, idEnd)
-        // } else {
-        //   println(s"[Diplomacy stage] ${cacheParams.name} client num: ${m.masters.length}")
-        //   println(s"[Diplomacy stage] ${cacheParams.name} client sourceId:")
-        //   m.masters.zipWithIndex.foreach{case(m, i) => println(s"[Diplomacy stage] \t[${i}]${m.name} => start: ${m.sourceId.start} end: ${m.sourceId.end}")}
-        //   val idEnd = 64 // TODO：Parameterize
-        //   println(s"[Diplomacy stage] ${cacheParams.name} sourceId idRange(0, ${idEnd})\n")
-        //   IdRange(0, idEnd)
-        // }
       )
     ),
     channelBytes = cacheParams.channelBytes,
