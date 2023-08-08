@@ -2,6 +2,8 @@ package coupledL2.utils
 
 import chisel3._
 import chisel3.util._
+import xs.utils.sram.SRAMTemplate
+
 
 class SRAMWrapper[T <: Data]
 (
@@ -26,7 +28,7 @@ class SRAMWrapper[T <: Data]
     val ren = if(n == 1) true.B else i.U === r_sel
     val wen = if(n == 1) true.B else i.U === w_sel
     val sram = Module(new SRAMTemplate[T](
-      gen, innerSet, 1, singlePort = true, clk_div_by_2 = clk_div_by_2
+      gen, innerSet, 1, singlePort = true, clk_div_by_2 = clk_div_by_2, hasMbist = false
     ))
     sram.io.r.req.valid := io.r.req.valid && ren
     sram.io.r.req.bits.apply(r_setIdx)

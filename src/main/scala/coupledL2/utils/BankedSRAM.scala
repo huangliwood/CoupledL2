@@ -2,6 +2,8 @@ package coupledL2.utils
 
 import chisel3._
 import chisel3.util._
+import xs.utils.sram.SRAMTemplate
+
 
 // divide SRAM into n banks
 // use lower-bits of setIdx to select bank
@@ -33,7 +35,8 @@ class BankedSRAM[T <: Data]
       gen, innerSet, ways,
       shouldReset = shouldReset, holdRead = holdRead,
       singlePort = true, bypassWrite = bypassWrite,
-      clk_div_by_2 = clk_div_by_2
+      clk_div_by_2 = clk_div_by_2,
+      hasMbist = false
     ))
     sram.io.r.req.valid := io.r.req.valid && ren
     sram.io.r.req.bits.apply(r_setIdx)
