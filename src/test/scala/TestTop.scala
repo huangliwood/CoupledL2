@@ -567,24 +567,24 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
   //     }
   // }
   // println(f"pf_l3recv_node connecting to l3pf_RecvXbar out")
-  val sppHasCrossLevelRefillOpt = p(L2ParamKey).sppMultiLevelRefill
-  println(f"SPP cross level refill: ${sppHasCrossLevelRefillOpt} ")
-  sppHasCrossLevelRefillOpt match{
-    case Some(x) =>
-      val l3pf_RecvXbar = LazyModule(new PrefetchReceiverXbar(NumCores))
-      l2List.zipWithIndex.foreach { 
-        case (l2, i) =>
-          l2.spp_send_node match {
-            case Some(l2Send) =>
-              l3pf_RecvXbar.inNode(i) := l2Send
-              println(f"spp_send_node${i} connecting to l3pf_RecvXbar")
-            case None =>
-        }
-      }
-      println(f"pf_l3recv_node connecting to l3pf_RecvXbar out")
-      l3.pf_l3recv_node.map(l3_recv =>  l3_recv:= l3pf_RecvXbar.outNode.head)
-    case None =>
-  }
+  // val sppHasCrossLevelRefillOpt = p(L2ParamKey).sppMultiLevelRefill
+  // println(f"SPP cross level refill: ${sppHasCrossLevelRefillOpt} ")
+  // sppHasCrossLevelRefillOpt match{
+  //   case Some(x) =>
+  //     val l3pf_RecvXbar = LazyModule(new PrefetchReceiverXbar(NumCores))
+  //     l2List.zipWithIndex.foreach { 
+  //       case (l2, i) =>
+  //         l2.spp_send_node match {
+  //           case Some(l2Send) =>
+  //             l3pf_RecvXbar.inNode(i) := l2Send
+  //             println(f"spp_send_node${i} connecting to l3pf_RecvXbar")
+  //           case None =>
+  //       }
+  //     }
+  //     println(f"pf_l3recv_node connecting to l3pf_RecvXbar out")
+  //     l3.pf_l3recv_node.map(l3_recv =>  l3_recv:= l3pf_RecvXbar.outNode.head)
+  //   case None =>
+  // }
 
   val dma_node = TLClientNode(Seq(TLMasterPortParameters.v2(
       Seq(TLMasterParameters.v1(

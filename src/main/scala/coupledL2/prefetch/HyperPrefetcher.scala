@@ -5,7 +5,6 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
 import coupledL2._
-import coupledL2.utils.SRAMTemplate
 import coupledL2.HasCoupledL2Parameters
 import coupledL2.utils.XSPerfAccumulate
 import coupledL2.utils.ReplaceableQueueV2

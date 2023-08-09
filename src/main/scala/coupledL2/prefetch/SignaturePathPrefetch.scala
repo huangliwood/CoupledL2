@@ -1,7 +1,7 @@
 // error when 000 signature occurs in pTable
 package coupledL2.prefetch
 
-import coupledL2.utils.SRAMTemplate
+import xs.utils.sram.SRAMTemplate
 import coupledL2.utils.ReplaceableQueueV2
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._

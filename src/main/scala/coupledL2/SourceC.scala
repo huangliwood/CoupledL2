@@ -23,7 +23,6 @@ import utility._
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.tilelink._
 import coupledL2.utils.XSPerfAccumulate
-import huancun.DirtyKey
 
 // // wbq receive reqs from MainPipe unconditionally, and send them out through channel C
 // // NOTICE: channel C may be unable to receive
@@ -141,7 +140,7 @@ class SourceC(implicit p: Parameters) extends L2Module {
     c.data := data
     c.corrupt := false.B
     // c.user.lift(utility.ReqSourceKey).foreach(_ := task.reqSource)
-    c.echo.lift(huancun.DirtyKey).foreach(_ := task.dirty)
+    c.echo.lift(DirtyKey).foreach(_ := task.dirty)
     c
   }
 
