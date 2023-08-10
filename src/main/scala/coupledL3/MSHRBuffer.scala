@@ -51,17 +51,9 @@ class MSHRBuffer(wPorts: Int = 1)(implicit p: Parameters) extends L3Module {
     val w = Vec(wPorts, new MSHRBufWrite)
   })
 
-  val buffer = Seq.fill(mshrsAll) {
-    Seq.fill(beatSize) {
-      Module(new SRAMTemplate(new DSBeat(), set = 1, way = 1, singlePort = true, hasMbist = false, hasClkGate = false))
-    }
-  }
-  val valids = RegInit(VecInit(Seq.fill(mshrsAll) {
-    VecInit(Seq.fill(beatSize)(false.B))
-  }))
-  val corrupts = RegInit(VecInit(Seq.fill(mshrsAll) {
-    VecInit(Seq.fill(beatSize)(false.B))
-  }))
+  val buffer = RegInit(VecInit.tabulate(mshrsAll, beatSize)((_, _) => 0.U.asTypeOf(new DSBeat())))
+  val valids = RegInit(VecInit.tabulate(mshrsAll, beatSize)((_, _) => false.B))
+  val corrupts = RegInit(VecInit.tabulate(mshrsAll, beatSize)((_, _) => false.B))
 
   io.w.foreach {
     case w =>
@@ -74,10 +66,6 @@ class MSHRBuffer(wPorts: Int = 1)(implicit p: Parameters) extends L3Module {
   }
 
   when (io.r.valid) {
-    // TODO: When the acquireperm is sent and grant is received, refillBuf does not contain data.
-    //  Therefore, refill buffer should be blocked from being read.
-
-    // assert(valids(io.r.id).asUInt.andR, "[%d] attempt to read an invalid entry", io.r.id)
     valids(io.r.id).foreach(_ := false.B)
     if(dataEccEnable) {
       corrupts.zipWithIndex.foreach{ case(beats, i) => 
@@ -98,17 +86,11 @@ class MSHRBuffer(wPorts: Int = 1)(implicit p: Parameters) extends L3Module {
       val w_beat_sel = PriorityMux(wens, io.w.map(_.beat_sel))
       val w_data = PriorityMux(wens, io.w.map(_.data))
       val w_corrupt = PriorityMux(wens, io.w.map(_.corrupt))
-      val ren = io.r.valid && io.r.id === i.U
       block.zipWithIndex.foreach {
         case (entry, j) =>
-          entry.io.w.req.valid := wens.orR && w_beat_sel(j)
-          entry.io.w.req.bits.apply(
-            data = w_data.data((j + 1) * beatBytes * 8 - 1, j * beatBytes * 8).asTypeOf(new DSBeat),
-            setIdx = 0.U,
-            waymask = 1.U
-          )
-          entry.io.r.req.valid := ren
-          entry.io.r.req.bits.apply(0.U)
+          when(wens.orR && w_beat_sel(j)) {
+            entry := w_data.data((j + 1) * beatBytes * 8 - 1, j * beatBytes * 8).asTypeOf(new DSBeat)
+          }
 
           if(dataEccEnable) corrupts(i)(j) := w_corrupt
       }
@@ -118,10 +100,8 @@ class MSHRBuffer(wPorts: Int = 1)(implicit p: Parameters) extends L3Module {
   io.w.foreach(_.ready := true.B)
 
   val ridReg = RegNext(io.r.id, 0.U.asTypeOf(io.r.id))
-  io.r.data.data := VecInit(buffer.map {
-    case block => VecInit(block.map(_.io.r.resp.data.asUInt)).asUInt
-  })(ridReg)
-  
+  io.r.data.data := buffer(ridReg).asUInt
+
   if(dataEccEnable) {
     io.r.corrupt := VecInit( corrupts.map( entry => entry.reduce(_ || _) ) )(ridReg)
   } else {

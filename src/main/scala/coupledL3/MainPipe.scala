@@ -506,16 +506,15 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   dontTouch(mshr_putpartial_s3)
   dontTouch(mshr_putfull_s3)
 
-  if(cacheParams.inclusionPolicy == "NINE") {
-    // Free sink c buffer when mshr is not allcated, which means that we will not read this buf anymore.
-    // TODO: How about s2 and s3 all need to read? ==> for NINE, move this logic into stage 3
-    io.bufRead.valid := task_s3.valid && ( 
-                          sinkC_req_s3 && task_s3.bits.opcode(0) && !need_mshr_s3 || 
-                          mshr_releaseack_s3
-                        )
-    io.bufRead.bits.bufIdx := task_s3.bits.bufIdx
-    io.bufRead.bits.bufInvalid := s3_fire
-  }
+  
+  // Free sink c buffer when mshr is not allcated, which means that we will not read this buf anymore.
+  io.bufRead.valid := task_s3.valid && ( 
+                        sinkC_req_s3 && task_s3.bits.opcode(0) && !need_mshr_s3 || 
+                        mshr_releaseack_s3
+                      )
+  io.bufRead.bits.bufIdx := task_s3.bits.bufIdx
+  io.bufRead.bits.bufInvalid := s3_fire
+  
 
   willAccessDS := task_s3.valid && (ren || wen) 
   io.toDS.req_s3.valid := willAccessDS && s3_fire
@@ -535,8 +534,8 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   //    inner clients' data is needed, but whether the client will ack data is uncertain, so DS data is also needed, or
   val need_write_releaseBuf = need_probe_s3_a && dirResult_s3.hit || need_data_b && need_mshr_s3_b
 
-  // B: need_write_refillBuf when L1 AcquireBlock BtoT
-  //    L3 sends AcquirePerm to L3, so GrantData to L1 needs to read DS ahead of time and store in RefillBuffer
+  // B: need_write_refillBuf when L2 AcquireBlock BtoT
+  //    L3 sends AcquirePerm to L3, so GrantData to L2 needs to read DS ahead of time and store in RefillBuffer
   // TODO: how about AcquirePerm BtoT interaction with refill buffer?
   val need_write_refillBuf = sinkA_req_s3 && req_needT_s3 && dirResult_s3.hit && meta_s3.state === BRANCH && !req_put_s3
   val need_write_putDataBuf = sinkA_req_s3 && req_put_partial_s3 && dirResult_s3.hit
