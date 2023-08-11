@@ -24,6 +24,7 @@ import coupledL2.utils._
 import utility.ParallelPriorityMux
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.tilelink.TLMessages
+import xs.utils.sram.SRAMTemplate
 
 class MetaEntry(implicit p: Parameters) extends L2Bundle {
   val dirty = Bool()
@@ -111,7 +112,7 @@ class Directory(implicit p: Parameters) extends L2Module {
   val replacerWen = RegInit(false.B)
 
   val tagArray  = Module(new BankedSRAM(UInt(tagBits.W), sets, ways, banks, singlePort = true, enableClockGate = true))
-  val metaArray = Module(new BankedSRAM(new MetaEntry, sets, ways, banks, singlePort = true, enableClockGate = true))
+  val metaArray = Module(new SRAMTemplate(new MetaEntry, sets, ways, singlePort = true, hasClkGate = true))
   val tagRead = Wire(Vec(ways, UInt(tagBits.W)))
   val metaRead = Wire(Vec(ways, new MetaEntry()))
 

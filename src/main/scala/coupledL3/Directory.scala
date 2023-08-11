@@ -26,6 +26,8 @@ import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.tilelink.TLMessages
 import xs.utils.sram._
 import xs.utils.RegNextN
+import xs.utils.sram.SRAMTemplate
+
 
 class MetaEntry(implicit p: Parameters) extends L3Bundle {
   val dirty = Bool()
@@ -115,7 +117,7 @@ class Directory(implicit p: Parameters) extends L3Module with DontCareInnerLogic
   val replacerWen = RegInit(false.B)
 
   val tagArray  = Module(new BankedSRAM(UInt(tagBits.W), sets, ways, banks, singlePort = true, enableClockGate = enableClockGate))
-  val metaArray = Module(new BankedSRAM(new MetaEntry, sets, ways, banks, singlePort = true, enableClockGate = enableClockGate))
+  val metaArray = Module(new SRAMTemplate(new MetaEntry, sets, ways, singlePort = true, hasClkGate = enableClockGate))
   val tagRead = Wire(Vec(ways, UInt(tagBits.W)))
   val metaRead = Wire(Vec(ways, new MetaEntry()))
 
@@ -161,7 +163,7 @@ class Directory(implicit p: Parameters) extends L3Module with DontCareInnerLogic
   val repl = ReplacementPolicy.fromString(cacheParams.replacement, ways)
   val random_repl = cacheParams.replacement == "random"
   val replacer_sram_opt = if(random_repl) None else
-    Some(Module(new BankedSRAM(UInt(repl.nBits.W), sets, 1, banks, singlePort = true, shouldReset = true, enableClockGate = enableClockGate)))
+    Some(Module(new SRAMTemplate(UInt(repl.nBits.W), sets, 1, singlePort = true, shouldReset = true, hasClkGate = enableClockGate)))
 
   val repl_state = if(random_repl){
     when(io.tagWReq.fire){
