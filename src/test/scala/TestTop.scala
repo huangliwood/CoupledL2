@@ -626,7 +626,7 @@ class TestTop_fullSys_1()(implicit p: Parameters) extends LazyModule {
   val delayFactor = 0.2
   val cacheParams = p(L2ParamKey)
 
-  val nrL2 = 2
+  val nrL2 = 1 // 2
 
   def createClientNode(name: String, sources: Int) = {
     val masterNode = TLClientNode(Seq(
@@ -670,7 +670,7 @@ class TestTop_fullSys_1()(implicit p: Parameters) extends LazyModule {
       case L2ParamKey => L2Param(
         name = s"l2$i",
         ways = 8,
-        sets = 512,
+        sets = 128,
         clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
         echoField = Seq(DirtyField()),
         prefetch = Some(BOPParameters(
@@ -690,7 +690,7 @@ class TestTop_fullSys_1()(implicit p: Parameters) extends LazyModule {
     case L3ParamKey => L3Param(
       name = s"l3",
       ways = 8,
-      sets = 1024,
+      sets = 2048,
       clientCaches = Seq(CacheParameters(
         sets = 512,
         ways = 16,
