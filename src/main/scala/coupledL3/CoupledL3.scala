@@ -56,8 +56,6 @@ trait HasCoupledL3Parameters {
 
   val dataEccCode = cacheParams.dataEccCode
   val dataEccEnable = dataEccCode != None && dataEccCode != Some("none")
-  val tagEccCode = cacheParams.tagEccCode
-  val tagEccEnable = tagEccCode != None && tagEccCode != Some("none")
 
   val enableDebug = cacheParams.enableDebug
   val enableHalfFreq = cacheParams.enableHalfFreq
@@ -85,7 +83,7 @@ trait HasCoupledL3Parameters {
   lazy val sourceIdBits = edgeIn.bundle.sourceBits // ids of L1
   lazy val msgSizeBits = edgeIn.bundle.sizeBits
 //  lazy val sourceIdAll = 1 << sourceIdBits
-  lazy val sourceIdAll = edgeIn.master.masters.last.sourceId.end
+  lazy val sourceIdAll = edgeIn.master.masters.last.sourceId.end + mshrsAll
 
   val mshrsAll = cacheParams.mshrs
   val idsAll = 1024 // ids of L3 //TODO: Paramterize like this: max(mshrsAll * 2, sourceIdAll * 2)

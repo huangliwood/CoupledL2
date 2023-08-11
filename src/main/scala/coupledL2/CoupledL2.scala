@@ -52,6 +52,11 @@ trait HasCoupledL2Parameters {
   val bufBlocks = 8 // hold data that flows in MainPipe
   val bufIdxBits = log2Up(bufBlocks)
 
+  val enableClockGate = cacheParams.enableClockGate
+
+  val dataEccCode = cacheParams.dataEccCode
+  val dataEccEnable = dataEccCode != None && dataEccCode != Some("none")
+
   // 1 cycle for sram read, and latch for another cycle
   val sramLatency = 2
 
@@ -179,11 +184,7 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
     ),
     channelBytes = cacheParams.channelBytes,
     minLatency = 1,
-    echoFields = {
-      println(f"HHHH => ${cacheParams.echoField}")
-
-      cacheParams.echoField
-    },
+    echoFields = cacheParams.echoField,
     requestFields = cacheParams.reqField,
     responseKeys = cacheParams.respKey
   )

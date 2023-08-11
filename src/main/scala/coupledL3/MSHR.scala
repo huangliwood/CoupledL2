@@ -329,6 +329,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
     mp_release.dirty := meta.dirty && meta.state =/= INVALID || probeDirty
 
     mp_release.fromProbeHelper := req.fromProbeHelper
+    mp_release.clientSet := clientDirResult.set
     when(req.fromProbeHelper) { // turn probeack into release
       mp_release.meta := MetaEntry()
       mp_release.metaWen := false.B

@@ -48,18 +48,9 @@ class LookupBuffer(entries: Int = 16)(implicit p: Parameters) extends L3Module {
     val full = Output(Bool())
   })
 
-
-  val buffer = Seq.fill(entries) {
-    Seq.fill(beatSize) {
-      Module(new SRAMTemplate(new DSBeat(), set = 1, way = 1, singlePort = true, hasMbist = false, hasClkGate = false))
-    }
-  }
-  val valids = RegInit(VecInit(Seq.fill(entries) {
-    VecInit(Seq.fill(beatSize)(false.B))
-  }))
-  val corrupts = RegInit(VecInit(Seq.fill(entries) {
-    VecInit(Seq.fill(beatSize)(false.B))
-  }))
+  val buffer = RegInit(VecInit.tabulate(mshrsAll, beatSize)((_, _) => 0.U.asTypeOf(new DSBeat())))
+  val valids = RegInit(VecInit.tabulate(mshrsAll, beatSize)((_, _) => false.B))
+  val corrupts = RegInit(VecInit.tabulate(mshrsAll, beatSize)((_, _) => false.B))
 
   io.full := Cat(valids.map( e => Cat(e).andR )).andR()
 
@@ -93,22 +84,15 @@ class LookupBuffer(entries: Int = 16)(implicit p: Parameters) extends L3Module {
     case (buf, i) =>
       buf.zipWithIndex.foreach{
         case (entry, j) =>
-          entry.io.w.req.valid := io.w.valid && io.w.beat_sel(j)
-          entry.io.w.req.bits.apply(
-            data = io.w.data.data((j + 1) * beatBytes * 8 - 1, j * beatBytes * 8).asTypeOf(new DSBeat),
-            setIdx = 0.U,
-            waymask = 1.U
-          )
-          entry.io.r.req.valid := io.r.valid
-          entry.io.r.req.bits.apply(0.U)
+          when(io.w.valid && io.w.beat_sel(j)) {
+            entry := io.w.data.data((j + 1) * beatBytes * 8 - 1, j * beatBytes * 8).asTypeOf(new DSBeat)
+          }
       }
   }
 
 
   val ridReg = RegNext(io.r.id, 0.U.asTypeOf(io.r.id))
-  io.r.data.data := VecInit(buffer.map {
-    case block => VecInit(block.map(_.io.r.resp.data.asUInt)).asUInt
-  })(ridReg)
+  io.r.data.data := buffer(ridReg).asUInt
 
   if (dataEccEnable) {
     io.r.corrupt := VecInit(corrupts.map(entry => entry.reduce(_ || _)))(ridReg)

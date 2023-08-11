@@ -114,9 +114,8 @@ class ClientDirectory(implicit p: Parameters) extends L3Module with DontCareInne
   val ways = clientWays
   val banks = cacheParams.dirNBanks
 
-  val tagArray  = Module(new BankedSRAM(UInt(clientTagBits.W), sets, ways, banks, singlePort = true, enableClockGate = true))
-  val metaArray = Module(new BankedSRAM(Vec(clientBits, new ClientMetaEntry), sets, ways, banks, singlePort = true, enableClockGate = true))
-  val metaValidArray = RegInit(VecInit.tabulate(sets, ways)((_, _) => false.B))
+  val tagArray  = Module(new BankedSRAM(UInt(clientTagBits.W), sets, ways, banks, singlePort = true, enableClockGate = enableClockGate))
+  val metaArray = Module(new BankedSRAM(Vec(clientBits, new ClientMetaEntry), sets, ways, banks, singlePort = true, enableClockGate = enableClockGate))
   val tagRead = Wire(Vec(ways, UInt(clientTagBits.W)))
   val metaRead = Wire(Vec(ways, Vec(clientBits, new ClientMetaEntry)))
 
@@ -207,29 +206,23 @@ class ClientDirectory(implicit p: Parameters) extends L3Module with DontCareInne
   val set_s3 = RegEnable(set_s2, 0.U, valid_s2)
   val replacerInfo_s3 = RegEnable(req_s2.replacerInfo, 0.U.asTypeOf(req_s2.replacerInfo), valid_s2)
 
-  when(metaValidArray(set_s3)(way_s3)) { 
-    io.resp.hits.zip(meta_s3).foreach{
-      case(hit, meta) =>
-        hit := meta.state =/= INVALID && hit_s3
-    }
-    io.resp.way := way_s3
-    io.resp.metas := meta_s3
-    io.resp.tag := tag_s3 // TODO: 
-    io.resp.set := set_s3
-    io.resp.error := false.B // TODO:
-    io.resp.replacerInfo := replacerInfo_s3
-  }.otherwise{
-    io.resp := DontCare
+  io.resp.hits.zip(meta_s3).foreach{
+    case(hit, meta) =>
+      hit := meta.state =/= INVALID && hit_s3
   }
+  io.resp.way := way_s3
+  io.resp.metas := meta_s3
+  io.resp.tag := tag_s3 // TODO: 
+  io.resp.set := set_s3
+  io.resp.error := false.B // TODO:
+  io.resp.replacerInfo := replacerInfo_s3  
 
-  // io.read.ready := (!io.metaWReq.valid && !io.tagWReq.valid && !replacerWen) &&
-  //                   (tagArray.io.r.req.ready && metaArray.io.r.req.ready)
   io.read.ready := (tagArray.io.r.req.ready && metaArray.io.r.req.ready)
 
-  when(io.metaWReq.fire) {
-    metaValidArray(io.metaWReq.bits.set)(OHToUInt(io.metaWReq.bits.wayOH)) := true.B
-  }
 
+  // ---------------------------------------------------------------------------
+  //  HalfFreq blocking logic
+  // --------------------------------------------------------------------------
   if(enableHalfFreq) {
     val readFull = RegInit(false.B)
     val writeFullMeta = RegInit(false.B)

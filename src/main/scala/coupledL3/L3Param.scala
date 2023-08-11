@@ -81,6 +81,7 @@ case class L3Param
   ways: Int = 4,
   sets: Int = 128,
   dirNBanks: Int = 8,
+  dsNBanks: Int = 8,
   blockBytes: Int = 64,
   pageBytes: Int = 4096,
   channelBytes: TLChannelBeatBytes = TLChannelBeatBytes(32),
@@ -88,10 +89,7 @@ case class L3Param
   replacement: String = "plru",
   mshrs: Int = 16,
   enableClockGate: Boolean = true,
-  // dataEccCode: Option[String] = Some("secded"), // Option: "none", "identity", "parity", "sec", "secded"
-  // tagEccCode: Option[String] = Some("secded"),
-  dataEccCode: Option[String] = None, // Option: "none", "identity", "parity", "sec", "secded"
-  tagEccCode: Option[String] = None,
+  dataEccCode: Option[String] = Some("secded"), // Option: "none", "identity", "parity", "sec", "secded"
   
   inclusionPolicy: String = "NINE", // inclusive, NINE(Non-inclusive Non-exclusive)
   releaseData: Int = 3,

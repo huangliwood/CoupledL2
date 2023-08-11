@@ -25,7 +25,6 @@ import utility.ParallelPriorityMux
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.tilelink.TLMessages
 import xs.utils.sram._
-import xs.utils.Code
 import xs.utils.RegNextN
 
 class MetaEntry(implicit p: Parameters) extends L3Bundle {
@@ -115,17 +114,10 @@ class Directory(implicit p: Parameters) extends L3Module with DontCareInnerLogic
   val metaWen = io.metaWReq.valid
   val replacerWen = RegInit(false.B)
 
-  def tagCode: Code = Code.fromString(tagEccCode)
-  val tagEccBits = tagCode.width(tagBits) - tagBits
-  println(s"Tag ECC bits:$tagEccBits")
-
   val tagArray  = Module(new BankedSRAM(UInt(tagBits.W), sets, ways, banks, singlePort = true, enableClockGate = enableClockGate))
   val metaArray = Module(new BankedSRAM(new MetaEntry, sets, ways, banks, singlePort = true, enableClockGate = enableClockGate))
-  val metaValidArray = RegInit(VecInit.tabulate(sets, ways)((_, _) => false.B))
-  val tagEccArray = if(tagEccBits > 0) Some(Module(new BankedSRAM(UInt(tagEccBits.W), sets, ways, banks, singlePort = true, enableClockGate = false))) else None
   val tagRead = Wire(Vec(ways, UInt(tagBits.W)))
   val metaRead = Wire(Vec(ways, new MetaEntry()))
-  val tagEccRead = if(tagEccBits > 0) Some(WireInit(VecInit(Seq.fill(ways)(0.U(tagEccBits.W))))) else None
 
   val reqValidReg = RegNext(io.read.fire, false.B)
   val resetFinish = RegInit(false.B)
@@ -153,18 +145,6 @@ class Directory(implicit p: Parameters) extends L3Module with DontCareInnerLogic
     io.metaWReq.bits.set,
     io.metaWReq.bits.wayOH
   )
-
-  // TagEcc R/W
-  if(tagEccBits > 0) {
-    tagEccRead.get := tagEccArray.get.io.r(io.read.fire, io.read.bits.set).resp.data
-    tagEccArray.get.io.w(
-      tagWen,
-      tagCode.encode(io.tagWReq.bits.wtag).head(tagEccBits),
-      io.tagWReq.bits.set,
-      UIntToOH(io.tagWReq.bits.way)
-    )
-  }
-
   
   // Generate response signals
   /* stage 1: io.read.fire, access Tag/Meta
@@ -269,11 +249,6 @@ class Directory(implicit p: Parameters) extends L3Module with DontCareInnerLogic
 
   hit_s2 := Cat(hitVec).orR
   way_s2 := Mux(hit_s2, hitWay, finalWay)
-  if(tagEccBits > 0) {
-    err_s2 := VecInit(tagEccRead.get.zip(tagRead).map{ case(ecc, tag) => 
-                      tagCode.decode(ecc ## tag).error
-                  })
-  }
 
   val hit_s3 = RegEnable(hit_s2, false.B, reqValidReg)
   val way_s3 = RegEnable(way_s2, 0.U, reqValidReg)
@@ -285,27 +260,13 @@ class Directory(implicit p: Parameters) extends L3Module with DontCareInnerLogic
   val replacerInfo_s3 = RegEnable(reqReg.replacerInfo, 0.U.asTypeOf(reqReg.replacerInfo), reqValidReg)
   val err_s3 = RegEnable(err_s2, 0.U.asTypeOf(err_s2), reqValidReg)
 
-  when(metaValidArray(set_s3)(way_s3)) {
-    io.resp.hit   := hit_s3
-    io.resp.way   := way_s3
-    io.resp.meta  := meta_s3
-    io.resp.tag   := tag_s3
-    io.resp.set   := set_s3
-    // io.resp.error := false.B  // depends on ECC
-    if (tagEccBits > 0) {
-      io.resp.error := io.resp.hit && err_s3(way_s3)
-
-      when(~reset.asBool) {
-        assert(RegNext(!io.resp.error), "For now, we won't ECC error happen in Directory...")
-      }
-
-    } else {
-      io.resp.error := false.B
-    }
-    io.resp.replacerInfo := replacerInfo_s3
-  }.otherwise{
-    io.resp := DontCare
-  }
+  io.resp.hit   := hit_s3
+  io.resp.way   := way_s3
+  io.resp.meta  := meta_s3
+  io.resp.tag   := tag_s3
+  io.resp.set   := set_s3
+  io.resp.error := false.B
+  io.resp.replacerInfo := replacerInfo_s3
 
   dontTouch(io)
   dontTouch(metaArray.io)
@@ -313,10 +274,6 @@ class Directory(implicit p: Parameters) extends L3Module with DontCareInnerLogic
 
   val replacerRready = if(cacheParams.replacement == "random") true.B else replacer_sram_opt.get.io.r.req.ready
 
-
-  when(io.metaWReq.fire) {
-    metaValidArray(io.metaWReq.bits.set)(OHToUInt(io.metaWReq.bits.wayOH)) := true.B
-  }
 
   if(enableHalfFreq) {
     val readFull = RegInit(false.B)

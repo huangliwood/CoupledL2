@@ -26,7 +26,7 @@ import utility.RegNextN
 import chipsalliance.rocketchip.config.Parameters
 import firrtl.Utils
 import xs.utils.Decoding
-import java.awt.image.DataBuffer
+import coupledL3.utils.BankedSRAM
 
 class DSRequest(implicit p: Parameters) extends L3Bundle {
   val way = UInt(wayBits.W)
@@ -68,68 +68,49 @@ class DataStorage(implicit p: Parameters) extends L3Module with DontCareInnerLog
     io.req.ready := true.B
   }
   
-
-  // Seperate the whole block of data into several banks, each bank contains 8 bytes(64-bit).
-  // For every bank, we attach ECC protection bits.
-  require(blockBytes % 8 == 0)
-  val bankBytes = 8
-  val banks = blockBytes / bankBytes // 64 / 8 = 8
-
-  def dataCode: Code = Code.fromString(dataEccCode)
-  val dataEccBits = dataCode.width(bankBytes * 8) - bankBytes * 8
-  println(s"Data ECC bits:$dataEccBits")
-
-  val dataEccArray = if (dataEccBits > 0) {
-    Some(
-      Module(new SRAMTemplate(
-        gen = Vec(banks, UInt((dataEccBits).W)), 
-        set = blocks,
-        singlePort = true,
-        hasMbist = false,
-        hasClkGate = enableClockGate
-      ))
-    )
-  } else None
-
-
-  val array = Module(new SRAMTemplate(
-    gen = new DSBlock,
-    set = blocks,
-    way = 1,
-    singlePort = true,
-    hasMbist = false,
-    hasClkGate = enableClockGate
-  ))
-
-  array.io.r <> DontCare
-  array.io.w <> DontCare
-
+  val array  = Module(new BankedSRAM(new DSBlock, blocks, 1, cacheParams.dsNBanks, singlePort = true, enableClockGate = enableClockGate))
   val arrayIdx = Cat(io.req.bits.way, io.req.bits.set)
   val wen = io.req.valid && io.req.bits.wen
   val ren = io.req.valid && !io.req.bits.wen
+
   array.io.w.apply(wen, io.wdata, arrayIdx, 1.U)
   array.io.r.apply(ren, arrayIdx)
 
-  // io.rdata := RegNextN(array.io.r.resp.data(0), sramLatency - 1)
+
+  // Seperate the whole block of data into several banksECC, each bank contains 8 bytes(64-bit).
+  // For every bank, we attach ECC protection bits.
+  require(blockBytes % 8 == 0)
+  val bankBytes = 32
+  val banksECC = blockBytes / bankBytes // 64 / 32 = 2
+
+  def dataCode: Code = Code.fromString(dataEccCode)
+  val dataEccBits = dataCode.width(bankBytes * 8) - bankBytes * 8
+  println(s"Data ECC bits:$dataEccBits Banks: $banksECC Blocks: $blocks")
+
+  val dataEccArray = if (dataEccBits > 0) {
+    Some(
+      Module(new BankedSRAM(Vec(banksECC, UInt((dataEccBits).W)), blocks, 1, cacheParams.dsNBanks, singlePort = true, hasMbist = false, enableClockGate = enableClockGate))
+    )
+  } else None
 
   if (dataEccBits > 0) {
-    val bankWrDataVec = io.wdata.asTypeOf(Vec(banks, UInt((bankBytes*8).W)))
+    val bankWrDataVec = io.wdata.asTypeOf(Vec(banksECC, UInt((bankBytes*8).W)))
     
-    val dataEccRdData = Wire(Vec(banks, UInt((dataEccBits).W)))
-    val dataEccWrData = Cat( (0 until banks).map{ bank => 
+    val dataEccRdData = Wire(Vec(banksECC, UInt((dataEccBits).W)))
+    val dataEccWrData = Cat( (0 until banksECC).map{ bank => 
                                 val t = dataCode.encode(bankWrDataVec(bank))
                                 require(t.asUInt.getWidth == (dataEccBits + bankBytes * 8))
                                 t.head(dataEccBits)
                               }.reverse
-                            ).asTypeOf( Vec(banks, UInt((dataEccBits).W)) )
+                            ).asTypeOf( Vec(banksECC, UInt((dataEccBits).W)) )
     dataEccArray.get.io.w.apply(wen, dataEccWrData, arrayIdx, 1.U)
     dataEccArray.get.io.r.apply(ren, arrayIdx)
 
     // We have only one way
-    dataEccRdData := RegNextN(dataEccArray.get.io.r.resp.data(0), sramLatency - 1).asTypeOf(Vec(banks, UInt((dataEccBits).W)))
+    dataEccRdData := RegNextN(dataEccArray.get.io.r.resp.data(0), sramLatency - 1).asTypeOf(Vec(banksECC, UInt((dataEccBits).W)))
 
     val rdDataRaw = RegNextN(array.io.r.resp.data(0), sramLatency - 1) // DSBlock
-    val rdData = rdDataRaw.data.asTypeOf(Vec(banks, UInt((bankBytes*8).W)))
+    val rdData = rdDataRaw.data.asTypeOf(Vec(banksECC, UInt((bankBytes*8).W)))
     val dataEccErrVec = dataEccRdData.zip(rdData).map{ case(e, d) => 
                             dataCode.decode(e ## d).error
                         }
@@ -149,16 +130,11 @@ class DataStorage(implicit p: Parameters) extends L3Module with DontCareInnerLog
 
     io.error := Cat(Cat(dataEccErrVec) & ~Cat(dataEccCorrVec)).orR
     io.rdata := toDSBlock(corrDataVec)
-    // io.rdata.bits := toDSBlock(corrDataVec)
     when(~reset.asBool) {
       assert(RegNext(!io.error), "For now, we won't ECC error happen in DataStorage...")
     }
   } else {
     io.error := false.B
     io.rdata := RegNextN(array.io.r.resp.data(0), sramLatency - 1)
-    // io.rdata.bits := RegNextN(array.io.r.resp.data(0), sramLatency - 1)
   }
-
-  // io.rdata.valid := RegNextN(io.req.valid, sramLatency - 1, Some(false.B))
-
 }
