@@ -580,7 +580,7 @@ class TestTop_fullSys_1()(implicit p: Parameters) extends LazyModule {
   val delayFactor = 0.2
   val cacheParams = p(L2ParamKey)
 
-  val nrL2 = 2
+  val nrL2 = 1 // 2
 
   def createClientNode(name: String, sources: Int) = {
     val masterNode = TLClientNode(Seq(
