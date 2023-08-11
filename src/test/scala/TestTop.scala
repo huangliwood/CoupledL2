@@ -624,7 +624,7 @@ class TestTop_fullSys_1()(implicit p: Parameters) extends LazyModule {
       case L2ParamKey => L2Param(
         name = s"l2$i",
         ways = 8,
-        sets = 512,
+        sets = 128,
         clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
         echoField = Seq(DirtyField()),
         prefetch = Some(BOPParameters(
@@ -644,7 +644,7 @@ class TestTop_fullSys_1()(implicit p: Parameters) extends LazyModule {
     case L3ParamKey => L3Param(
       name = s"l3",
       ways = 8,
-      sets = 1024,
+      sets = 2048,
       clientCaches = Seq(CacheParameters(
         sets = 512,
         ways = 16,
