@@ -602,8 +602,8 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
 
 
 
-  val clientMetaW_valid_s3_a = sinkA_req_s3 && !need_mshr_s3_a && !req_get_s3 && !req_put_s3 && (hasClientHit || !hasClientHit && !io.clientDirConflict) // get & prefetch that hit will not write meta
-  val clientMetaW_valid_s3_c = sinkC_req_s3 && !need_mshr_s3_c && (hasClientHit || !hasClientHit && !io.clientDirConflict)
+  val clientMetaW_valid_s3_a = sinkA_req_s3 && !need_mshr_s3_a && !req_get_s3 && !req_put_s3 && (hasClientHit || !hasClientHit && !clientDirConflict_s3) // get & prefetch that hit will not write meta
+  val clientMetaW_valid_s3_c = sinkC_req_s3 && !need_mshr_s3_c && (hasClientHit || !hasClientHit && !clientDirConflict_s3)
   val clientMetaW_valid_s3_mshr = mshr_req_s3 && req_s3.clientMetaWen
 
   val clientMetaW_s3_a    = WireInit(VecInit(Seq.fill(clientBits)(0.U.asTypeOf(new noninclusive.ClientMetaEntry))))

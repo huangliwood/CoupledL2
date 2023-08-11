@@ -121,14 +121,18 @@ class SourceC(implicit p: Parameters) extends L3Module {
   val full = block_valids.andR
   val selectOH = ParallelPriorityMux(~block_valids, (0 until mshrsAll).map(i => (1 << i).U))
 
-  selectOH.asBools.zipWithIndex.foreach {
-    case (sel, i) =>
-      when (sel && io.in.fire()) {
-        beat_valids(i).foreach(_ := true.B)
-        tasks(i) := io.in.bits.task
-        datas(i) := io.in.bits.data
-      }
+  when(io.in.fire) {
+    selectOH.asBools.zipWithIndex.foreach {
+      case (sel, i) =>
+        when (sel) {
+          beat_valids(i).foreach(_ := true.B)
+          tasks(i) := io.in.bits.task
+          datas(i) := io.in.bits.data
+        }
+    }
   }
+
+
 
   def toTLBundleC(task: TaskBundle, data: UInt = 0.U) = {
     val c = Wire(new TLBundleC(edgeOut.bundle))

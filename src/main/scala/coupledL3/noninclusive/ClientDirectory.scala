@@ -220,6 +220,9 @@ class ClientDirectory(implicit p: Parameters) extends L3Module with DontCareInne
   io.read.ready := (tagArray.io.r.req.ready && metaArray.io.r.req.ready)
 
 
+  // ---------------------------------------------------------------------------
+  //  HalfFreq blocking logic
+  // --------------------------------------------------------------------------
   if(enableHalfFreq) {
     val readFull = RegInit(false.B)
     val writeFullMeta = RegInit(false.B)
