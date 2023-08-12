@@ -79,8 +79,8 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     })
 
     /* get ReleaseBuffer and RefillBuffer read result */
-    val refillBufResp_s3 = Flipped(ValidIO(new DSBlock))
-    val releaseBufResp_s3 = Flipped(ValidIO(new DSBlock))
+    val refillBufResp_s3 = Flipped(ValidIO(new MSHRBufReadResp))
+    val releaseBufResp_s3 = Flipped(ValidIO(new MSHRBufReadResp))
 
     /* get PutDataBuffer read result */
     val putDataBufResp_s3 = Flipped(ValidIO(new DSBlock))
@@ -109,10 +109,10 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     val clientTagWReq = DecoupledIO(new noninclusive.ClientTagWrite)
 
     /* read DS and write data into ReleaseBuf when the task needs to replace */
-    val releaseBufWrite = Flipped(new MSHRBufWrite()) // s5 & s6
+    val releaseBufWrite = DecoupledIO(new MSHRBufWrite()) // s5 & s6
 
     /* read DS and write data into RefillBuf when Acquire toT hits on B */
-    val refillBufWrite = Flipped(new MSHRBufWrite())
+    val refillBufWrite = DecoupledIO(new MSHRBufWrite())
 
     /* read DS and write data into PutDataBuf when req is Put and need to alloc MSHR */
     val putDataBufWrite = Flipped(new LookupBufWrite())
@@ -833,17 +833,17 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   val chnl_fire_s5 = c_s5.fire() || d_s5.fire()
 
   io.releaseBufWrite.valid      := task_s5.valid && need_write_releaseBuf_s5
-  io.releaseBufWrite.beat_sel   := Fill(beatSize, 1.U(1.W))
-  io.releaseBufWrite.data.data  := merged_data_s5
-  io.releaseBufWrite.id         := task_s5.bits.mshrId
-  io.releaseBufWrite.corrupt    := task_s5.bits.corrupt // TODO: Ecc
+  io.releaseBufWrite.bits.beat_sel   := Fill(beatSize, 1.U(1.W))
+  io.releaseBufWrite.bits.data.data  := merged_data_s5
+  io.releaseBufWrite.bits.id         := task_s5.bits.mshrId
+  io.releaseBufWrite.bits.corrupt    := task_s5.bits.corrupt // TODO: Ecc
   assert(!(io.releaseBufWrite.valid && !io.releaseBufWrite.ready), "releaseBuf should be ready when given valid")
 
   io.refillBufWrite.valid     := task_s5.valid && need_write_refillBuf_s5
-  io.refillBufWrite.beat_sel  := Fill(beatSize, 1.U(1.W))
-  io.refillBufWrite.data.data := merged_data_s5
-  io.refillBufWrite.id        := task_s5.bits.mshrId
-  io.refillBufWrite.corrupt   := task_s5.bits.corrupt // TODO: Ecc
+  io.refillBufWrite.bits.beat_sel  := Fill(beatSize, 1.U(1.W))
+  io.refillBufWrite.bits.data.data := merged_data_s5
+  io.refillBufWrite.bits.id        := task_s5.bits.mshrId
+  io.refillBufWrite.bits.corrupt   := task_s5.bits.corrupt // TODO: Ecc
   assert(!(io.refillBufWrite.valid && !io.refillBufWrite.ready), "releaseBuf should be ready when given valid")
 
   io.putDataBufWrite.valid        := task_s5.valid && need_write_putDataBuf_s5

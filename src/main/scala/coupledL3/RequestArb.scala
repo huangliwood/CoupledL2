@@ -52,8 +52,8 @@ class RequestArb(implicit p: Parameters) extends L3Module {
     val taskToPipe_s2 = DecoupledIO(new TaskBundle())
 
     // send mshrBuf read request
-    val refillBufRead_s2 = Flipped(new MSHRBufRead)
-    val releaseBufRead_s2 = Flipped(new MSHRBufRead)
+    val refillBufRead_s2 = DecoupledIO(new MSHRBufReadReq)
+    val releaseBufRead_s2 = DecoupledIO(new MSHRBufReadReq)
 
     // send lookupBuf read request for PutPartialData
     val putDataBufRead_s2 = Flipped(new LookupBufRead)
@@ -279,7 +279,7 @@ class RequestArb(implicit p: Parameters) extends L3Module {
   val selfHasData = task_s2.bits.selfHasData
   
   io.refillBufRead_s2.valid := mshrTask_s2 && !task_s2.bits.useProbeData && mshrTask_s2_a_upwards && !selfHasData && s2_fire
-  io.refillBufRead_s2.id    := task_s2.bits.mshrId
+  io.refillBufRead_s2.bits.id    := task_s2.bits.mshrId
   // For ReleaseData or ProbeAckData, read releaseBuffer
   // channel is used to differentiate GrantData and ProbeAckData
   io.releaseBufRead_s2.valid := mshrTask_s2 && (
@@ -287,7 +287,7 @@ class RequestArb(implicit p: Parameters) extends L3Module {
     task_s2.bits.fromB && task_s2.bits.opcode === ProbeAckData || 
     task_s2.bits.fromA && task_s2.bits.useProbeData && mshrTask_s2_a_upwards && !selfHasData
   )  && s2_fire
-  io.releaseBufRead_s2.id := task_s2.bits.mshrId
+  io.releaseBufRead_s2.bits.id := task_s2.bits.mshrId
   assert(!io.refillBufRead_s2.valid || io.refillBufRead_s2.ready)
   assert(!io.releaseBufRead_s2.valid || io.releaseBufRead_s2.ready)
 
