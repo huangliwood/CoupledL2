@@ -220,19 +220,17 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
     XSPerfHistogram(cacheParams, "a_to_d_delay", delay, delay_sample, 500, 1000, 100, true, false)
   }
 
-  if(enableHalfFreq) {
-    val dirRespBuffer = Module(new DirRespBuffer)
-    val dirRespValid = RegNextN(reqArb.io.dirRead_s1.valid, 2, Some(false.B))
-    dirRespBuffer.io.in.valid := dirRespValid
-    dirRespBuffer.io.in.dirResp := directory.io.resp
-    dirRespBuffer.io.in.clientDirResp := clientDirectory.io.resp
-    dirRespBuffer.io.in.clientDirConflict := probeHelper.io.dirConflict
-    dirRespBuffer.io.in.accept := mainPipe.io.pipeFlow_s3
-    dontTouch(dirRespBuffer.io.out)
+  val dirRespBuffer = Module(new DirRespBuffer)
+  val dirRespValid = RegNextN(reqArb.io.dirRead_s1.valid, 2, Some(false.B))
+  dirRespBuffer.io.in.valid := dirRespValid
+  dirRespBuffer.io.in.dirResp := directory.io.resp
+  dirRespBuffer.io.in.clientDirResp := clientDirectory.io.resp
+  dirRespBuffer.io.in.clientDirConflict := probeHelper.io.dirConflict
+  dirRespBuffer.io.in.accept := mainPipe.io.acceptDirResp
+  dontTouch(dirRespBuffer.io.out)
 
-    mainPipe.io.dirResp_s3 <> Mux(dirRespValid, directory.io.resp, dirRespBuffer.io.out.dirResp)
-    mainPipe.io.clientDirResp_s3 <> Mux(dirRespValid, clientDirectory.io.resp, dirRespBuffer.io.out.clientDirResp)
-    mainPipe.io.clientDirConflict := Mux(dirRespValid, probeHelper.io.dirConflict, dirRespBuffer.io.out.clientDirConflict)
-  }
+  mainPipe.io.dirResp_s3 <> Mux(dirRespValid, directory.io.resp, dirRespBuffer.io.out.dirResp)
+  mainPipe.io.clientDirResp_s3 <> Mux(dirRespValid, clientDirectory.io.resp, dirRespBuffer.io.out.clientDirResp)
+  mainPipe.io.clientDirConflict := Mux(dirRespValid, probeHelper.io.dirConflict, dirRespBuffer.io.out.clientDirConflict)
 
 }

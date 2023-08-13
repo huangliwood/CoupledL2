@@ -52,6 +52,7 @@ class SinkC(implicit p: Parameters) extends L3Module {
   
   val (first, last, _, beat) = edgeIn.count(io.c)
   val isRelease = io.c.bits.opcode(1)
+  val isProbeAck = !isRelease
   val hasData = io.c.bits.opcode(0)
 
   // dataBuf entry is valid when Release has data
@@ -180,8 +181,12 @@ class SinkC(implicit p: Parameters) extends L3Module {
   io.releaseBufWrite.bits.data.data := Fill(beatSize, io.c.bits.data)
   io.releaseBufWrite.bits.id := 0.U(mshrBits.W) // id is given by MSHRCtl by comparing address to the MSHRs
 
-  // io.c.ready := !first || !noSpace && !(isRelease && !io.toReqArb.ready)
-  io.c.ready := !isRelease || !first || !full || !hasData && io.toReqArb.ready
+  // io.c.ready := !isRelease || !first || !full || !hasData && io.toReqArb.ready
+  io.c.ready := !(isRelease && first && full && (hasData || !io.toReqArb.ready)) && !(isProbeAck && hasData && !io.releaseBufWrite.ready)
+
+  when(io.c.valid && isProbeAck && hasData && !io.releaseBufWrite.ready) {
+    printf(s"ProbeAckData want to write releaseBuf and releaseBuf is not ready! address: ${io.c.bits.address} source: ${io.c.bits.source}")
+  }
 
   io.bufResp.data := dataBuf(io.bufRead.bits.bufIdx)
 
