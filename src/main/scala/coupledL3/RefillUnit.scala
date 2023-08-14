@@ -35,7 +35,7 @@ class RefillUnit(implicit p: Parameters) extends L3Module {
   val io = IO(new Bundle() {
     val sinkD = Flipped(DecoupledIO(new TLBundleD(edgeOut.bundle)))
     val sourceE = DecoupledIO(new TLBundleE(edgeOut.bundle))
-    val refillBufWrite = Flipped(new MSHRBufWrite)
+    val refillBufWrite = DecoupledIO(new MSHRBufWrite)
     val resp = Output(new RespBundle)
   })
 
@@ -54,10 +54,10 @@ class RefillUnit(implicit p: Parameters) extends L3Module {
   io.sourceE.valid := grantAckQ.io.deq.valid
 
   io.refillBufWrite.valid := io.sinkD.valid && hasData
-  io.refillBufWrite.beat_sel := UIntToOH(beat)
-  io.refillBufWrite.data.data := Fill(beatSize, io.sinkD.bits.data)
-  io.refillBufWrite.id := io.sinkD.bits.source
-  io.refillBufWrite.corrupt := io.sinkD.bits.corrupt
+  io.refillBufWrite.bits.beat_sel := UIntToOH(beat)
+  io.refillBufWrite.bits.data.data := Fill(beatSize, io.sinkD.bits.data)
+  io.refillBufWrite.bits.id := io.sinkD.bits.source
+  io.refillBufWrite.bits.corrupt := io.sinkD.bits.corrupt
 
   io.resp.valid := (first || last) && io.sinkD.valid
   io.resp.mshrId := io.sinkD.bits.source

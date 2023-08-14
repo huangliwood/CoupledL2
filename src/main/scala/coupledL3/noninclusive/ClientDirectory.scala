@@ -78,7 +78,7 @@ class ClientMetaWrite(implicit p: Parameters) extends L3Bundle with HasClientInf
 }
 
 class ClientTagWrite(implicit p: Parameters) extends L3Bundle with HasClientInfo {
-  val set = UInt(clientSets.W)
+  val set = UInt(clientSetBits.W)
   val way = UInt(clientWayBits.W)
   val tag = UInt(clientTagBits.W)
 

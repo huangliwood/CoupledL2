@@ -79,8 +79,8 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     })
 
     /* get ReleaseBuffer and RefillBuffer read result */
-    val refillBufResp_s3 = Flipped(ValidIO(new DSBlock))
-    val releaseBufResp_s3 = Flipped(ValidIO(new DSBlock))
+    val refillBufResp_s3 = Flipped(ValidIO(new MSHRBufReadResp))
+    val releaseBufResp_s3 = Flipped(ValidIO(new MSHRBufReadResp))
 
     /* get PutDataBuffer read result */
     val putDataBufResp_s3 = Flipped(ValidIO(new DSBlock))
@@ -109,10 +109,10 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     val clientTagWReq = DecoupledIO(new noninclusive.ClientTagWrite)
 
     /* read DS and write data into ReleaseBuf when the task needs to replace */
-    val releaseBufWrite = Flipped(new MSHRBufWrite()) // s5 & s6
+    val releaseBufWrite = DecoupledIO(new MSHRBufWrite()) // s5 & s6
 
     /* read DS and write data into RefillBuf when Acquire toT hits on B */
-    val refillBufWrite = Flipped(new MSHRBufWrite())
+    val refillBufWrite = DecoupledIO(new MSHRBufWrite())
 
     /* read DS and write data into PutDataBuf when req is Put and need to alloc MSHR */
     val putDataBufWrite = Flipped(new LookupBufWrite())
@@ -124,6 +124,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
 
     val pipeFlow_s2 = Output(Bool())
     val pipeFlow_s3 = Output(Bool())
+    val acceptDirResp = Output(Bool())
 
     val fromReqBufSinkA = Input(new Bundle{
       val valid = Bool()
@@ -150,8 +151,10 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     resetFinishClient := true.B
   } 
 
-  val c_s3, c_s4, c_s5 = Wire(io.toSourceC.cloneType)
-  val d_s3, d_s4, d_s5 = Wire(io.toSourceD.cloneType)
+  val c_s3, c_s5 = Wire(io.toSourceC.cloneType)
+  val d_s3, d_s5 = Wire(io.toSourceD.cloneType)
+  val c_s4 = WireInit(0.U.asTypeOf(io.toSourceC))
+  val d_s4 = WireInit(0.U.asTypeOf(io.toSourceD))
 
   require(cacheParams.inclusionPolicy == "NINE", "For this repo, L3 only support NINE")
 
@@ -191,6 +194,10 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   val willAccessClientDirMeta = Wire(Bool())
   val willAccessClientDirTag = Wire(Bool())
 
+  val sendSourceC, sendSourceD = RegInit(false.B)
+  val willSendSourceC = Wire(Bool())
+  val willSendSourceD = Wire(Bool())
+
   val s2_fire = task_s2.fire // task_s2.valid && s3_ready
   s3_ready := !s3_full || s3_fire
   s3_valid := s3_full && (
@@ -198,7 +205,9 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     !(willAccessDirMeta       && !io.metaWReq.ready      ) && 
     !(willAccessDirTag        && !io.tagWReq.ready       ) &&
     !(willAccessClientDirMeta && !io.clientMetaWReq.ready) &&
-    !(willAccessClientDirTag  && !io.clientTagWReq.ready )
+    !(willAccessClientDirTag  && !io.clientTagWReq.ready ) &&
+    !(willSendSourceC && !c_s3.ready && !sendSourceC     ) &&
+    !(willSendSourceD && !d_s3.ready && !sendSourceD     )
   )
   val s4_ready = true.B
   s3_fire := s3_valid
@@ -219,6 +228,9 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   // when(task_s2.valid) {
   //   task_s3.bits := task_s2.bits
   // }
+
+  io.acceptDirResp := s3_fire && !task_s3.bits.mshrTask
+
 
   when(s2_fire) {
     task_s3.valid := true.B
@@ -249,6 +261,9 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   }.elsewhen(RegNext(s2_fire)) {
     gotDirResult_s3 := true.B
     dirResultReg_s3 := io.dirResp_s3
+  }
+  when(~reset.asBool) {
+    assert(!RegNext(dirResult_s3.set =/= task_s3.bits.set && task_s3.valid && !task_s3.bits.mshrTask), "dirResult_s3.set:%d =/= task_s3.bits.set:%d mshrTask:%d", RegNext(dirResult_s3.set), RegNext(task_s3.bits.set), RegNext(task_s3.bits.mshrTask))
   }
 
   // client dir result (Only for NINE)
@@ -532,12 +547,12 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   // A: need_write_releaseBuf indicates that DS should be read and the data will be written into ReleaseBuffer
   //    need_write_releaseBuf is assigned true when:
   //    inner clients' data is needed, but whether the client will ack data is uncertain, so DS data is also needed, or
-  val need_write_releaseBuf = need_probe_s3_a && dirResult_s3.hit || need_data_b && need_mshr_s3_b
+  val need_write_releaseBuf = need_probe_s3_a && req_acquireBlock_s3 && dirResult_s3.hit || need_data_b && need_mshr_s3_b
 
   // B: need_write_refillBuf when L2 AcquireBlock BtoT
   //    L3 sends AcquirePerm to L3, so GrantData to L2 needs to read DS ahead of time and store in RefillBuffer
   // TODO: how about AcquirePerm BtoT interaction with refill buffer?
-  val need_write_refillBuf = sinkA_req_s3 && req_needT_s3 && dirResult_s3.hit && meta_s3.state === BRANCH && !req_put_s3
+  val need_write_refillBuf = sinkA_req_s3 && req_acquireBlock_s3 && req_needT_s3 && dirResult_s3.hit && meta_s3.state === BRANCH && !req_put_s3
   val need_write_putDataBuf = sinkA_req_s3 && req_put_partial_s3 && dirResult_s3.hit
 
   /* ======== Write Directory ======== */
@@ -694,11 +709,13 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   }
 
 
-  /* ======== Interact with Channels (C & D) ======== */
+  // --------------------------------------------------------------------------
+  //  Interact with Channels (C & D)
+  // --------------------------------------------------------------------------
   val task_ready_s3 = !hasData_s3 || req_s3.fromC || (need_mshr_s3 && !a_need_replacement) || mshr_req_s3 || req_put_s3
   // do not need s4 & s5
   req_drop_s3 := (!mshr_req_s3 && need_mshr_s3 && !need_write_releaseBuf && !need_write_refillBuf && !need_write_putDataBuf && !mainpipe_release) ||
-                    (task_ready_s3 && (c_s3.fire || d_s3.fire)) ||
+                    (task_ready_s3 && (c_s3.fire || d_s3.fire || sendSourceC || sendSourceD)) ||
                     (mshr_req_s3 && req_s3.fromProbeHelper || !mshr_req_s3 && req_s3.fromProbeHelper)  // We won't send resp for the ProbeHepler request, since it is an inner request not an outer request.
                     
   
@@ -707,19 +724,31 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   
   //[Alias] TODO: may change this to ren?
   val data_unready_s3 = hasData_s3 && !mshr_req_s3 || task_s3.bits.selfHasData && mshr_req_s3
-              
+  
+  when(s3_fire) {
+    sendSourceC := false.B
+  }.elsewhen(c_s3.fire) {
+    sendSourceC := true.B
+  }
+  when(s3_fire) {
+    sendSourceD := false.B
+  }.elsewhen(d_s3.fire) {
+    sendSourceD := true.B
+  }
 
-  c_s3.valid := s3_fire && task_s3.valid && Mux(
+  willSendSourceC := task_s3.valid && Mux(
     mshr_req_s3,
     mshr_release_s3 && !req_s3.fromC && !data_unready_s3 || mshr_probeack_s3 && !req_s3.fromProbeHelper, // We won't send resp for the ProbeHepler request, since it is an inner request not an outer request.
     req_s3.fromB && !need_mshr_s3 && !data_unready_s3 && !req_s3.fromProbeHelper
   )
+  c_s3.valid := willSendSourceC && !sendSourceC
   
-  d_s3.valid := s3_fire && task_s3.valid && Mux(
+  willSendSourceD := task_s3.valid && Mux(
     mshr_req_s3,
     mshr_grant_s3 & !task_s3.bits.selfHasData || mshr_accessackdata_s3 || mshr_accessack_s3 || mshr_putpartial_s3 || mshr_releaseack_s3,
     req_s3.fromC && !need_mshr_s3 || req_s3.fromA && !need_mshr_s3 && !mainpipe_release &&(!data_unready_s3 || req_put_full_s3)
   )
+  d_s3.valid := willSendSourceD && !sendSourceD
 
   assert(!((d_s3.valid || c_s3.valid) && !sink_resp_s3.valid && !req_s3.mshrTask), "d_s3.valid:%d  c_s3.valid:%d", d_s3.valid, c_s3.valid)
 
@@ -768,8 +797,6 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   //  Stage4: 
   // --------------------------------------------------------------------------
   val task_s4 = RegInit(0.U.asTypeOf(Valid(new TaskBundle())))
-  val data_unready_s4 = RegInit(false.B)
-  val data_s4 = RegInit(0.U((blockBytes * 8).W))
   val ren_s4 = RegInit(false.B)
   val need_write_releaseBuf_s4 = RegInit(false.B)
   val need_write_refillBuf_s4 = RegInit(false.B)
@@ -778,8 +805,6 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   when (task_s3.valid && !req_drop_s3 && s3_fire) {
     task_s4.bits := source_req_s3
     task_s4.bits.mshrId := Mux(!task_s3.bits.mshrTask && need_mshr_s3, io.fromMSHRCtl.mshr_alloc_ptr, source_req_s3.mshrId)
-    data_unready_s4 := data_unready_s3
-    data_s4 := data_s3
     ren_s4 := ren
     need_write_releaseBuf_s4 := need_write_releaseBuf
     need_write_refillBuf_s4 := need_write_refillBuf
@@ -795,15 +820,6 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
                     task_s4.bits.opcode(2, 1) === AccessAck(2, 1)
                   )
 
-  val chnl_fire_s4 = c_s4.fire() || d_s4.fire()
-
-  c_s4.valid := task_s4.valid && !data_unready_s4 && isC_s4 && !need_write_releaseBuf_s4 && !need_write_refillBuf_s4 && !need_write_putDataBuf_s4
-  d_s4.valid := task_s4.valid && !data_unready_s4 && isD_s4 && !need_write_releaseBuf_s4 && !need_write_refillBuf_s4 && !need_write_putDataBuf_s4
-  c_s4.bits.task := task_s4.bits
-  c_s4.bits.data.data := data_s4
-  d_s4.bits.task := task_s4.bits
-  d_s4.bits.data.data := data_s4
-
 
   
   // --------------------------------------------------------------------------
@@ -811,54 +827,53 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   // --------------------------------------------------------------------------
   val task_s5 = RegInit(0.U.asTypeOf(Valid(new TaskBundle())))
   val ren_s5 = RegInit(false.B)
-  val data_s5 = Reg(UInt((blockBytes * 8).W))
   val need_write_releaseBuf_s5 = RegInit(false.B)
   val need_write_refillBuf_s5 = RegInit(false.B)
   val need_write_putDataBuf_s5 = RegInit(false.B)
   val isC_s5, isD_s5 = RegInit(false.B)
-  task_s5.valid := task_s4.valid && !chnl_fire_s4
-  when (task_s4.valid && !chnl_fire_s4) {
+  task_s5.valid := task_s4.valid
+  when (task_s4.valid) {
     task_s5.bits := task_s4.bits
     ren_s5 := ren_s4
-    data_s5 := data_s4
     need_write_releaseBuf_s5 := need_write_releaseBuf_s4
     need_write_refillBuf_s5 := need_write_refillBuf_s4
     need_write_putDataBuf_s5 := need_write_putDataBuf_s4
     isC_s5 := isC_s4
     isD_s5 := isD_s4
   }
+  assert(!RegNext(!ren_s5 && task_s5.valid), "ren_s5:%d task_s5_valid:%d isC_s5:%d isD_s5:%d channel:%d opcode:%d mshrTask:%d", RegNext(ren_s5), RegNext(task_s5.valid), RegNext(isC_s5), RegNext(isD_s5), RegNext(task_s5.bits.channel), RegNext(task_s5.bits.opcode), RegNext(task_s5.bits.mshrTask))
   val rdata_s5 = io.toDS.rdata_s5.data
   task_s5.bits.corrupt := Mux(ren_s5, io.toDS.error_s5, false.B)
-  val merged_data_s5 = Mux(ren_s5, rdata_s5, data_s5)
   val chnl_fire_s5 = c_s5.fire() || d_s5.fire()
 
   io.releaseBufWrite.valid      := task_s5.valid && need_write_releaseBuf_s5
-  io.releaseBufWrite.beat_sel   := Fill(beatSize, 1.U(1.W))
-  io.releaseBufWrite.data.data  := merged_data_s5
-  io.releaseBufWrite.id         := task_s5.bits.mshrId
-  io.releaseBufWrite.corrupt    := task_s5.bits.corrupt // TODO: Ecc
+  io.releaseBufWrite.bits.beat_sel   := Fill(beatSize, 1.U(1.W))
+  io.releaseBufWrite.bits.data.data  := rdata_s5
+  io.releaseBufWrite.bits.id         := task_s5.bits.mshrId
+  io.releaseBufWrite.bits.corrupt    := task_s5.bits.corrupt // TODO: Ecc
   assert(!(io.releaseBufWrite.valid && !io.releaseBufWrite.ready), "releaseBuf should be ready when given valid")
 
   io.refillBufWrite.valid     := task_s5.valid && need_write_refillBuf_s5
-  io.refillBufWrite.beat_sel  := Fill(beatSize, 1.U(1.W))
-  io.refillBufWrite.data.data := merged_data_s5
-  io.refillBufWrite.id        := task_s5.bits.mshrId
-  io.refillBufWrite.corrupt   := task_s5.bits.corrupt // TODO: Ecc
+  io.refillBufWrite.bits.beat_sel  := Fill(beatSize, 1.U(1.W))
+  io.refillBufWrite.bits.data.data := rdata_s5
+  io.refillBufWrite.bits.id        := task_s5.bits.mshrId
+  io.refillBufWrite.bits.corrupt   := task_s5.bits.corrupt // TODO: Ecc
   assert(!(io.refillBufWrite.valid && !io.refillBufWrite.ready), "releaseBuf should be ready when given valid")
 
   io.putDataBufWrite.valid        := task_s5.valid && need_write_putDataBuf_s5
   io.putDataBufWrite.beat_sel     := Fill(beatSize, 1.U(1.W))
-  io.putDataBufWrite.data.data    := merged_data_s5
+  io.putDataBufWrite.data.data    := rdata_s5
   io.putDataBufWrite.id           := task_s5.bits.sourceId // TODO:
   io.putDataBufWrite.corrupt      := task_s5.bits.corrupt || io.toDS.error_s5
 
   c_s5.valid := task_s5.valid && isC_s5 && !need_write_releaseBuf_s5 && !need_write_refillBuf_s5 && !need_write_putDataBuf_s5
   d_s5.valid := task_s5.valid && isD_s5 && !need_write_releaseBuf_s5 && !need_write_refillBuf_s5 && !need_write_putDataBuf_s5
   c_s5.bits.task := task_s5.bits
-  c_s5.bits.data.data := merged_data_s5
+  c_s5.bits.data.data := rdata_s5
   d_s5.bits.task := task_s5.bits
-  d_s5.bits.data.data := merged_data_s5
+  d_s5.bits.data.data := rdata_s5
 
+  assert(!(d_s5.valid && !d_s5.ready), "d_s5 should be ready when given valid")
 
 
   // --------------------------------------------------------------------------
@@ -935,14 +950,16 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   // --------------------------------------------------------------------------
   //  Other Signals Assignment
   // --------------------------------------------------------------------------
-  val c = Seq(c_s5, c_s4, c_s3)
-  val d = Seq(d_s5, d_s4, d_s3)
+  c_s4.ready := false.B
+  d_s4.ready := false.B
+  val c = Seq(c_s5, 0.U.asTypeOf(c_s4), c_s3)
+  val d = Seq(d_s5, 0.U.asTypeOf(d_s4), d_s3)
   // DO NOT use TLArbiter because TLArbiter will send continuous beats for the same source
   val fifoArbEntries =  5
-  val c_arb = Module(new FIFOArbiter(io.toSourceC.bits.cloneType, c.size, fifoArbEntries)) // TODO: optimize
-  val d_arb = Module(new FIFOArbiter(io.toSourceD.bits.cloneType, d.size, fifoArbEntries))
-  // val c_arb = Module(new Arbiter(io.toSourceC.bits.cloneType, c.size))
-  // val d_arb = Module(new Arbiter(io.toSourceD.bits.cloneType, d.size))
+  // val c_arb = Module(new FIFOArbiter(io.toSourceC.bits.cloneType, c.size, fifoArbEntries)) // TODO: optimize
+  // val d_arb = Module(new FIFOArbiter(io.toSourceD.bits.cloneType, d.size, fifoArbEntries))
+  val c_arb = Module(new Arbiter(io.toSourceC.bits.cloneType, c.size))
+  val d_arb = Module(new Arbiter(io.toSourceD.bits.cloneType, d.size))
   c_arb.io.in <> c
   d_arb.io.in <> d
 

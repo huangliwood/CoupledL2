@@ -80,7 +80,7 @@ trait HasCoupledL3Parameters {
   lazy val bankBits = p(BankBitsKey)
 
   lazy val clientBits = edgeIn.client.clients.count(_.supports.probe)
-  lazy val sourceIdBits = edgeIn.bundle.sourceBits // ids of L1
+  lazy val sourceIdBits = edgeIn.bundle.sourceBits
   lazy val msgSizeBits = edgeIn.bundle.sizeBits
 //  lazy val sourceIdAll = 1 << sourceIdBits
   lazy val sourceIdAll = edgeIn.master.masters.last.sourceId.end + mshrsAll

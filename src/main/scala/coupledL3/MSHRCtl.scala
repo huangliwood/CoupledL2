@@ -113,7 +113,8 @@ class MSHRCtl(implicit p: Parameters) extends L3Module {
   val pipeReqCount = PopCount(Cat(s2s3PipeStatusVec.map(status => status.valid))) // TODO: consider add !mshrTask to optimize
   val mshrCount = PopCount(Cat(mshrs.map(_.io.status.valid)))
   val mshrFull = pipeReqCount + mshrCount >= mshrsAll.U
-  val a_mshrFull = pipeReqCount + mshrCount >= (mshrsAll-1).U // the last idle mshr should not be allocated for channel A req
+  val b_mshrFull = pipeReqCount + mshrCount >= (mshrsAll-1).U
+  val a_mshrFull = pipeReqCount + mshrCount >= (mshrsAll-2).U // the last idle mshr should not be allocated for channel A req
   val mshrSelector = Module(new MSHRSelector())
   mshrSelector.io.idle := mshrs.map(m => !m.io.status.valid)
   val selectedMSHROH = mshrSelector.io.out.bits
@@ -189,7 +190,7 @@ class MSHRCtl(implicit p: Parameters) extends L3Module {
   val setMatchVec_c = mshrs.map(m => m.io.status.valid && m.io.status.bits.set === io.fromReqArb.status_s1.c_set)
   val setConflictVec_c = (setMatchVec_c zip mshrs.map(_.io.status.bits.nestC)).map(x => x._1 && !x._2)
   io.toReqArb.blockC_s1 := mshrFull || Cat(setConflictVec_c).orR || !hasEmptyWay
-  io.toReqArb.blockB_s1 := mshrFull || Cat(setConflictVec_b_1).orR
+  io.toReqArb.blockB_s1 := b_mshrFull || Cat(setConflictVec_b_1).orR
   io.toReqArb.blockA_s1 := a_mshrFull // conflict logic moved to ReqBuf
 
   /* Acquire downwards */

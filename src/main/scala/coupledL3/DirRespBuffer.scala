@@ -30,10 +30,10 @@ class DirRespBuffer(implicit p: Parameters) extends L3Module {
         val clientDirResp = chiselTypeOf(io.in.clientDirResp)
         val clientDirConflict = chiselTypeOf(io.in.clientDirConflict)
     }
-    val queue = Module(new Queue(new DirInfo, entries, pipe = false, flow = false))
+    val queue = Module(new Queue(new DirInfo, entries, pipe = true, flow = true))
 
     // queue.io.enq.ready
-    queue.io.enq.valid := io.in.valid
+    queue.io.enq.valid := io.in.valid //&& !io.in.accept
     queue.io.enq.bits.dirResp := io.in.dirResp
     queue.io.enq.bits.clientDirResp := io.in.clientDirResp
     queue.io.enq.bits.clientDirConflict := io.in.clientDirConflict
