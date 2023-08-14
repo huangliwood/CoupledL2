@@ -207,7 +207,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     !(willAccessClientDirMeta && !io.clientMetaWReq.ready) &&
     !(willAccessClientDirTag  && !io.clientTagWReq.ready ) &&
     !(willSendSourceC && !c_s3.ready && !sendSourceC     ) &&
-    !(willSendSourceD && !d_s4.ready && !sendSourceD     )
+    !(willSendSourceD && !d_s3.ready && !sendSourceD     )
   )
   val s4_ready = true.B
   s3_fire := s3_valid
