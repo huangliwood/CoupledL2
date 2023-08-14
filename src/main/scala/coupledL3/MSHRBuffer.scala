@@ -25,22 +25,26 @@ import java.util.ResourceBundle
 import xs.utils.sram._
 
 // read with block granularity
-class MSHRBufRead(implicit p: Parameters) extends L3Bundle {
-  val valid = Input(Bool())
-  val id = Input(UInt(mshrBits.W))
-  val ready = Output(Bool())
-  val data = Output(new DSBlock)
-  val corrupt = Output(Bool())
+class MSHRBufReadReq(implicit p: Parameters) extends L3Bundle {
+  val id = UInt(mshrBits.W)
 }
+
+class MSHRBufReadResp(implicit p: Parameters) extends DSBlock {
+    val corrupt = Bool()
+}
+
+class MSHRBufRead(implicit p: Parameters) extends L3Bundle {
+  val req  = Flipped(DecoupledIO(new MSHRBufReadReq))
+  val resp = ValidIO(new MSHRBufReadResp)
+}
+
 
 // write with beat granularity
 class MSHRBufWrite(implicit p: Parameters) extends L3Bundle {
-  val valid = Input(Bool())
-  val beat_sel = Input(UInt(beatSize.W))
-  val data = Input(new DSBlock)
-  val id = Input(UInt(mshrBits.W))
-  val corrupt = Input(Bool())
-  val ready = Output(Bool())
+  val beat_sel = UInt(beatSize.W)
+  val data     = new DSBlock
+  val id       = UInt(mshrBits.W)
+  val corrupt  = Bool()
 }
 
 // TODO: should it have both r/w port?
@@ -48,7 +52,7 @@ class MSHRBufWrite(implicit p: Parameters) extends L3Bundle {
 class MSHRBuffer(wPorts: Int = 1)(implicit p: Parameters) extends L3Module {
   val io = IO(new Bundle() {
     val r = new MSHRBufRead()
-    val w = Vec(wPorts, new MSHRBufWrite)
+    val w = Vec(wPorts, Flipped(DecoupledIO(new MSHRBufWrite)))
   })
 
   val buffer = RegInit(VecInit.tabulate(mshrsAll, beatSize)((_, _) => 0.U.asTypeOf(new DSBeat())))
@@ -58,20 +62,20 @@ class MSHRBuffer(wPorts: Int = 1)(implicit p: Parameters) extends L3Module {
   io.w.foreach {
     case w =>
       when (w.valid) {
-        w.beat_sel.asBools.zipWithIndex.foreach {
+        w.bits.beat_sel.asBools.zipWithIndex.foreach {
           case (sel, i) =>
-            when (sel) { valids(w.id)(i) := true.B }
+            when (sel) { valids(w.bits.id)(i) := true.B }
         }
       }
   }
 
-  when (io.r.valid) {
-    valids(io.r.id).foreach(_ := false.B)
+  when (io.r.req.valid) {
+    valids(io.r.req.bits.id).foreach(_ := false.B)
     if(dataEccEnable) {
       corrupts.zipWithIndex.foreach{ case(beats, i) => 
         require(beats.getWidth == beatSize, s"${beats.getWidth} =/= ${beatSize}")
         
-        when(io.r.id === i.U) {
+        when(io.r.req.bits.id === i.U) {
           beats.asTypeOf(Vec(beatSize, Bool())).foreach( _ := false.B ) 
         }
       }
@@ -80,12 +84,12 @@ class MSHRBuffer(wPorts: Int = 1)(implicit p: Parameters) extends L3Module {
 
   buffer.zipWithIndex.foreach {
     case (block, i) =>
-      val wens = VecInit(io.w.map(w => w.valid && w.id === i.U)).asUInt
+      val wens = VecInit(io.w.map(w => w.valid && w.bits.id === i.U)).asUInt
       assert(PopCount(wens) <= 1.U, "multiple write to the same MSHR buffer entry wens:0x%x", wens)
 
-      val w_beat_sel = PriorityMux(wens, io.w.map(_.beat_sel))
-      val w_data = PriorityMux(wens, io.w.map(_.data))
-      val w_corrupt = PriorityMux(wens, io.w.map(_.corrupt))
+      val w_beat_sel = PriorityMux(wens, io.w.map(_.bits.beat_sel))
+      val w_data = PriorityMux(wens, io.w.map(_.bits.data))
+      val w_corrupt = PriorityMux(wens, io.w.map(_.bits.corrupt))
       block.zipWithIndex.foreach {
         case (entry, j) =>
           when(wens.orR && w_beat_sel(j)) {
@@ -96,16 +100,73 @@ class MSHRBuffer(wPorts: Int = 1)(implicit p: Parameters) extends L3Module {
       }
   }
 
-  io.r.ready := true.B
+  io.r.req.ready := true.B
   io.w.foreach(_.ready := true.B)
 
-  val ridReg = RegNext(io.r.id, 0.U.asTypeOf(io.r.id))
-  io.r.data.data := buffer(ridReg).asUInt
+  val ridReg = RegNext(io.r.req.bits.id, 0.U.asTypeOf(io.r.req.bits.id))
+  io.r.resp.bits.data := buffer(ridReg).asUInt
+  io.r.resp.valid := true.B // TODO:
 
   if(dataEccEnable) {
-    io.r.corrupt := VecInit( corrupts.map( entry => entry.reduce(_ || _) ) )(ridReg)
+    io.r.resp.bits.corrupt := VecInit( corrupts.map( entry => entry.reduce(_ || _) ) )(ridReg)
   } else {
-    io.r.corrupt := false.B
+    io.r.resp.bits.corrupt := false.B
+  }
+
+}
+
+
+class MSHRBuffer_1(implicit p: Parameters) extends L3Module {
+  val io = IO(new Bundle() {
+    val r = new MSHRBufRead()
+    val w = Flipped(DecoupledIO(new MSHRBufWrite))
+  })
+
+  val buffer = RegInit(VecInit.tabulate(mshrsAll, beatSize)((_, _) => 0.U.asTypeOf(new DSBeat())))
+  val valids = RegInit(VecInit.tabulate(mshrsAll, beatSize)((_, _) => false.B))
+  val corrupts = RegInit(VecInit.tabulate(mshrsAll, beatSize)((_, _) => false.B))
+
+
+  when (io.w.valid) {
+    valids(io.w.bits.id)(OHToUInt(io.w.bits.beat_sel)) := true.B
+  }
+
+
+  when (io.r.req.valid) {
+    valids(io.r.req.bits.id).foreach(_ := false.B)
+    if(dataEccEnable) {
+      corrupts.zipWithIndex.foreach{ case(beats, i) => 
+        require(beats.getWidth == beatSize, s"${beats.getWidth} =/= ${beatSize}")
+        
+        when(io.r.req.bits.id === i.U) {
+          beats.asTypeOf(Vec(beatSize, Bool())).foreach( _ := false.B ) 
+        }
+      }
+    }
+  }
+
+  buffer.zipWithIndex.foreach {
+    case (block, i) =>
+      block.zipWithIndex.foreach {
+        case(entry, j) =>
+          when(io.w.valid && io.w.bits.beat_sel(j)) {
+            entry := io.w.bits.data.data((j + 1) * beatBytes * 8 - 1, j * beatBytes * 8).asTypeOf(new DSBeat)
+          }
+          if(dataEccEnable) corrupts(i)(j) := io.w.bits.corrupt
+      }
+  }
+
+  io.r.req.ready := true.B
+  io.w.ready := true.B
+
+  val ridReg = RegNext(io.r.req.bits.id, 0.U.asTypeOf(io.r.req.bits.id))
+  io.r.resp.bits.data := buffer(ridReg).asUInt
+  io.r.resp.valid := true.B // TODO:
+
+  if(dataEccEnable) {
+    io.r.resp.bits.corrupt := VecInit( corrupts.map( entry => entry.reduce(_ || _) ) )(ridReg)
+  } else {
+    io.r.resp.bits.corrupt := false.B
   }
 
 }
