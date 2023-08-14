@@ -127,28 +127,31 @@ class SignatureTable(implicit p: Parameters) extends SPPModule {
 
   val rAddr = io.req.bits.pageAddr
   val rData = Wire(sTableEntry())
-  val lastAccessedPage = RegNext(io.req.bits.pageAddr)
-  val lastAccessedBlock = RegNext(io.req.bits.blkOffset)
+
+  val accessedPage  = RegEnable(io.req.bits.pageAddr , io.req.fire())
+  val accessedBlock = RegEnable(io.req.bits.blkOffset, io.req.fire())
+  val accessedAddr  = RegEnable(Cat(io.req.bits.pageAddr, io.req.bits.blkOffset), io.req.fire())
 
   sTable.io.r.req.valid := io.req.fire()
   sTable.io.r.req.bits.setIdx := idx(rAddr)
   rData := sTable.io.r.resp.data(0)
 
-  val hit = rData.valid && rData.tag === tag(lastAccessedPage)
+  val hit = rData.valid && rData.tag === tag(accessedPage)
   val oldSignature = Mux(hit, rData.signature, 0.U)
-  val newDelta = Mux(hit, lastAccessedBlock.asSInt - rData.lastBlock.asSInt, lastAccessedBlock.asSInt)
+  val newDelta = Mux(hit, accessedBlock.asSInt - rData.lastBlock.asSInt, accessedBlock.asSInt)
+  val stableWriteValid = RegEnable(newDelta =/= 0.S, sTable.io.r.req.fire())
 
-  sTable.io.w.req.valid := RegNext(sTable.io.r.req.fire()) && newDelta =/= 0.S
-  sTable.io.w.req.bits.setIdx := idx(lastAccessedPage)
+  sTable.io.w.req.valid := stableWriteValid
+  sTable.io.w.req.bits.setIdx := idx(accessedPage)
   sTable.io.w.req.bits.data(0).valid := true.B
-  sTable.io.w.req.bits.data(0).tag := tag(lastAccessedPage)
+  sTable.io.w.req.bits.data(0).tag := tag(accessedPage)
   sTable.io.w.req.bits.data(0).signature := (oldSignature << 3) ^ strideMap(newDelta)
-  sTable.io.w.req.bits.data(0).lastBlock := lastAccessedBlock
+  sTable.io.w.req.bits.data(0).lastBlock := accessedBlock
 
-  io.resp.valid := RegNext(sTable.io.r.req.fire()) && newDelta =/= 0.S
+  io.resp.valid := stableWriteValid
   io.resp.bits.signature := oldSignature
   io.resp.bits.delta := newDelta
-  io.resp.bits.block := RegNext(Cat(io.req.bits.pageAddr, io.req.bits.blkOffset))
+  io.resp.bits.block := accessedAddr
 
   io.req.ready := sTable.io.r.req.ready
 }
@@ -186,19 +189,25 @@ class PatternTable(implicit p: Parameters) extends SPPModule {
   val state = RegInit(s_idle)
   val readResult = Wire(pTableEntry())
   val readSignature = WireDefault(0.U(signatureBits.W)) //to differentiate the result from io or lookahead, set based on state
+  val readSignature_reg = RegInit(0.U(signatureBits.W))
   val readDelta = WireDefault(0.S((blkOffsetBits + 1).W))
   val lastSignature = Wire(UInt(signatureBits.W))
   val lastDelta = Wire(SInt((blkOffsetBits + 1).W))
   val hit = WireDefault(false.B)
   val enread = WireDefault(false.B)
+  val enread_reg = RegInit(false.B)
   val enprefetch = WireDefault(false.B)
   val enprefetchnl = WireDefault(false.B)
   val enwrite = RegNext(q.io.deq.fire() && pTable.io.r.req.fire()) //we only modify-write on demand requests
   val current = Reg(new SignatureTableResp) // RegInit(0.U.asTypeOf(new PatternTableResp))
   val lookCount = RegInit(0.U(lookCountBits.W))
   val miniCount = lookCount
-  // val miniCount = slowLookTable(lookCount)
 
+  when(enread_reg) {
+    enread := enread_reg
+    readSignature := readSignature_reg
+    enread_reg := false.B
+  }
   //read pTable
   pTable.io.r.req.valid := enread
   pTable.io.r.req.bits.setIdx := readSignature
@@ -280,37 +289,39 @@ class PatternTable(implicit p: Parameters) extends SPPModule {
       state := s_lookahead
     }
     is(s_lookahead) {
-      when(hit) {
-        val issued = delta_list_checked.map(a => Mux(a =/= 0.S, 1.U, 0.U)).reduce(_ +& _)
-        when(issued =/= 0.U) {
-          enprefetch := true.B
-          val testOffset = (current.block.asSInt + maxEntry.delta).asUInt
-          //same page?
-          when(testOffset(pageAddrBits + blkOffsetBits - 1, blkOffsetBits) === 
-            current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits)
-            && maxEntry.cDelta > miniCount) {
-            lookCount := lookCount + 1.U
-            readSignature := (lastSignature << 3) ^ strideMap(maxEntry.delta)
-            current.block := testOffset
-            enread := true.B
-          } .otherwise {
+      when(RegNext(pTable.io.r.req.fire())) {
+        when(hit) {
+          val issued = delta_list_checked.map(a => Mux(a =/= 0.S, 1.U, 0.U)).reduce(_ +& _)
+          when(issued =/= 0.U) {
+            enprefetch := true.B
+            val testOffset = (current.block.asSInt + maxEntry.delta).asUInt
+            //same page?
+            val samePage = (testOffset(pageAddrBits + blkOffsetBits - 1, blkOffsetBits) === 
+              current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits)) 
+            when(samePage  && (maxEntry.cDelta > miniCount)) {
+              lookCount := lookCount + 1.U
+              readSignature_reg := (lastSignature << 3) ^ strideMap(maxEntry.delta)
+              enread_reg := true.B
+              current.block := testOffset
+            } .otherwise {
+              lookCount := 0.U
+              state := s_idle
+            }
+          }.otherwise {
             lookCount := 0.U
             state := s_idle
+          } 
+        } .otherwise {
+          when(lookCount <= 1.U) {
+            val testOffset = current.block + 1.U
+            when(testOffset(pageAddrBits + blkOffsetBits - 1, blkOffsetBits) === 
+              current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits)) {
+              enprefetchnl := true.B
+            }
           }
-        }.otherwise {
           lookCount := 0.U
           state := s_idle
-        } 
-      } .otherwise {
-        when(lookCount <= 1.U) {
-          val testOffset = current.block + 1.U
-          when(testOffset(pageAddrBits + blkOffsetBits - 1, blkOffsetBits) === 
-            current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits)) {
-            enprefetchnl := true.B
-          }
         }
-        lookCount := 0.U
-        state := s_idle
       }
     }
   }
@@ -322,7 +333,7 @@ class PatternTable(implicit p: Parameters) extends SPPModule {
 class Unpack(implicit p: Parameters) extends SPPModule {
   val io = IO(new Bundle {
     val req = Flipped(DecoupledIO(new PatternTableResp))
-    val resp = DecoupledIO(new UnpackResp)
+    val resp = ValidIO(new UnpackResp)
   })
 
   def idx(addr:      UInt) = addr(log2Up(fTableEntries) - 1, 0)
@@ -421,34 +432,27 @@ class SignaturePathPrefetch(implicit p: Parameters) extends SPPModule {
   pTable.io.req <> sTable.io.resp //to detail
   pTable.io.resp <> unpack.io.req
 
-  val req = Reg(new PrefetchReq)
-  val req_valid = RegInit(false.B)
-  unpack.io.resp.ready := true.B
-  when(io.req.fire() && !unpack.io.resp.fire()) {
-    req_valid := false.B
-  }
-  when(unpack.io.resp.fire()) {
-    val newAddr = Cat(unpack.io.resp.bits.prefetchBlock, 0.U(offsetBits.W))
-    req.tag := parseFullAddress(newAddr)._1
-    req.set := parseFullAddress(newAddr)._2
-    req.needT := unpack.io.resp.bits.needT
-    req.source := unpack.io.resp.bits.source
-    req.isBOP := false.B
-    req_valid := true.B 
-  }
-
+  val newAddr = Cat(unpack.io.resp.bits.prefetchBlock, 0.U(offsetBits.W))
   val db_degree = RegEnable(io.db_degree.bits, 1.U, io.db_degree.valid)
-  val queue_used_degree = Wire(UInt(2.W))
-  queue_used_degree := Mux(io.queue_used >= 24.U, 1.U, 0.U)
+  val queue_used_degree = Mux(io.queue_used >= 24.U, 1.U, 0.U)
+  val pf_degree = unpack.io.resp.bits.degree
+  val send2Llc = pf_degree > 2.U && (queue_used_degree >= 1.U || db_degree > 1.U)
+
   pTable.io.db_degree := db_degree
   pTable.io.queue_used_degree := queue_used_degree
 
-  io.req.valid := req_valid
-  io.req.bits := req
-  io.resp.ready := true.B
+  io.req.bits.tag := parseFullAddress(newAddr)._1
+  io.req.bits.set := parseFullAddress(newAddr)._2
+  io.req.bits.needT := unpack.io.resp.bits.needT
+  io.req.bits.source := unpack.io.resp.bits.source
+  io.req.bits.isBOP := false.B
 
-  val pf_degree = unpack.io.resp.bits.degree
-  io.hint2llc := pf_degree > 2.U && (queue_used_degree >= 1.U || db_degree > 1.U)
+  io.req.valid := unpack.io.resp.valid
+  // io.req.valid := unpack.io.resp.valid && !send2Llc
+  // io.hint2llc := unpack.io.resp.valid && send2Llc
+  io.hint2llc := false.B
+
+  io.resp.ready := true.B
   XSPerfAccumulate(cacheParams, "recv_train", io.train.fire())
   XSPerfAccumulate(cacheParams, "recv_st", sTable.io.resp.fire())
   XSPerfAccumulate(cacheParams, "recv_pt", Mux(pTable.io.resp.fire(), 
