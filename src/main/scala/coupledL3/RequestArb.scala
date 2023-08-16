@@ -107,7 +107,7 @@ class RequestArb(implicit p: Parameters) extends L3Module {
   //  Stage0: 
   // --------------------------------------------------------------------------
   // io.mshrTask.ready  := !io.fromGrantBuffer.blockMSHRReqEntrance
-  io.mshrTask.ready  := !io.fromGrantBuffer.blockMSHRReqEntrance && s0_ready
+  io.mshrTask.ready  := s0_ready
   val mshr_task_s0    = Wire(Valid(new TaskBundle()))
   mshr_task_s0.valid := io.mshrTask.fire()
   mshr_task_s0.bits  := io.mshrTask.bits
@@ -217,7 +217,7 @@ class RequestArb(implicit p: Parameters) extends L3Module {
 
   val dirReady = io.dirRead_s1.ready && io.clientDirRead_s1.ready
   s1_valid := mshrTask_s1.valid || chnlTask_s1.valid && dirReady
-  s1_ready := !s1_full || s1_fire
+  s1_ready := (!s1_full || s1_fire) && !io.fromGrantBuffer.blockMSHRReqEntrance
   s1_fire := s1_valid && s2_ready 
 
   when(s0_fire) {

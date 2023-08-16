@@ -92,6 +92,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
   val nestedReleaseToN = RegInit(false.B)
   val nestedSourceIdC = RegInit(0.U(sourceIdBits.W))
   val nestedReleaseNeedRelease = RegInit(false.B)
+  val nestedReleaseClientOH = RegInit(0.U(clientBits.W))
   val nestedValid = WireInit(false.B)
   val nestedWbMatch = WireInit(false.B)
 
@@ -384,7 +385,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
     mp_probeack.way := req.way
     mp_probeack.dirty := meta.dirty && meta.state =/= INVALID || probeDirty
     mp_probeack.meta := MetaEntry(
-      dirty = false.B,
+      dirty = meta.dirty && meta.state =/= INVALID || probeDirty,
       state = Mux(
         req.param === toN,
         Mux(req.fromProbeHelper, Mux(nestedReleaseToN, dirResult.meta.state, stateAfterProbe), INVALID),
@@ -753,7 +754,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
   assert(!((!state.s_pprobe || !state.s_rprobe) && !hasClientHit), "rprobe:%d pprobe:%d", state.s_rprobe, state.s_pprobe)
 
   // ! This is the last client sending probeack
-  val probeackLast = (probeAckDoneClient | incomingProbeAckClient) === probeClientsOH || probeClientsOH === 0.U(clientBits.W)
+  val probeackLast = ((probeAckDoneClient | incomingProbeAckClient) & ~nestedReleaseClientOH) === probeClientsOH || probeClientsOH === 0.U(clientBits.W)
 
   when(io.alloc.valid) {
     probeAckDoneClient := 0.U
@@ -926,9 +927,11 @@ class MSHR(implicit p: Parameters) extends L3Module {
   io.toReqBuf.bits.isAcqOrPrefetch := req_acquire
   io.toReqBuf.bits.isChannelC := req.fromC
 
-  assert(!(c_resp.valid && !io.status.bits.w_c_resp), "mshrId:%d", io.id)
-  assert(!(d_resp.valid && !io.status.bits.w_d_resp), "mshrId:%d", io.id)
-  assert(!(e_resp.valid && !io.status.bits.w_e_resp), "mshrId:%d", io.id)
+  when(status_reg.valid) {
+    assert(!(c_resp.valid && !io.status.bits.w_c_resp), "mshrId:%d", io.id)
+    assert(!(d_resp.valid && !io.status.bits.w_d_resp), "mshrId:%d", io.id)
+    assert(!(e_resp.valid && !io.status.bits.w_e_resp), "mshrId:%d", io.id)
+  }
 
 
 
@@ -973,6 +976,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
     waitNestedC := false.B
     nestedSourceIdC := DontCare
     nestedReleaseNeedRelease := false.B
+    nestedReleaseClientOH := 0.U
     nestedReleaseToN := false.B
     waitNestedB := false.B
     nestedSourceIdB := DontCare
@@ -1070,6 +1074,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
       // TODO: Only nested probehelper
       when(clientDirAddrMatch) { // Only hit clientResult can be modified
         needWaitNestedC := false.B
+        nestedReleaseClientOH := io.nestedwb.c_client
 
         when(io.nestedwb.c_toN) {
           clientDirResult.hits.zip(io.nestedwb.c_client.asBools).foreach {

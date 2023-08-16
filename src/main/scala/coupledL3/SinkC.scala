@@ -184,9 +184,9 @@ class SinkC(implicit p: Parameters) extends L3Module {
   // io.c.ready := !isRelease || !first || !full || !hasData && io.toReqArb.ready
   io.c.ready := !(isRelease && first && full && (hasData || !io.toReqArb.ready)) && !(isProbeAck && hasData && !io.releaseBufWrite.ready)
 
-  when(io.c.valid && isProbeAck && hasData && !io.releaseBufWrite.ready) {
-    printf(s"ProbeAckData want to write releaseBuf and releaseBuf is not ready! address: ${io.c.bits.address} source: ${io.c.bits.source}")
-  }
+  // when(RegNext(io.c.valid && isProbeAck && hasData && !io.releaseBufWrite.ready)) {
+  //   printf(p"ProbeAckData want to write releaseBuf and releaseBuf is not ready! address: ${io.c.bits.address} source: ${io.c.bits.source}")
+  // }
 
   io.bufResp.data := dataBuf(io.bufRead.bits.bufIdx)
 
