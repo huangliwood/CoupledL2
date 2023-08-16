@@ -96,6 +96,8 @@ trait HasCoupledL3Parameters {
   val lookupBufEntries = 16
   val lookupBufBits = log2Up(lookupBufEntries)
 
+  val grantQueueEntries = cacheParams.grantQueueEntries
+
   // width params with bank idx (used in prefetcher / ctrl unit)
   lazy val fullAddressBits = edgeOut.bundle.addressBits
   lazy val fullTagBits = fullAddressBits - setBits - offsetBits

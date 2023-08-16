@@ -122,6 +122,18 @@ class MSHRBuffer_1(implicit p: Parameters) extends L3Module {
     val w = Flipped(DecoupledIO(new MSHRBufWrite))
   })
 
+  val buffer_1 = Module(new SRAMTemplate(new DSBeat(), mshrsAll, beatSize, singlePort = true, hasClkGate = enableClockGate))
+  val bufferRead = WireInit(0.U.asTypeOf(new DSBlock()))
+  buffer_1.io.w(
+    io.w.fire,
+    io.w.bits.data.asTypeOf(Vec(beatSize, new DSBeat())),
+    io.w.bits.id,
+    io.w.bits.beat_sel
+  )
+  bufferRead := buffer_1.io.r(io.r.req.fire, io.r.req.bits.id).resp.data.asTypeOf(new DSBlock)
+  io.r.resp.bits.data := bufferRead.data
+  io.r.resp.valid := RegNext(io.r.req.fire)
+
   val buffer = RegInit(VecInit.tabulate(mshrsAll, beatSize)((_, _) => 0.U.asTypeOf(new DSBeat())))
   val valids = RegInit(VecInit.tabulate(mshrsAll, beatSize)((_, _) => false.B))
   val corrupts = RegInit(VecInit.tabulate(mshrsAll, beatSize)((_, _) => false.B))
@@ -156,12 +168,12 @@ class MSHRBuffer_1(implicit p: Parameters) extends L3Module {
       }
   }
 
-  io.r.req.ready := true.B
-  io.w.ready := true.B
+  // io.r.req.ready := true.B
+  io.r.req.ready := !io.w.valid
+  io.w.ready := io.w.valid
+  dontTouch(io.w.ready)
 
   val ridReg = RegNext(io.r.req.bits.id, 0.U.asTypeOf(io.r.req.bits.id))
-  io.r.resp.bits.data := buffer(ridReg).asUInt
-  io.r.resp.valid := true.B // TODO:
 
   if(dataEccEnable) {
     io.r.resp.bits.corrupt := VecInit( corrupts.map( entry => entry.reduce(_ || _) ) )(ridReg)

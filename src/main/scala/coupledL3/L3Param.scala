@@ -88,6 +88,7 @@ case class L3Param
   clientCaches: Seq[CacheParameters] = Nil,
   replacement: String = "plru",
   mshrs: Int = 16,
+  grantQueueEntries: Int = 8,
   enableClockGate: Boolean = true,
   dataEccCode: Option[String] = Some("secded"), // Option: "none", "identity", "parity", "sec", "secded"
   
@@ -115,7 +116,8 @@ case class L3Param
   innerBuf: TLBufferParams = TLBufferParams(),
   outerBuf: TLBufferParams = TLBufferParams(
     a = BufferParams.default,
-    b = BufferParams.default,
+    // b = BufferParams.default,
+    b = BufferParams.none,
     c = BufferParams.none,
     d = BufferParams.default,
     e = BufferParams.default

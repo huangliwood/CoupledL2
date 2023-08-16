@@ -180,7 +180,7 @@ class GrantBufferFIFO(implicit p: Parameters) extends BaseGrantBuffer with HasCi
 
   // GrantBuf should always be ready.
   // If not, block reqs at the entrance of the pipeline when GrantBuf is about to be full.
-  assert(!io.d_task.valid || io.d_task.ready) 
+  // assert(!io.d_task.valid || io.d_task.ready) 
 
   when(flush(deqPtr)) {
     flush(deqPtr) := false.B
