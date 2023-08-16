@@ -50,10 +50,16 @@ class Monitor(implicit p: Parameters) extends L2Module {
   val dirResult_s3  = mp.dirResult_s3
   val meta_s3       = mp.dirResult_s3.meta
 
+  //  TODO: debug address consider multi-bank
+  def restoreAddr(set: UInt, tag: UInt) = {
+    (set << offsetBits).asUInt + (tag << (setBits + offsetBits)).asUInt
+  }
+  val debug_addr_s3 = restoreAddr(req_s3.set, req_s3.tag)
+
   /* ======== MainPipe Assertions ======== */
   assert(!(s3_valid && req_s3.fromC && !dirResult_s3.hit),
-    "C Release should always hit, Tag %x Set %x",
-    req_s3.tag, req_s3.set)
+    "C Release should always hit, Tag %x Set %x Addr %x",
+    req_s3.tag, req_s3.set, debug_addr_s3)
 
   assert(RegNext(!(s3_valid && !mshr_req_s3 && dirResult_s3.hit &&
     meta_s3.state === TRUNK && !meta_s3.clients.orR)),
