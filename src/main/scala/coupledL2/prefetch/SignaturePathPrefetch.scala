@@ -189,13 +189,13 @@ class PatternTable(implicit p: Parameters) extends SPPModule {
   val state = RegInit(s_idle)
   val readResult = Wire(pTableEntry())
   val readSignature = WireDefault(0.U(signatureBits.W)) //to differentiate the result from io or lookahead, set based on state
-  val readSignature_reg = RegInit(0.U(signatureBits.W))
+  // val readSignature_reg = RegInit(0.U(signatureBits.W))
   val readDelta = WireDefault(0.S((blkOffsetBits + 1).W))
   val lastSignature = Wire(UInt(signatureBits.W))
   val lastDelta = Wire(SInt((blkOffsetBits + 1).W))
   val hit = WireDefault(false.B)
   val enread = WireDefault(false.B)
-  val enread_reg = RegInit(false.B)
+  // val enread_reg = RegInit(false.B)
   val enprefetch = WireDefault(false.B)
   val enprefetchnl = WireDefault(false.B)
   val enwrite = RegNext(q.io.deq.fire() && pTable.io.r.req.fire()) //we only modify-write on demand requests
@@ -203,11 +203,11 @@ class PatternTable(implicit p: Parameters) extends SPPModule {
   val lookCount = RegInit(0.U(lookCountBits.W))
   val miniCount = lookCount
 
-  when(enread_reg) {
-    enread := enread_reg
-    readSignature := readSignature_reg
-    enread_reg := false.B
-  }
+  // when(enread_reg) {
+  //   enread := enread_reg
+  //   readSignature := readSignature_reg
+  //   enread_reg := false.B
+  // }
   //read pTable
   pTable.io.r.req.valid := enread
   pTable.io.r.req.bits.setIdx := readSignature
@@ -289,39 +289,39 @@ class PatternTable(implicit p: Parameters) extends SPPModule {
       state := s_lookahead
     }
     is(s_lookahead) {
-      when(RegNext(pTable.io.r.req.fire())) {
-        when(hit) {
-          val issued = delta_list_checked.map(a => Mux(a =/= 0.S, 1.U, 0.U)).reduce(_ +& _)
-          when(issued =/= 0.U) {
-            enprefetch := true.B
-            val testOffset = (current.block.asSInt + maxEntry.delta).asUInt
-            //same page?
-            val samePage = (testOffset(pageAddrBits + blkOffsetBits - 1, blkOffsetBits) === 
-              current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits)) 
-            when(samePage  && (maxEntry.cDelta > miniCount)) {
-              lookCount := lookCount + 1.U
-              readSignature_reg := (lastSignature << 3) ^ strideMap(maxEntry.delta)
-              enread_reg := true.B
-              current.block := testOffset
-            } .otherwise {
-              lookCount := 0.U
-              state := s_idle
-            }
-          }.otherwise {
+      // when(RegNext(pTable.io.r.req.fire())) {
+      when(hit) {
+        val issued = delta_list_checked.map(a => Mux(a =/= 0.S, 1.U, 0.U)).reduce(_ +& _)
+        when(issued =/= 0.U) {
+          enprefetch := true.B
+          val testOffset = (current.block.asSInt + maxEntry.delta).asUInt
+          //same page?
+          val samePage = (testOffset(pageAddrBits + blkOffsetBits - 1, blkOffsetBits) === 
+            current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits)) 
+          when(samePage  && (maxEntry.cDelta > miniCount)) {
+            lookCount := lookCount + 1.U
+            readSignature := (lastSignature << 3) ^ strideMap(maxEntry.delta)
+            enread := true.B
+            current.block := testOffset
+          } .otherwise {
             lookCount := 0.U
             state := s_idle
-          } 
-        } .otherwise {
-          when(lookCount <= 1.U) {
-            val testOffset = current.block + 1.U
-            when(testOffset(pageAddrBits + blkOffsetBits - 1, blkOffsetBits) === 
-              current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits)) {
-              enprefetchnl := true.B
-            }
           }
+        }.otherwise {
           lookCount := 0.U
           state := s_idle
+        } 
+      } .otherwise {
+        when(lookCount <= 1.U) {
+          val testOffset = current.block + 1.U
+          when(testOffset(pageAddrBits + blkOffsetBits - 1, blkOffsetBits) === 
+            current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits)) {
+            enprefetchnl := true.B
+          }
         }
+        lookCount := 0.U
+        state := s_idle
+        // }
       }
     }
   }
