@@ -165,7 +165,7 @@ class SinkC(implicit p: Parameters) extends L3Module {
   io.toReqArb.bits.wayMask := ~occWay
 
   io.resp := DontCare
-  io.resp.valid := io.c.valid && (first || last) && !isRelease
+  io.resp.valid := io.c.fire && (first || last) && !isRelease
   io.resp.mshrId := 0.U // DontCare
   io.resp.tag := parseAddress(io.c.bits.address)._1
   io.resp.set := parseAddress(io.c.bits.address)._2

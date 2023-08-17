@@ -194,7 +194,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
   val req_put = req.opcode === PutFullData || req.opcode === PutPartialData
   val req_get = req.opcode === Get
   val req_prefetch = req.opcode === Hint
-  val req_promoteT = (req_acquire || req_get || req_prefetch) && Mux(dirResult.hit, meta_no_client && meta.state === TIP, gotT)
+  val req_promoteT = (req_acquire || req_get || req_prefetch) && Mux(dirResult.hit, meta_no_client && meta.state === TIP || nestedReleaseToN, gotT)
 
   // self cache does not have the acquired block, but some other client owns the block
   val transmitFromOtherClient = !dirResult.hit && VecInit(clientDirResult.hits.zipWithIndex.map {
@@ -462,8 +462,8 @@ class MSHR(implicit p: Parameters) extends L3Module {
                                     BRANCH, 
                                     dirResult.meta.clientStates(client)
                                   )
-                                ), 
-                              dirResult.meta.clientStates(client)
+                                ),
+                                INVALID 
                             )
     }
 
@@ -581,7 +581,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
         ),
         MuxLookup(dirResult.meta.state, INVALID, Seq( // dirResult.hit
           INVALID -> BRANCH,
-          BRANCH -> BRANCH,
+          BRANCH -> Mux(req_promoteT, TRUNK, BRANCH),
           // if prefetch read && hit && self is Trunk
           // self meta won't update, we don't care new_meta
           TRUNK -> TIP,
@@ -898,7 +898,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
   io.status.bits <> status_reg.bits
   // For A reqs, we only concern about the tag to be replaced
   io.status.bits.tag := Mux(state.w_release_sent, req.tag, dirResult.tag) // s_release is low-as-valid
-  io.status.bits.nestB := status_reg.valid && state.w_releaseack && state.w_rprobeacklast && state.w_pprobeacklast && !waitNestedC && (!state.w_grantfirst || !state.w_probehelper_done) // allow nested probehelper req
+  io.status.bits.nestB := status_reg.valid && state.w_releaseack && state.w_rprobeacklast && state.w_pprobeacklast && !waitNestedC && (!state.w_grantfirst || !state.w_probehelper_done) && !status_reg.bits.fromC // allow nested probehelper req
   io.status.bits.nestC := status_reg.valid && Mux(waitNestedB || req.fromProbeHelper, true.B, state.w_releaseack) && MuxCase(false.B, Seq(
     req.fromA -> (!state.s_refill && !mp_grant_valid),
     req.fromB -> (!mp_probeack_valid && !mp_release_valid),
@@ -1174,6 +1174,8 @@ class MSHR(implicit p: Parameters) extends L3Module {
 
 
   dontTouch(state)
+
+  assert(!(status_reg.valid && timer >= 15000.U), "mshr timeout! cnt:%d id:%d addr:0x%x", timer, io.id, Cat(status_reg.bits.tag, status_reg.bits.set))
 
   /* ======== Performance counters ======== */
   // time stamp
