@@ -66,8 +66,6 @@ class MSHRCtl(implicit p: Parameters) extends L3Module {
     /* send reqs */
     val sourceA = DecoupledIO(new TLBundleA(edgeOut.bundle))
     val sourceB = DecoupledIO(new TLBundleB(edgeIn.bundle))
-    // val prefetchTrain = prefetchOpt.map(_ => DecoupledIO(new PrefetchTrain))
-    // val grantStatus = Input(Vec(sourceIdAll, new GrantStatus))
     val grantStatus = Input(Vec(grantQueueEntries, new GrantStatus))
 
 

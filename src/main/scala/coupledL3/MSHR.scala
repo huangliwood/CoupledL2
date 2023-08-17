@@ -462,8 +462,8 @@ class MSHR(implicit p: Parameters) extends L3Module {
                                     BRANCH, 
                                     dirResult.meta.clientStates(client)
                                   )
-                                ), 
-                              dirResult.meta.clientStates(client)
+                                ),
+                                INVALID 
                             )
     }
 
@@ -581,7 +581,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
         ),
         MuxLookup(dirResult.meta.state, INVALID, Seq( // dirResult.hit
           INVALID -> BRANCH,
-          BRANCH -> BRANCH,
+          BRANCH -> Mux(req_promoteT, TRUNK, BRANCH),
           // if prefetch read && hit && self is Trunk
           // self meta won't update, we don't care new_meta
           TRUNK -> TIP,

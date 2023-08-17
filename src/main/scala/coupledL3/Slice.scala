@@ -38,7 +38,7 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   })
 
   val reqArb = Module(new RequestArb())
-  val a_reqBuf = Module(new RequestBuffer_1)
+  val a_reqBuf = Module(new RequestBuffer)
   val mainPipe = Module(new MainPipe())
   val mshrCtl = Module(new MSHRCtl())
   val directory = Module(new Directory())
@@ -47,23 +47,18 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   val sinkA = Module(new SinkA)
   val sinkC = Module(new SinkC)
   val sourceC = Module(new SourceC)
-  // val grantBuf = if (!useFIFOGrantBuffer) Module(new GrantBuffer) else Module(new GrantBufferFIFO)
-  val grantBuf = Module(new GrantBuffer_1)
+  val grantBuf = Module(new GrantBuffer)
   val putDataBuf = Module(new LookupBuffer(entries = lookupBufEntries))
 
-  val mshrBuf = Module(new MSHRBuffer_1())
-  val mshrBufRdArb = Module(new Arbiter(mshrBuf.io.r.req.bits.cloneType, 2))
-  val mshrBufWrArb = Module(new Arbiter(mshrBuf.io.w.bits.cloneType, 4))
+  val mshrBuf = Module(new MSHRBuffer())
+  val mshrBufWrArb = Module(new Arbiter(mshrBuf.io.w.bits.cloneType, 3))
 
-  mshrBufRdArb.io.in(0) <> reqArb.io.refillBufRead_s2
-  mshrBufRdArb.io.in(1) <> reqArb.io.releaseBufRead_s2
-  mshrBuf.io.r.req <> mshrBufRdArb.io.out
+  mshrBuf.io.r.req <> reqArb.io.mshrBufRead_s2
 
-  mshrBufWrArb.io.in(0) <> mainPipe.io.releaseBufWrite
-  mshrBufWrArb.io.in(1) <> mainPipe.io.refillBufWrite
-  mshrBufWrArb.io.in(2) <> sinkC.io.releaseBufWrite
-  mshrBufWrArb.io.in(2).bits.id := mshrCtl.io.releaseBufWriteId
-  mshrBufWrArb.io.in(3) <> refillUnit.io.refillBufWrite
+  mshrBufWrArb.io.in(0) <> mainPipe.io.mshrBufWrite
+  mshrBufWrArb.io.in(1) <> sinkC.io.releaseBufWrite
+  mshrBufWrArb.io.in(1).bits.id := mshrCtl.io.releaseBufWriteId
+  mshrBufWrArb.io.in(2) <> refillUnit.io.refillBufWrite
 
   mshrBuf.io.w <> mshrBufWrArb.io.out
 
