@@ -84,6 +84,9 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle with HasChannelBits {
   // for Release to read refillBuf and write to DS
   val replTask = Bool()
 
+  // for refillBuf data -> dataStroage
+  val mergeTask = Bool()
+
   // for TopDown Monitor (# TopDown)
   val reqSource = UInt(MemReqSource.reqSourceBits.W)
 

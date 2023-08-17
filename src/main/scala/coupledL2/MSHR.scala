@@ -59,6 +59,11 @@ class MSHR(implicit p: Parameters) extends L2Module {
     val replResp = Flipped(ValidIO(new ReplacerResult))
   })
 
+  // For A need replace and it merge B
+  val alreadySendProbe = RegInit(false.B)
+  val alreadySRefill   = RegInit(false.B)
+  val AneedReplMergeB  = RegInit(false.B)
+
   val gotT = RegInit(false.B) // L3 might return T even though L2 wants B
   val gotDirty = RegInit(false.B)
   val gotGrantData = RegInit(false.B)
@@ -87,6 +92,9 @@ class MSHR(implicit p: Parameters) extends L2Module {
     probeDirty  := false.B
     probeGotN   := false.B
     timer       := 1.U
+    alreadySendProbe := false.B
+    alreadySRefill   := false.B
+    AneedReplMergeB  := false.B
   }
 
   /* ======== Enchantment ======== */
@@ -201,6 +209,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
     mp_release.tagWen := false.B
     mp_release.dsWen := true.B
     mp_release.replTask := true.B
+    mp_release.mergeTask := false.B
     mp_release.wayMask := 0.U(cacheParams.ways.W)
     mp_release.reqSource := 0.U(MemReqSource.reqSourceBits.W)
     mp_release
@@ -260,6 +269,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
     mp_probeack.wayMask := 0.U(cacheParams.ways.W)
     mp_probeack.reqSource := 0.U(MemReqSource.reqSourceBits.W)
     mp_probeack.replTask := false.B
+    mp_probeack.mergeTask := false.B
     mp_probeack
   }
 
@@ -286,6 +296,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
     mp_merge_probeack.mshrId := io.id
     // mp_merge_probeack definitely read releaseBuf and refillBuf at ReqArb
     // and it needs to write refillData to DS, so useProbeData is set false according to DS.wdata logic
+    // TODO: has problem here
     mp_merge_probeack.useProbeData := false.B
     mp_merge_probeack.way := dirResult.way
     mp_merge_probeack.dirty := meta.dirty && meta.state =/= INVALID || probeDirty
@@ -297,9 +308,14 @@ class MSHR(implicit p: Parameters) extends L2Module {
       prefetch = task.param =/= toN && meta_pft,
       accessed = task.param =/= toN && meta.accessed
     )
-    mp_merge_probeack.metaWen := true.B
+    // TODO: has problem here
+//    mp_merge_probeack.metaWen := true.B && !AneedReplMergeB
+    mp_merge_probeack.metaWen := false.B
     mp_merge_probeack.tagWen := false.B
-    mp_merge_probeack.dsWen := task.param =/= toN && probeDirty
+//    mp_merge_probeack.dsWen := task.param =/= toN && probeDirty
+//    mp_merge_probeack.dsWen := AneedReplMergeB && alreadySRefill // === true.B
+    mp_merge_probeack.dsWen := true.B
+    mp_merge_probeack.mergeTask := true.B
 
     // unused, set to default
     mp_merge_probeack.alias.foreach(_ := 0.U)
@@ -385,6 +401,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
     mp_grant.fromL2pft.foreach(_ := req.fromL2pft.get)
     mp_grant.needHint.foreach(_ := false.B)
     mp_grant.replTask := !dirResult.hit // Get and Alias are hit that does not need replacement
+    mp_grant.mergeTask := false.B
     mp_grant.wayMask := 0.U(cacheParams.ways.W)
     mp_grant.reqSource := 0.U(MemReqSource.reqSourceBits.W)
     mp_grant
@@ -414,12 +431,14 @@ class MSHR(implicit p: Parameters) extends L2Module {
   when (io.tasks.source_b.fire) {
     state.s_pprobe := true.B
     state.s_rprobe := true.B
+    alreadySendProbe := true.B
   }
   when (io.tasks.mainpipe.ready) {
     when (mp_merge_probeack_valid) {
       state.s_merge_probeack := true.B
     }.elsewhen (mp_grant_valid) {
       state.s_refill := true.B
+      alreadySRefill := true.B
     }.elsewhen (mp_release_valid) {
       state.s_release := true.B
       meta.state := INVALID
@@ -560,10 +579,11 @@ class MSHR(implicit p: Parameters) extends L2Module {
 
   /* ======== Handling Nested B ======== */
   when (io.bMergeTask.valid) {
+    AneedReplMergeB := true.B
     state.s_merge_probeack := false.B
     state.s_release := true.B
     state.w_releaseack := true.B
-    when (meta.clients.orR) {
+    when (meta.clients.orR && !alreadySendProbe) {
       state.s_rprobe := false.B
       state.w_rprobeackfirst := false.B
       state.w_rprobeacklast := false.B

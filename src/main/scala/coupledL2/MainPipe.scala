@@ -226,6 +226,7 @@ class MainPipe(implicit p: Parameters) extends L2Module {
   ms_task.dsWen            := false.B
   ms_task.wayMask          := 0.U(cacheParams.ways.W)
   ms_task.replTask         := false.B
+  ms_task.mergeTask        := false.B
   ms_task.reqSource        := req_s3.reqSource
 
   /* ======== Resps to SinkA/B/C Reqs ======== */
@@ -286,7 +287,7 @@ class MainPipe(implicit p: Parameters) extends L2Module {
   val wen_c = sinkC_req_s3 && isParamFromT(req_s3.param) && req_s3.opcode(0) && dirResult_s3.hit
   val wen_mshr = req_s3.dsWen && (
     mshr_probeack_s3 || mshr_release_s3 ||
-    mshr_refill_s3 && !need_repl && !retry
+    mshr_refill_s3 && !need_repl && !retry || req_s3.mergeTask
   )
   val wen   = wen_c || wen_mshr
 

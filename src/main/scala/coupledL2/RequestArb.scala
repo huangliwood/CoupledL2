@@ -167,7 +167,8 @@ class RequestArb(implicit p: Parameters) extends L2Module {
   io.refillBufRead_s2.valid := mshrTask_s2 && (
     task_s2.bits.fromB && task_s2.bits.opcode(2, 1) === ProbeAck(2, 1) && task_s2.bits.replTask ||
     task_s2.bits.opcode(2, 1) === Release(2, 1) && task_s2.bits.replTask ||
-    mshrTask_s2_a_upwards && !task_s2.bits.useProbeData)
+    mshrTask_s2_a_upwards && !task_s2.bits.useProbeData ||
+    task_s2.bits.mergeTask && task_s2.bits.dsWen)
   io.refillBufRead_s2.id := task_s2.bits.mshrId
 
   // ReleaseData and ProbeAckData read releaseBuffer

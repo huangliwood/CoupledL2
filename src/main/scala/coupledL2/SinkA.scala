@@ -97,6 +97,7 @@ class SinkA(implicit p: Parameters) extends L2Module {
     task.wayMask := 0.U(cacheParams.ways.W)
     task.reqSource := a.user.lift(utility.ReqSourceKey).getOrElse(MemReqSource.NoWhere.id.U)
     task.replTask := false.B
+    task.mergeTask := false.B
     task.reqSource := DontCare
     task
   }
@@ -130,6 +131,7 @@ class SinkA(implicit p: Parameters) extends L2Module {
     task.wayMask := 0.U(cacheParams.ways.W)
     task.reqSource := MemReqSource.L2Prefetch.id.U
     task.replTask := false.B
+    task.mergeTask := false.B
     task
   }
   commonReq.valid := io.a.valid && first && !noSpace
