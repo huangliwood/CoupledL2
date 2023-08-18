@@ -284,14 +284,16 @@ class MSHR(implicit p: Parameters) extends L2Module {
       ProbeAckData,
       ProbeAck
     )
-    mp_merge_probeack.param := ParallelLookUp(
-      Cat(isT(meta.state), task.param(bdWidth - 1, 0)),
-      Seq(
-        Cat(false.B, toN) -> BtoN,
-        Cat(true.B, toN) -> TtoN,
-        Cat(true.B, toB) -> TtoB
-      )
-    )
+    // TODO: has problem here
+//    mp_merge_probeack.param := ParallelLookUp(
+//      Cat(isT(meta.state), task.param(bdWidth - 1, 0)),
+//      Seq(
+//        Cat(false.B, toN) -> BtoN,
+//        Cat(true.B, toN) -> TtoN,
+//        Cat(true.B, toB) -> TtoB
+//      )
+//    )
+    mp_merge_probeack.param := Mux(isT(meta.state), TtoN, BtoN)
     mp_merge_probeack.mshrTask := true.B
     mp_merge_probeack.mshrId := io.id
     // mp_merge_probeack definitely read releaseBuf and refillBuf at ReqArb
@@ -602,6 +604,15 @@ class MSHR(implicit p: Parameters) extends L2Module {
     when (io.nestedwb.c_set_dirty) {
       meta.dirty := true.B
     }
+//    TODO: wait to test
+//    when(req_valid && req.fromB){
+//      when(state.s_pprobe === false.B && !alreadySendProbe){
+//        state.s_pprobe := true.B
+//        state.w_pprobeack := true.B
+//        state.w_pprobeackfirst := true.B
+//        state.w_pprobeacklast := true.B
+//      }
+//    }
   }
   // let nested C write ReleaseData to the MSHRBuffer entry of this MSHR id
   // This is the VALID signal for releaseBuf.io.w(2)
