@@ -10,8 +10,10 @@ import huancun._
 import coupledL2.prefetch._
 import utility.{ChiselDB, FileRegisters}
 import coupledL3._
+import chisel3.util.experimental.BoringUtils
 
 import scala.collection.mutable.ArrayBuffer
+import coupledL3.utils.GTimer
 
 class TestTop_L2()(implicit p: Parameters) extends LazyModule {
 
@@ -531,7 +533,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       sets = 64,
       clientCaches = Seq(CacheParameters(
         sets = 64,
-        ways = 4,
+        ways = 2 * nrL2,
         aliasBitsOpt = None,
         name = "l2",
         blockGranularity = 64
@@ -566,6 +568,26 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
         node.makeIOs()(ValName(s"master_port_$i"))
     }
     dma_node.makeIOs()(ValName("dma_port"))
+
+    val io = IO(new Bundle{
+      val perfClean = Input(Bool())
+      val perfDump = Input(Bool())
+    })
+
+    val logTimestamp = WireInit(0.U(64.W))
+    val perfClean = WireInit(false.B)
+    val perfDump = WireInit(false.B)
+
+    BoringUtils.addSink(logTimestamp, "logTimestamp")
+    BoringUtils.addSink(perfClean, "XSPERF_CLEAN")
+    BoringUtils.addSink(perfDump, "XSPERF_DUMP")
+  
+    perfClean := io.perfClean
+    perfDump := io.perfDump
+  
+    val timer = GTimer()
+
+    logTimestamp := timer
   }
 }
 

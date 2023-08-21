@@ -1149,7 +1149,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
 
   //  Wakeup nested pending task
   when(io.nestedwb.wakeupValid) {
-    when(waitNestedC && io.nestedwb.wakeupSourceId === nestedSourceIdC) {
+    when(waitNestedC && io.nestedwb.wakeupSourceId === nestedSourceIdC && !io.nestedwb.fromProbeHelper) {
       waitNestedC := false.B
     }
     when(waitNestedB && io.nestedwb.wakeupSourceId === nestedSourceIdB && io.nestedwb.fromProbeHelper) {
