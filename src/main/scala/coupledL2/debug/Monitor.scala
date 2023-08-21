@@ -41,7 +41,7 @@ class CPL2S3Info(implicit p: Parameters) extends L2Bundle {
 class Monitor(implicit p: Parameters) extends L2Module {
   val io = IO(new Bundle() {
     val fromMainPipe = Input(new MainpipeMoni())
-    //  val nestedWBValid = Input(Bool())
+//  val nestedWBValid = Input(Bool())
   })
 
   val mp            = io.fromMainPipe
@@ -62,11 +62,11 @@ class Monitor(implicit p: Parameters) extends L2Module {
   /* ======== MainPipe Assertions ======== */
   // ! Release w/o data will not trigger nestedWBValid, either
   // ! consider using mshrs.map(_.io.nestedwb_match) and passes to Monitor, if necessary
-  //  val c_notHit = s3_valid && req_s3.fromC && !dirResult_s3.hit
-  //  val c_noNested = !io.nestedWBValid
-  //  assert(RegNext(!(c_notHit && c_noNested)),
-  //    "C Release should always hit or have some MSHR meta nested, Tag %x Set %x",
-  //    req_s3.tag, req_s3.set)
+//  val c_notHit = s3_valid && req_s3.fromC && !dirResult_s3.hit
+//  val c_noNested = !io.nestedWBValid
+//  assert(RegNext(!(c_notHit && c_noNested)),
+//    "C Release should always hit or have some MSHR meta nested, Tag %x Set %x",
+//    req_s3.tag, req_s3.set)
 
   assert(RegNext(!(s3_valid && !mshr_req_s3 && dirResult_s3.hit &&
     meta_s3.state === TRUNK && !meta_s3.clients.orR)),
@@ -79,36 +79,36 @@ class Monitor(implicit p: Parameters) extends L2Module {
   // assertion for set blocking
   // A channel task @s1 never have same-set task @s2/s3
   // to ensure that meta written can be read by chnTask
-  //  assert(RegNext(!(mp.task_s2.bits.set === mp.task_s3.bits.set &&
-  //    s2_valid && !req_s2.mshrTask && s3_valid)),
-  //    "chnTask-s2 and s3 same set, failed in blocking")
-  //
-  //  assert(RegNext(!(mp.task_s2.bits.set === RegNext(mp.task_s3.bits.set) &&
-  //    s2_valid && !req_s2.mshrTask && RegNext(s3_valid))),
-  //    "chosen-chnTask-s1 and s3 task same set, failed in blocking")
+//  assert(RegNext(!(mp.task_s2.bits.set === mp.task_s3.bits.set &&
+//    s2_valid && !req_s2.mshrTask && s3_valid)),
+//    "chnTask-s2 and s3 same set, failed in blocking")
+//
+//  assert(RegNext(!(mp.task_s2.bits.set === RegNext(mp.task_s3.bits.set) &&
+//    s2_valid && !req_s2.mshrTask && RegNext(s3_valid))),
+//    "chosen-chnTask-s1 and s3 task same set, failed in blocking")
 
-  //   TODO: whether mshrGrant also need such blocking, since it reads dir as well
+//   TODO: whether mshrGrant also need such blocking, since it reads dir as well
 
 
   /* ======== ChiselDB ======== */
-  //  assert(cacheParams.hartIds.length == 1, "private L2 should have one and only one hardId")
-  // if (!cacheParams.FPGAPlatform) {
-  //   val hartId = if (cacheParams.hartIds.length == 1) cacheParams.hartIds.head else 0
-  //   val table = ChiselDB.createTable(s"L2MP", new CPL2S3Info, basicDB = true)
-  //   val s3Info = Wire(new CPL2S3Info)
-  //   s3Info.mshrTask := req_s3.mshrTask
-  //   s3Info.channel := req_s3.channel
-  //   s3Info.opcode := req_s3.opcode
-  //   s3Info.tag := req_s3.tag
-  //   s3Info.sset := req_s3.set
-  //   s3Info.dirHit := dirResult_s3.hit
-  //   s3Info.dirWay := dirResult_s3.way
-  //   s3Info.allocValid := mp.allocMSHR_s3.valid
-  //   s3Info.allocPtr := mp.allocMSHR_s3.bits
-  //   s3Info.mshrId := req_s3.mshrId
-  //   s3Info.metaWvalid := mp.metaW_s3.valid
-  //   s3Info.metaWway := OHToUInt(mp.metaW_s3.bits.wayOH)
+//  assert(cacheParams.hartIds.length == 1, "private L2 should have one and only one hardId")
+//   if (!cacheParams.FPGAPlatform) {
+//     val hartId = if (cacheParams.hartIds.length == 1) cacheParams.hartIds.head else 0
+//     val table = ChiselDB.createTable(s"L2MP", new CPL2S3Info, basicDB = true)
+//     val s3Info = Wire(new CPL2S3Info)
+//     s3Info.mshrTask := req_s3.mshrTask
+//     s3Info.channel := req_s3.channel
+//     s3Info.opcode := req_s3.opcode
+//     s3Info.tag := req_s3.tag
+//     s3Info.sset := req_s3.set
+//     s3Info.dirHit := dirResult_s3.hit
+//     s3Info.dirWay := dirResult_s3.way
+//     s3Info.allocValid := mp.allocMSHR_s3.valid
+//     s3Info.allocPtr := mp.allocMSHR_s3.bits
+//     s3Info.mshrId := req_s3.mshrId
+//     s3Info.metaWvalid := mp.metaW_s3.valid
+//     s3Info.metaWway := OHToUInt(mp.metaW_s3.bits.wayOH)
 
-  //   table.log(s3Info, s3_valid, s"L2${hartId}_${p(SliceIdKey)}", clock, reset)
-  // }
+//     table.log(s3Info, s3_valid, s"L2${hartId}_${p(SliceIdKey)}", clock, reset)
+//   }
 }

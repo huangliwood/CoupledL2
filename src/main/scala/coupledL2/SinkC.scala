@@ -23,6 +23,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import chipsalliance.rocketchip.config.Parameters
 import coupledL2.utils.XSPerfAccumulate
+import utility.MemReqSource
 
 class PipeBufferRead(implicit p: Parameters) extends L2Bundle {
   val bufIdx = UInt(bufIdxBits.W)
@@ -74,6 +75,7 @@ class SinkC(implicit p: Parameters) extends L2Module {
     task.set := parseAddress(c.address)._2
     task.off := parseAddress(c.address)._3
     task.alias.foreach(_ := 0.U)
+    task.vaddr.foreach(_ := 0.U)
     task.opcode := c.opcode
     task.param := c.param
     task.size := c.size
@@ -84,7 +86,6 @@ class SinkC(implicit p: Parameters) extends L2Module {
     task.mshrId := 0.U(mshrBits.W)
     task.aliasTask.foreach(_ := false.B)
     task.useProbeData := false.B
-    task.pbIdx := 0.U(mshrBits.W)
     task.fromL2pft.foreach(_ := false.B)
     task.needHint.foreach(_ := false.B)
     task.dirty := false.B

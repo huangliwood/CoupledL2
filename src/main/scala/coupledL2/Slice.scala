@@ -37,6 +37,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     val prefetch = prefetchOpt.map(_ => Flipped(new PrefetchIO))
     val msStatus = topDownOpt.map(_ => Vec(mshrsAll, ValidIO(new MSHRStatus)))
     val dirResult = topDownOpt.map(_ => ValidIO(new DirResult))
+    val latePF = topDownOpt.map(_ => Output(Bool()))
   })
 
   val reqArb = Module(new RequestArb())
@@ -86,8 +87,6 @@ class Slice()(implicit p: Parameters) extends L2Module {
   mshrCtl.io.resps.sourceC := sourceC.io.resp
   mshrCtl.io.nestedwb := mainPipe.io.nestedwb
   mshrCtl.io.bMergeTask := sinkB.io.bMergeTask
-  mshrCtl.io.pbRead <> sinkA.io.pbRead
-  mshrCtl.io.pbResp <> sinkA.io.pbResp
   mshrCtl.io.replResp <> directory.io.replResp
   mainPipe.io.replResp <> directory.io.replResp
 
@@ -173,6 +172,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
       io.msStatus.get        := mshrCtl.io.msStatus.get
       io.dirResult.get.valid := RegNextN(directory.io.read.fire, 2, Some(false.B)) // manually generate dirResult.valid
       io.dirResult.get.bits  := directory.io.resp
+      io.latePF.get          := a_reqBuf.io.hasLatePF
     }
   )
 

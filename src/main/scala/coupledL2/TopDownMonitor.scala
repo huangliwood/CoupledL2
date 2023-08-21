@@ -4,6 +4,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import coupledL2.utils.{XSPerfAccumulate, XSPerfHistogram}
+import utility.MemReqSource
 
 class TopDownMonitor()(implicit p: Parameters) extends L2Module {
   val banks = 1 << bankBits

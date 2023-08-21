@@ -181,6 +181,14 @@ class MSHR(implicit p: Parameters) extends L3Module {
     timer       := 1.U
   }
 
+  // for debug
+  //  TODO: debug address consider multi-bank
+  def restoreAddr(set: UInt, tag: UInt) = {
+    (set << offsetBits).asUInt + (tag << (setBits + offsetBits)).asUInt
+  }
+  val debug_addr_req = restoreAddr(req.set, req.tag)
+  dontTouch(debug_addr_req)
+
 
   // --------------------------------------------------------------------------
   //  Enchantment
