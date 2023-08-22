@@ -10,8 +10,10 @@ import huancun._
 import coupledL2.prefetch._
 import utility.{ChiselDB, FileRegisters}
 import coupledL3._
+import chisel3.util.experimental.BoringUtils
 
 import scala.collection.mutable.ArrayBuffer
+import coupledL3.utils.GTimer
 
 class TestTop_L2()(implicit p: Parameters) extends LazyModule {
 
@@ -484,11 +486,11 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
   }
 
   val l2xbar = TLXbar()
-  // val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffL), beatBytes = 32))
-  val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffffL), beatBytes = 32))
+  val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffffffL), beatBytes = 32))
   var master_nodes: Seq[TLClientNode] = Seq() // TODO
-
-  (0 until nrL2).map{i =>
+  val NumCores=2
+  // val nullNode = LazyModule(new SppSenderNull)
+  val l2List = (0 until nrL2).map{i =>
     val l1d = createClientNode(s"l1d$i", 32)
     val l1i = TLClientNode(Seq(
       TLMasterPortParameters.v1(
@@ -501,25 +503,42 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
     master_nodes = master_nodes ++ Seq(l1d, l1i) // TODO
 
     val l1xbar = TLXbar()
-    val l2node = LazyModule(new CoupledL2()(new Config((_, _, _) => {
+    val l2 = LazyModule(new CoupledL2()(new Config((_, _, _) => {
       case L2ParamKey => L2Param(
         name = s"l2$i",
         ways = 4,
         // sets = 128,
         sets = 32,
         clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
-        echoField = Seq(DirtyField()),
-        prefetch = Some(BOPParameters(
-          rrTableEntries = 16,
-          rrTagBits = 6
-        ))
+        echoField = Seq(huancun.DirtyField()),
+        // prefetch = Some(BOPParameters(rrTableEntries = 16,rrTagBits = 6))
+        prefetch = Some(HyperPrefetchParams()),/* 
+        del L2 prefetche recv option, move into: prefetch =  PrefetchReceiverParams
+        prefetch options:
+          SPPParameters          => spp only
+          BOPParameters          => bop only
+          PrefetchReceiverParams => sms+bop
+          HyperPrefetchParams    => spp+bop+sms
+        */
+        sppMultiLevelRefill = Some(coupledL2.prefetch.PrefetchReceiverParams()),
+        /*must has spp, otherwise Assert Fail
+        sppMultiLevelRefill options:
+        PrefetchReceiverParams() => spp has cross level refill
+        None                     => spp only refill L2 
+        */
       )
-    }))).node
-
+    })))
+    val l2node = l2.node
     l1xbar := TLBuffer() := l1i
     l1xbar := TLBuffer() := l1d
-
+    l2.pf_recv_node match{
+      case Some(l2Recv) => 
+        val l1_sms_send_0_node = LazyModule(new PrefetchSmsOuterNode)
+        l2Recv := l1_sms_send_0_node.outNode
+      case None =>
+    }
     l2xbar := TLBuffer() := l2node := l1xbar
+    l2 // return l2 list
   }
 
   val l3 = LazyModule(new CoupledL3()(new Config((_, _, _) => {
@@ -527,10 +546,11 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       name = s"l3",
       ways = 4,
       // sets = 128,
-      sets = 32,
+      // sets = 32,
+      sets = 64,
       clientCaches = Seq(CacheParameters(
-        sets = 32,
-        ways = 8,
+        sets = 64,
+        ways = 2 * nrL2,
         aliasBitsOpt = None,
         name = "l2",
         blockGranularity = 64
@@ -539,6 +559,35 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       prefetch = None
     )
   })))
+  // l2List.zipWithIndex.foreach { 
+  //   case (l2, i) =>
+  //     l2.spp_send_node match{
+  //       case Some(sppSend) =>
+  //         val l3pf_RecvXbar =  LazyModule(new PrefetchReceiverXbar(NumCores))
+  //         l3pf_RecvXbar.inNode(i) := l2.spp_send_node.get
+  //         println(f"spp_send_node${i} connecting to l3pf_RecvXbar")
+  //       case None => 
+  //     }
+  // }
+  // println(f"pf_l3recv_node connecting to l3pf_RecvXbar out")
+  // val sppHasCrossLevelRefillOpt = p(L2ParamKey).sppMultiLevelRefill
+  // println(f"SPP cross level refill: ${sppHasCrossLevelRefillOpt} ")
+  // sppHasCrossLevelRefillOpt match{
+  //   case Some(x) =>
+  //     val l3pf_RecvXbar = LazyModule(new PrefetchReceiverXbar(NumCores))
+  //     l2List.zipWithIndex.foreach { 
+  //       case (l2, i) =>
+  //         l2.spp_send_node match {
+  //           case Some(l2Send) =>
+  //             l3pf_RecvXbar.inNode(i) := l2Send
+  //             println(f"spp_send_node${i} connecting to l3pf_RecvXbar")
+  //           case None =>
+  //       }
+  //     }
+  //     println(f"pf_l3recv_node connecting to l3pf_RecvXbar out")
+  //     l3.pf_l3recv_node.map(l3_recv =>  l3_recv:= l3pf_RecvXbar.outNode.head)
+  //   case None =>
+  // }
 
   val dma_node = TLClientNode(Seq(TLMasterPortParameters.v2(
       Seq(TLMasterParameters.v1(
@@ -565,6 +614,26 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
         node.makeIOs()(ValName(s"master_port_$i"))
     }
     dma_node.makeIOs()(ValName("dma_port"))
+
+    val io = IO(new Bundle{
+      val perfClean = Input(Bool())
+      val perfDump = Input(Bool())
+    })
+
+    val logTimestamp = WireInit(0.U(64.W))
+    val perfClean = WireInit(false.B)
+    val perfDump = WireInit(false.B)
+
+    BoringUtils.addSink(logTimestamp, "logTimestamp")
+    BoringUtils.addSink(perfClean, "XSPERF_CLEAN")
+    BoringUtils.addSink(perfDump, "XSPERF_DUMP")
+  
+    perfClean := io.perfClean
+    perfDump := io.perfDump
+  
+    val timer = GTimer()
+
+    logTimestamp := timer
   }
 }
 
@@ -767,7 +836,22 @@ object TestTop_fullSys extends App {
   val config = new Config((_, _, _) => {
     case L2ParamKey => L2Param(
       clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
-      echoField = Seq(DirtyField())
+      echoField = Seq(DirtyField()),
+      // prefetch = Some(BOPParameters(rrTableEntries = 16,rrTagBits = 6))
+      prefetch = Some(HyperPrefetchParams()), /*
+      del L2 prefetche recv option, move into: prefetch =  PrefetchReceiverParams
+      prefetch options:
+        SPPParameters          => spp only
+        BOPParameters          => bop only
+        PrefetchReceiverParams => sms+bop
+        HyperPrefetchParams    => spp+bop+sms
+      */
+      sppMultiLevelRefill = Some(coupledL2.prefetch.PrefetchReceiverParams()),
+      /*must has spp, otherwise Assert Fail
+      sppMultiLevelRefill options:
+      PrefetchReceiverParams() => spp has cross level refill
+      None                     => spp only refill L2
+      */
     )
     case HCCacheParamsKey => HCCacheParameters(
       echoField = Seq(DirtyField())

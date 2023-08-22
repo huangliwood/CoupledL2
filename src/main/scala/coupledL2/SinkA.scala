@@ -109,9 +109,11 @@ class SinkA(implicit p: Parameters) extends L2Module {
   commonReq.valid := io.a.valid
   commonReq.bits := fromTLAtoTaskBundle(io.a.bits)
   if (prefetchOpt.nonEmpty) {
-    prefetchReq.get.valid := io.prefetchReq.get.valid
-    prefetchReq.get.bits := fromPrefetchReqtoTaskBundle(io.prefetchReq.get.bits)
-    io.prefetchReq.get.ready := prefetchReq.get.ready
+    val pipe = Module(new Pipeline(io.prefetchReq.get.bits.cloneType, 1))
+    pipe.io.in <> io.prefetchReq.get
+    prefetchReq.get.valid := pipe.io.out.valid
+    prefetchReq.get.bits := fromPrefetchReqtoTaskBundle(pipe.io.out.bits)
+    pipe.io.out.ready := prefetchReq.get.ready
     fastArb(Seq(commonReq, prefetchReq.get), io.task)
   } else {
     io.task <> commonReq
@@ -120,6 +122,7 @@ class SinkA(implicit p: Parameters) extends L2Module {
   // Performance counters
   // num of reqs
   XSPerfAccumulate(cacheParams, "sinkA_req", io.task.fire())
+  XSPerfAccumulate(cacheParams, "sinkA_req_is_free", io.task.ready && !io.task.valid)
   XSPerfAccumulate(cacheParams, "sinkA_acquire_req", io.a.fire() && io.a.bits.opcode(2, 1) === AcquireBlock(2, 1))
   XSPerfAccumulate(cacheParams, "sinkA_acquireblock_req", io.a.fire() && io.a.bits.opcode === AcquireBlock)
   XSPerfAccumulate(cacheParams, "sinkA_acquireperm_req", io.a.fire() && io.a.bits.opcode === AcquirePerm)

@@ -196,7 +196,7 @@ class FSMState(implicit p: Parameters) extends L2Bundle {
   val s_merge_probeack = Bool() // respond probeack downwards, Probe merge into A-replacement-Release
   // val s_grantack = Bool() // respond grantack downwards, moved to GrantBuf
   // val s_triggerprefetch = prefetchOpt.map(_ => Bool())
-
+  val s_prefetchevict = prefetchOpt.map(_ => Bool())
   // wait
   val w_rprobeackfirst = Bool()
   val w_rprobeacklast = Bool()
@@ -249,6 +249,13 @@ class PrefetchRecv extends Bundle {
   val addr = UInt(64.W)
   val addr_valid = Bool()
   val l2_pf_en = Bool()
+}
+
+class LlcPrefetchRecv extends Bundle{
+  val source = UInt(8.W)
+  val needT = Bool()
+  val addr = UInt(64.W)
+  val addr_valid = Bool()
 }
 
 // custom l2 - l1 interface
