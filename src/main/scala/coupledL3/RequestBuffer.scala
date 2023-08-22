@@ -269,7 +269,7 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
       case (e, t) =>
         when(e.valid) { t := t + 1.U }
         when(RegNext(RegNext(e.valid) && !e.valid)) { t := 0.U }
-        assert(t < 10000.U, "ReqBuf Leak")
+        assert(t < 10000.U, "ReqBuf Leak set:0x%x tag:0x%x addr:0x%x source:%d opcode:%d param:%d", e.task.set, e.task.set, Cat(e.task.tag, e.task.set), e.task.sourceId, e.task.opcode, e.task.param)
 
         val enable = RegNext(e.valid) && !e.valid
         XSPerfHistogram(cacheParams, "reqBuf_timer", t, enable, 0, 20, 1, right_strict = true)

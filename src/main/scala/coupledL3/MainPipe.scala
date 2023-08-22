@@ -589,9 +589,9 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
       )
     )
 
-    val clientStates = VecInit(meta_s3.clientStates.zip(reqClientOH.asBools).map {
-      case (clientState, en) =>
-        Mux(en, Mux(isToN(req_s3.param), INVALID, BRANCH), Mux(dirResult_s3.hit, clientState, INVALID))
+    val clientStates = VecInit(meta_s3.clientStates.zip(reqClientOH.asBools).zipWithIndex.map {
+      case ((clientState, en), client) =>
+        Mux(en, Mux(isToN(req_s3.param), INVALID, BRANCH), Mux(dirResult_s3.hit, clientState, clientDirResult_s3.metas(client).state))
     })
 
     MetaEntry(
@@ -659,6 +659,15 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
           "illegal cache states! self is BRANCH and clients has TIP addr:0x%x channel:%d opcode:%d param:%d mshrTask:%d mshrId:%d sourceId:%d" , 
           debug_addr_s3, task_s3.bits.channel, task_s3.bits.opcode, task_s3.bits.param, task_s3.bits.mshrTask, task_s3.bits.mshrId, task_s3.bits.sourceId)
 
+  val metaWrNotMatch = VecInit(io.metaWReq.bits.wmeta.clientStates.zip(io.clientMetaWReq.bits.wmeta).map{
+    case(selfMeta, clientMeta) =>
+      selfMeta =/= clientMeta.state
+  })
+  assert(!(io.metaWReq.valid && io.clientMetaWReq.valid && metaWrNotMatch.asUInt.orR), 
+        "self client meta not match client meta! addr:0x%x channel:%d opcode:%d param:%d mshrTask:%d mshrId:%d sourceId:%d",
+        debug_addr_s3, task_s3.bits.channel, task_s3.bits.opcode, task_s3.bits.param, task_s3.bits.mshrTask, task_s3.bits.mshrId, task_s3.bits.sourceId)
+
+  
   willAccessDirTag := task_s3.valid && (
                             (mshr_grant_s3 || mshr_accessack_s3 || mshr_accessackdata_s3 || mshr_releaseack_s3) && req_s3.tagWen ||
                             metaW_valid_s3_c

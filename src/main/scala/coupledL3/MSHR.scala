@@ -463,7 +463,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
                                     dirResult.meta.clientStates(client)
                                   )
                                 ),
-                                INVALID 
+                                Mux(dirResult.hit, dirResult.meta.clientStates(client), clientDirResult.metas(client).state) 
                             )
     }
 
@@ -483,7 +483,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
         when(reqClient === client.U) {
           clientMeta.state := Mux(isToN(req.param), INVALID, BRANCH)
         }.otherwise {
-          clientMeta.state := clientDirResult.metas(client).state
+          clientMeta.state := Mux(clientDirResult.hits(client), clientDirResult.metas(client).state, INVALID)
         }
     } 
     mp_releaseack.clientWay := clientDirResult.way
