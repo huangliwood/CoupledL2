@@ -149,6 +149,9 @@ class Slice()(implicit p: Parameters) extends L2Module {
         evict <> mainPipe.io.prefetchEvict.get
       case None =>
     }
+      p.tlb_req.req.ready := true.B
+      p.tlb_req.resp.valid := false.B
+      p.tlb_req.resp.bits := DontCare
   }
 
   /* input & output signals */

@@ -82,9 +82,12 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle with HasChannelBits {
   // for Release to read refillBuf and write to DS
   val replTask = Bool()
 
+<<<<<<< HEAD
   // for refillBuf data -> dataStroage
   val mergeTask = Bool()
 
+=======
+>>>>>>> vaddr_read
   // for TopDown Monitor (# TopDown)
   val reqSource = UInt(MemReqSource.reqSourceBits.W)
 
@@ -261,4 +264,69 @@ class LlcPrefetchRecv extends Bundle{
 // custom l2 - l1 interface
 class L2ToL1Hint(implicit p: Parameters) extends Bundle {
   val sourceId = UInt(32.W)    // tilelink sourceID
+}
+
+// custom l2 - l1 tlb
+// FIXME lyq: Tlbcmd and TlbExceptionBundle, how to use L1 corresponding bundles?
+object TlbCmd {
+  def read  = "b00".U
+  def write = "b01".U
+  def exec  = "b10".U
+
+  def atom_read  = "b100".U // lr
+  def atom_write = "b101".U // sc / amo
+
+  def apply() = UInt(3.W)
+  def isRead(a: UInt) = a(1,0)===read
+  def isWrite(a: UInt) = a(1,0)===write
+  def isExec(a: UInt) = a(1,0)===exec
+
+  def isAtom(a: UInt) = a(2)
+  def isAmo(a: UInt) = a===atom_write // NOTE: sc mixed
+}
+class TlbExceptionBundle extends Bundle {
+  val ld = Output(Bool())
+  val st = Output(Bool())
+  val instr = Output(Bool())
+}
+class L2TlbReq(implicit p: Parameters) extends L2Bundle{
+  val vaddr = Output(UInt((vaddrBits+offsetBits).W))
+  val cmd = Output(TlbCmd())
+  val size = Output(UInt(log2Ceil(log2Ceil(XLEN/8) + 1).W))
+  val kill = Output(Bool()) // Use for blocked tlb that need sync with other module like icache
+  val no_translate = Output(Bool()) // do not translate, but still do pmp/pma check
+}
+class L2TlbResp(nDups: Int = 1)(implicit p: Parameters) extends L2Bundle {
+  val paddr = Vec(nDups, Output(UInt(fullAddressBits.W)))
+  val miss = Output(Bool())
+  val fast_miss = Output(Bool()) // without sram part for timing optimization
+  val excp = Vec(nDups, new Bundle {
+    val pf = new TlbExceptionBundle()
+    val af = new TlbExceptionBundle()
+  })
+  val static_pm = Output(Valid(Bool())) // valid for static, bits for mmio result from normal entries
+  val ptwBack = Output(Bool()) // when ptw back, wake up replay rs's state
+}
+class L2ToL1TlbIO(nRespDups: Int = 1)(implicit p: Parameters) extends L2Bundle{
+  val req = DecoupledIO(new L2TlbReq)
+  val req_kill = Output(Bool())
+  val resp = Flipped(DecoupledIO(new L2TlbResp(nRespDups)))
+}
+
+// indicates where the memory access request comes from
+// a dupliacte of this is in xiangShan/package.scala utility/TLUtils/BusKeyField.scala
+object MemReqSource extends Enumeration {
+  val NoWhere = Value("NoWhere")
+
+  val CPUInst = Value("CPUInst")
+  val CPULoadData = Value("CPULoadData")
+  val CPUStoreData = Value("CPUStoreData")
+  val CPUAtomicData = Value("CPUAtomicData")
+  val L1InstPrefetch = Value("L1InstPrefetch")
+  val L1DataPrefetch = Value("L1DataPrefetch")
+  val PTW = Value("PTW")
+  val L2Prefetch = Value("L2Prefetch")
+  val ReqSourceCount = Value("ReqSourceCount")
+
+  val reqSourceBits = log2Ceil(ReqSourceCount.id)
 }

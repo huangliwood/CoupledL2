@@ -35,6 +35,7 @@ trait HasCoupledL2Parameters {
   val p: Parameters
   val cacheParams = p(L2ParamKey)
 
+  val XLEN = 64
   val blocks = cacheParams.sets * cacheParams.ways
   val blockBytes = cacheParams.blockBytes
   val beatBytes = cacheParams.channelBytes.d.get
@@ -49,6 +50,7 @@ trait HasCoupledL2Parameters {
                   else cacheParams.clientCaches.head.aliasBitsOpt
   val vaddrBitsOpt = if(cacheParams.clientCaches.isEmpty) None
                   else cacheParams.clientCaches.head.vaddrBitsOpt
+  val vaddrBits = vaddrBitsOpt.getOrElse(0)
   val pageOffsetBits = log2Ceil(cacheParams.pageBytes)
 
   val bufBlocks = 8 // hold data that flows in MainPipe (4)
@@ -249,8 +251,14 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
   lazy val module = new LazyModuleImp(this) {
     val banks = node.in.size
     val bankBits = if (banks == 1) 0 else log2Up(banks)
+    val l2TlbParams: Parameters = p.alterPartial {
+      case EdgeInKey => node.in.head._2
+      case EdgeOutKey => node.out.head._2
+      case BankBitsKey => bankBits
+    }
     val io = IO(new Bundle {
       val l2_hint = Valid(UInt(32.W))
+      val l2_tlb_req = new L2ToL1TlbIO(nRespDups = 1)(l2TlbParams)
     })
 
     // Display info
@@ -307,6 +315,7 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
           fastArb(evict_wire, prefetcher.get.io.evict.get, Some("prefetch_evict"))
           case None =>
         }
+        prefetcher.get.io.tlb_req <> io.l2_tlb_req
     }
 
     pf_recv_node match {
@@ -436,6 +445,10 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
               //   case None =>
               // }
             }
+            s.tlb_req.req.valid := false.B
+            s.tlb_req.req.bits := DontCare
+            s.tlb_req.req_kill := DontCare
+            s.tlb_req.resp.ready := true.B
         }
 
         slice
@@ -470,6 +483,9 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
         }
         topDown.get.io.dirResult.zip(slices).foreach {
           case (res, s) => res := s.io.dirResult.get
+        }
+        topDown.get.io.latePF.zip(slices).foreach {
+          case (in, s) => in := s.io.latePF.get
         }
       }
     }

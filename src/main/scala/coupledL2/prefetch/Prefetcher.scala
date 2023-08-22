@@ -37,6 +37,7 @@ object AccessState {
 class PrefetchReq(implicit p: Parameters) extends PrefetchBundle {
   val tag = UInt(fullTagBits.W)
   val set = UInt(setBits.W)
+  val vaddr = vaddrBitsOpt.map(_ => UInt(vaddrBitsOpt.get.W))
   val needT = Bool()
   val source = UInt(sourceIdBits.W)
   val isBOP = Bool()
@@ -47,6 +48,7 @@ class PrefetchResp(implicit p: Parameters) extends PrefetchBundle {
   // val id = UInt(sourceIdBits.W)
   val tag = UInt(fullTagBits.W)
   val set = UInt(setBits.W)
+  val vaddr = vaddrBitsOpt.map(_ => UInt(vaddrBitsOpt.get.W))
   def addr = Cat(tag, set, 0.U(offsetBits.W))
 }
 
@@ -74,6 +76,7 @@ class PrefetchEvict(implicit p: Parameters) extends PrefetchBundle {
 
 class PrefetchIO(implicit p: Parameters) extends PrefetchBundle {
   val train = Flipped(DecoupledIO(new PrefetchTrain))
+  val tlb_req = new L2ToL1TlbIO(nRespDups= 1)
   val req = DecoupledIO(new PrefetchReq)
   val resp = Flipped(DecoupledIO(new PrefetchResp))
   val recv_addr = Flipped(ValidIO(UInt(64.W)))
@@ -202,6 +205,7 @@ class Prefetcher(implicit p: Parameters) extends PrefetchModule {
       val pipe = Module(new Pipeline(io.req.bits.cloneType, 1))
       pft.io.train <> io.train
       pft.io.resp <> io.resp
+      pft.io.tlb_req <> io.tlb_req
       pftQueue.io.enq <> pft.io.req
       pipe.io.in <> pftQueue.io.deq
       io.req <> pipe.io.out
@@ -216,11 +220,17 @@ class Prefetcher(implicit p: Parameters) extends PrefetchModule {
       val bop_en = RegNextN(io_l2_pf_en, 2, Some(true.B))
       // l1 prefetch
       l1_pf.io.recv_addr := ValidIODelay(io.recv_addr, 2)
-      l1_pf.io.train <> DontCare
-      l1_pf.io.resp <> DontCare
+      l1_pf.io.train.valid := false.B
+      l1_pf.io.train.bits := 0.U.asTypeOf(new PrefetchTrain)
+      l1_pf.io.resp.valid := false.B
+      l1_pf.io.resp.bits := 0.U.asTypeOf(new PrefetchResp)
+      l1_pf.io.tlb_req.req.ready := true.B
+      l1_pf.io.tlb_req.resp.valid := false.B
+      l1_pf.io.tlb_req.resp.bits := DontCare
       // l2 prefetch
       bop.io.train <> io.train
       bop.io.resp <> io.resp
+      bop.io.tlb_req <> io.tlb_req
       // send to prq
       pftQueue.io.enq.valid := l1_pf.io.req.valid || (bop_en && bop.io.req.valid)
       pftQueue.io.enq.bits := Mux(l1_pf.io.req.valid,

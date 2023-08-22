@@ -121,8 +121,7 @@ case class L2Param
   reqField: Seq[BundleFieldBase] = Nil, 
   respKey: Seq[BundleKeyBase] = Seq(IsHitKey),
   // Manager
-  // reqKey: Seq[BundleKeyBase] = Seq(AliasKey, PrefetchKey, ReqSourceKey),
-  reqKey: Seq[BundleKeyBase] = Seq(AliasKey, PrefetchKey),
+  reqKey: Seq[BundleKeyBase] = Seq(AliasKey, VaddrKey, PrefetchKey, ReqSourceKey),
   respField: Seq[BundleFieldBase] = Nil,
 
   innerBuf: TLBufferParams = TLBufferParams(),
