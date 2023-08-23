@@ -206,7 +206,8 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     !(willSendSourceC && !c_s3.ready && !sendSourceC     ) &&
     !(willSendSourceD && !d_s3.ready && !sendSourceD     )
   )
-  s3_fire := s3_valid && s4_ready
+  // s3_fire := s3_valid && s4_ready
+  s3_fire := s3_valid && s5_ready // TODO:
   when(s2_fire) {
     s3_full := true.B 
   }.elsewhen(s3_fire) {
