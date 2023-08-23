@@ -24,7 +24,7 @@ import coupledL3.utils._
 import coupledL3.MetaData._
 import chipsalliance.rocketchip.config.Parameters
 import utility.ParallelPriorityMux
-
+import xs.utils.sram.SRAMTemplate
 
 trait HasClientInfo { this: HasCoupledL3Parameters =>
   // assume all clients have same params
@@ -93,8 +93,6 @@ class ClientDirectory(implicit p: Parameters) extends L3Module with DontCareInne
   val io = IO(new Bundle() {
     val read = Flipped(DecoupledIO(new ClientDirRead))
     val resp = Output(new ClientDirResult)
-    // val metaWReq = Flipped(ValidIO(new ClientMetaWrite))
-    // val tagWReq = Flipped(ValidIO(new ClientTagWrite))
     val metaWReq = Flipped(DecoupledIO(new ClientMetaWrite))
     val tagWReq = Flipped(DecoupledIO(new ClientTagWrite))
   })
@@ -117,7 +115,7 @@ class ClientDirectory(implicit p: Parameters) extends L3Module with DontCareInne
   val banks = cacheParams.dirNBanks
 
   val tagArray  = Module(new BankedSRAM(UInt(clientTagBits.W), sets, ways, banks, singlePort = true, enableClockGate = enableClockGate))
-  val metaArray = Module(new BankedSRAM(Vec(clientBits, new ClientMetaEntry), sets, ways, banks, singlePort = true, enableClockGate = enableClockGate))
+  val metaArray = Module(new SRAMTemplate(Vec(clientBits, new ClientMetaEntry), sets, ways, singlePort = true, hasClkGate = enableClockGate))
   val tagRead = Wire(Vec(ways, UInt(clientTagBits.W)))
   val metaRead = Wire(Vec(ways, Vec(clientBits, new ClientMetaEntry)))
 
