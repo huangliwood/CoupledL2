@@ -46,7 +46,7 @@ class MSHRResps(implicit p: Parameters) extends L3Bundle {
   val source_c = Flipped(ValidIO(new RespInfoBundle))
 }
 
-class MSHR(implicit p: Parameters) extends L3Module {
+class MSHR(implicit p: Parameters) extends L3Module with noninclusive.HasClientInfo {
   val io = IO(new Bundle() {
     val id = Input(UInt(mshrBits.W))
     val status = ValidIO(new MSHRStatus)
@@ -407,8 +407,8 @@ class MSHR(implicit p: Parameters) extends L3Module {
     mp_probeack.fromProbeHelper := req.fromProbeHelper
 
     mp_probeack.clientTagWen := false.B
-    mp_probeack.clientSet := req.set
-    mp_probeack.clientTag := req.tag
+    mp_probeack.clientSet := clientDirResult.set
+    mp_probeack.clientTag := clientDirResult.tag
     mp_probeack.clientWay := clientDirResult.way
 
     mp_probeack
@@ -463,7 +463,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
                                     dirResult.meta.clientStates(client)
                                   )
                                 ),
-                                INVALID 
+                                Mux(dirResult.hit, dirResult.meta.clientStates(client), clientDirResult.metas(client).state) 
                             )
     }
 
@@ -483,7 +483,7 @@ class MSHR(implicit p: Parameters) extends L3Module {
         when(reqClient === client.U) {
           clientMeta.state := Mux(isToN(req.param), INVALID, BRANCH)
         }.otherwise {
-          clientMeta.state := clientDirResult.metas(client).state
+          clientMeta.state := Mux(clientDirResult.hits(client), clientDirResult.metas(client).state, INVALID)
         }
     } 
     mp_releaseack.clientWay := clientDirResult.way
@@ -1165,7 +1165,10 @@ class MSHR(implicit p: Parameters) extends L3Module {
 
 
   // Waitting for ProbeHelper task finish
-  val phAddrMatch = clientDirResult.set === io.probeHelperWakeup.set && clientDirResult.tag === io.probeHelperWakeup.tag
+  val addr = Cat(io.probeHelperWakeup.tag, io.probeHelperWakeup.set)
+  val wakeupSet = addr(clientSetBits - 1, 0)
+  val wakeupTag = (addr >> clientSetBits.U)(clientTagBits - 1, 0)
+  val phAddrMatch = clientDirResult.set === wakeupSet && clientDirResult.tag === wakeupTag
   val phWakeupMatch = status_reg.valid && !state.w_probehelper_done && io.probeHelperWakeup.valid && phAddrMatch
   when(phWakeupMatch) {
     state.w_probehelper_done := true.B

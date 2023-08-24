@@ -59,6 +59,8 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
     val pipeFlow_s1 = Input(Bool())
     val pipeFlow_s2 = Input(Bool())
     val pipeFlow_s3 = Input(Bool())
+
+    val taskStatusSinkC = Input(Vec(bufBlocks, new TaskStatusSinkC))
   })
 
   io.ATag := io.in.bits.tag
@@ -119,7 +121,8 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   val full    = Cat(buffer.map(_.valid)).andR
 
   // flow not allowed when full, or entries might starve
-  val canFlow = flow.B && !full && !conflict(in) && !chosenQValid && !Cat(io.mainPipeBlock).orR && !noFreeWay(in)
+  val sourceConflictIn = Cat(io.taskStatusSinkC.map( s => s.valid && s.sourceId === io.in.bits.sourceId)).orR
+  val canFlow = flow.B && !full && !conflict(in) && !chosenQValid && !Cat(io.mainPipeBlock).orR && !noFreeWay(in) && !sourceConflictIn
   val doFlow  = canFlow && io.out.ready
 
 
@@ -163,8 +166,9 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
     case(in, e) =>
       // when io.out.valid, we temporarily stall all entries of the same set
       val pipeBlockOut = io.out.valid && sameSet(e.task, io.out.bits)
+      val sourceConflict = Cat(io.taskStatusSinkC.map( s => s.valid && s.sourceId === e.task.sourceId)).orR
 
-      in.valid := e.valid && e.rdy && !pipeBlockOut
+      in.valid := e.valid && e.rdy && !pipeBlockOut && !sourceConflict
       in.bits  := e
   }
 
@@ -269,7 +273,7 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
       case (e, t) =>
         when(e.valid) { t := t + 1.U }
         when(RegNext(RegNext(e.valid) && !e.valid)) { t := 0.U }
-        assert(t < 10000.U, "ReqBuf Leak")
+        assert(t < 10000.U, "ReqBuf Leak set:0x%x tag:0x%x addr:0x%x source:%d opcode:%d param:%d", e.task.set, e.task.set, Cat(e.task.tag, e.task.set), e.task.sourceId, e.task.opcode, e.task.param)
 
         val enable = RegNext(e.valid) && !e.valid
         XSPerfHistogram(cacheParams, "reqBuf_timer", t, enable, 0, 20, 1, right_strict = true)

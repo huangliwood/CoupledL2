@@ -549,8 +549,11 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       // sets = 32,
       sets = 64,
       clientCaches = Seq(CacheParameters(
-        sets = 64,
-        ways = 2 * nrL2,
+        // sets = 64,
+        // ways = 2 * nrL2,
+        sets = 32,
+        // ways = 2 * nrL2,
+        ways = 4 * nrL2 + nrL2, // extra ways is needed for solving duble request conflict from the same sourceId(Acquire + Release)
         aliasBitsOpt = None,
         name = "l2",
         blockGranularity = 64

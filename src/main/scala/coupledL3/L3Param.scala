@@ -101,7 +101,7 @@ case class L3Param
    */
 
   enableDebug: Boolean = true,
-  enableHalfFreq: Boolean = false,
+  enableHalfFreq: Boolean = true,
 
   // Client (these are set in Configs.scala in XiangShan)
   echoField: Seq[BundleFieldBase] = Nil,
