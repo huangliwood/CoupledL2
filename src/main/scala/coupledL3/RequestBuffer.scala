@@ -59,6 +59,8 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
     val pipeFlow_s1 = Input(Bool())
     val pipeFlow_s2 = Input(Bool())
     val pipeFlow_s3 = Input(Bool())
+
+    val taskStatusSinkC = Input(Vec(bufBlocks, new TaskStatusSinkC))
   })
 
   io.ATag := io.in.bits.tag
@@ -119,7 +121,8 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   val full    = Cat(buffer.map(_.valid)).andR
 
   // flow not allowed when full, or entries might starve
-  val canFlow = flow.B && !full && !conflict(in) && !chosenQValid && !Cat(io.mainPipeBlock).orR && !noFreeWay(in)
+  val sourceConflictIn = Cat(io.taskStatusSinkC.map( s => s.valid && s.sourceId === io.in.bits.sourceId)).orR
+  val canFlow = flow.B && !full && !conflict(in) && !chosenQValid && !Cat(io.mainPipeBlock).orR && !noFreeWay(in) && !sourceConflictIn
   val doFlow  = canFlow && io.out.ready
 
 
@@ -163,8 +166,9 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
     case(in, e) =>
       // when io.out.valid, we temporarily stall all entries of the same set
       val pipeBlockOut = io.out.valid && sameSet(e.task, io.out.bits)
+      val sourceConflict = Cat(io.taskStatusSinkC.map( s => s.valid && s.sourceId === e.task.sourceId)).orR
 
-      in.valid := e.valid && e.rdy && !pipeBlockOut
+      in.valid := e.valid && e.rdy && !pipeBlockOut && !sourceConflict
       in.bits  := e
   }
 

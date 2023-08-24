@@ -30,6 +30,7 @@ import coupledL3.utils._
 import coupledL3.debug._
 import coupledL3.prefetch.PrefetchTrain
 import chisel3.util.experimental.BoringUtils
+import coupledL3.noninclusive.ClientDirResult
 
 class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasClientInfo {
   val io = IO(new Bundle() {
@@ -107,6 +108,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     /* write client dir */
     val clientMetaWReq = DecoupledIO(new noninclusive.ClientMetaWrite)
     val clientTagWReq = DecoupledIO(new noninclusive.ClientTagWrite)
+    val clientBusyWakeup = ValidIO(new noninclusive.ClientBusyWakeup)
 
     // /* read DS and write data into MSHRBuffer which will be used in the future */
     val mshrBufWrite = DecoupledIO(new MSHRBufWrite())
@@ -263,10 +265,27 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     assert(!RegNext(dirResult_s3.set =/= task_s3.bits.set && task_s3.valid && !task_s3.bits.mshrTask), "dirResult_s3.set:%d =/= task_s3.bits.set:%d mshrTask:%d", RegNext(dirResult_s3.set), RegNext(task_s3.bits.set), RegNext(task_s3.bits.mshrTask))
   }
 
+  def selfToClientDirResult(selfDir: DirResult, clientDir: noninclusive.ClientDirResult): noninclusive.ClientDirResult = {
+    val clientDirResult = WireInit(0.U.asTypeOf(new noninclusive.ClientDirResult))
+    clientDirResult.set := clientDir.set
+    clientDirResult.tag := clientDir.tag
+    clientDirResult.way := clientDir.way
+    clientDirResult.replacerInfo := clientDir.replacerInfo
+    clientDirResult.hits := selfDir.meta.clientStates.map( m => m =/= INVALID )
+    clientDirResult.error := false.B // TODO:
+    // clientDirResult.metas := selfDir.meta.clientStates.asTypeOf(Vec(clientBits, new noninclusive.ClientMetaEntry()))
+    clientDirResult.metas.zipWithIndex.foreach{ 
+      case(m, i) => 
+        m.state := selfDir.meta.clientStates(i)
+    } 
+    clientDirResult
+  }
+
   // client dir result (Only for NINE)
   val gotClientDirResult_s3 = RegInit(false.B)
   val clientDirResultReg_s3 = RegInit(0.U.asTypeOf(io.clientDirResp_s3))
-  val clientDirResult_s3 = Mux(gotClientDirResult_s3, clientDirResultReg_s3, io.clientDirResp_s3)
+  val clientDirResult_s3_1 = Mux(gotClientDirResult_s3, clientDirResultReg_s3, io.clientDirResp_s3)
+  val clientDirResult_s3 = Mux(dirResult_s3.hit, selfToClientDirResult(dirResult_s3, clientDirResult_s3_1), clientDirResult_s3_1)
   val clientMetas_s3 = clientDirResult_s3.metas
   val hasClientHit = clientDirResult_s3.hits.asUInt.orR
   dontTouch(clientDirResult_s3) // TODO: NINE
@@ -719,6 +738,13 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   }
 
 
+  io.clientBusyWakeup := DontCare
+  val sinkReqWakeUp = !need_mshr_s3 && sink_req_s3 && s3_fire
+  val mshrReqWakeUp = mshr_req_s3 && s3_fire && !(mshr_release_s3 && !req_s3.fromC)
+  io.clientBusyWakeup.valid := sinkReqWakeUp || mshrReqWakeUp
+  io.clientBusyWakeup.bits.set := Mux(sinkReqWakeUp, clientDirResult_s3.set, task_s3.bits.clientSet)
+  io.clientBusyWakeup.bits.way := Mux(sinkReqWakeUp, clientDirResult_s3.way, task_s3.bits.clientWay)
+
   // --------------------------------------------------------------------------
   //  Interact with Channels (C & D)
   // --------------------------------------------------------------------------
@@ -797,7 +823,9 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
 
 
   // Wake up MSHR that waitting for the ProbeHelper task. (Only for NINE)
-  io.probeHelperWakeup.valid := (mshr_req_s3 && req_s3.fromProbeHelper || !mshr_req_s3 && req_s3.fromProbeHelper && !need_mshr_s3) && s3_fire
+  val probeHelperWakeupFromMSHR = mshr_req_s3 && req_s3.fromProbeHelper
+  val probeHelperWakeupFromSink = !mshr_req_s3 && req_s3.fromProbeHelper && !need_mshr_s3
+  io.probeHelperWakeup.valid := (probeHelperWakeupFromMSHR || probeHelperWakeupFromSink) && s3_fire
   io.probeHelperWakeup.set := req_s3.set
   io.probeHelperWakeup.tag := req_s3.tag
   
@@ -956,8 +984,14 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   val stage3IsBlocked = s3_full && !s3_fire
   val fromReqBufSinkA_valid = WireInit(false.B)
   val fromReqBufSinkA_set = WireInit(0.U.asTypeOf(task_s2.bits.set))
-  val fromReqBufSinkA_blockFromS2 = fromReqBufSinkA_valid && task_s2.valid && fromReqBufSinkA_set === task_s2.bits.set
-  val fromReqBufSinkA_blockFromS3 = fromReqBufSinkA_valid && task_s3.valid && fromReqBufSinkA_set === task_s3.bits.set
+  val fromReqBufSinkA_blockFromS2 = fromReqBufSinkA_valid && task_s2.valid && (
+      fromReqBufSinkA_set === task_s2.bits.set || 
+      fromReqBufSinkA_set(clientSetBits-1, 0) === task_s2.bits.set(clientSetBits-1, 0) && task_s2.bits.fromC
+  )
+  val fromReqBufSinkA_blockFromS3 = fromReqBufSinkA_valid && task_s3.valid && (
+      fromReqBufSinkA_set === task_s3.bits.set || 
+      fromReqBufSinkA_set(clientSetBits-1, 0) === task_s3.bits.set(clientSetBits-1, 0) && task_s3.bits.fromC
+  )
   fromReqBufSinkA_valid := io.fromReqBufSinkA.valid
   fromReqBufSinkA_set := io.fromReqBufSinkA.set
 

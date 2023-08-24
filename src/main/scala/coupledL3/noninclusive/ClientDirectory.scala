@@ -89,12 +89,18 @@ class ClientTagWrite(implicit p: Parameters) extends L3Bundle with HasClientInfo
   }
 }
 
+class ClientBusyWakeup(implicit p: Parameters) extends L3Bundle with HasClientInfo{
+  val set = UInt(clientSetBits.W)
+  val way = UInt(clientWayBits.W)
+}
+
 class ClientDirectory(implicit p: Parameters) extends L3Module with DontCareInnerLogic with HasClientInfo {
   val io = IO(new Bundle() {
     val read = Flipped(DecoupledIO(new ClientDirRead))
     val resp = Output(new ClientDirResult)
     val metaWReq = Flipped(DecoupledIO(new ClientMetaWrite))
     val tagWReq = Flipped(DecoupledIO(new ClientTagWrite))
+    val busyWakeup = Flipped(ValidIO(new ClientBusyWakeup))
   })
 
   println(s"clientInfo:\n" +
@@ -102,8 +108,9 @@ class ClientDirectory(implicit p: Parameters) extends L3Module with DontCareInne
           s"\tclientSets:${clientSets}\tclientSetBits:${clientSetBits}\n" +
           s"\tclientTagBits:${clientTagBits}\tclientMetaBits:${(new ClientMetaEntry).getWidth}\tclientBits:${clientBits}")
 
-  def client_invalid_way_fn(metaVec: Vec[Vec[ClientMetaEntry]], repl: UInt): (Bool, UInt) = {
-    val invalid_vec = Cat(metaVec.map(states => Cat(states.map(_.state === INVALID)).andR).reverse)
+  def client_invalid_way_fn(metaVec: Vec[Vec[ClientMetaEntry]], busyVec: UInt): (Bool, UInt) = {
+    val invalid_vec_1 = Cat(metaVec.map(states => Cat(states.map(_.state === INVALID)).andR).reverse)
+    val invalid_vec = invalid_vec_1 & ~busyVec
     val has_invalid_way = Cat(invalid_vec).orR
     val way = ParallelPriorityMux(invalid_vec.asBools.zipWithIndex.map(x => x._1 -> x._2.U(clientWayBits.W)))
     (has_invalid_way, way)
@@ -114,6 +121,13 @@ class ClientDirectory(implicit p: Parameters) extends L3Module with DontCareInne
   val ways = clientWays
   val banks = cacheParams.dirNBanks
 
+  val busyTableCnts = RegInit(VecInit.tabulate(sets, ways)( (_, _) => 0.U(2.W)))
+  val busyTable = WireInit(VecInit.tabulate(sets, ways)( (_, _) => false.B))
+  busyTable.zip(busyTableCnts).foreach{
+    case (bt, btc) =>
+      bt := VecInit(btc.map( b => b =/= 0.U ))
+  }
+  dontTouch(busyTable)
   val tagArray  = Module(new BankedSRAM(UInt(clientTagBits.W), sets, ways, banks, singlePort = true, enableClockGate = enableClockGate))
   val metaArray = Module(new SRAMTemplate(Vec(clientBits, new ClientMetaEntry), sets, ways, singlePort = true, hasClkGate = enableClockGate))
   val tagRead = Wire(Vec(ways, UInt(clientTagBits.W)))
@@ -219,12 +233,48 @@ class ClientDirectory(implicit p: Parameters) extends L3Module with DontCareInne
   val hitVec = tagMatchVec.zip(metaValidVec).map(x => x._1 && x._2)
   val hitWay = OHToUInt(hitVec)
   val replaceWay = repl.get_replace_way(0.U)
-  val (inv, invalidWay) = client_invalid_way_fn(metaRead, replaceWay)
-  val chosenWay = Mux(inv, invalidWay, replaceWay)
+  val (inv, invalidWay) = client_invalid_way_fn(metaRead, busyTable(set_s2).asUInt)
+  val replWayIsBusy = (UIntToOH(replaceWay) & busyTable(set_s2).asUInt).orR
+  val busyTableFull = busyTable(set_s2).asUInt.andR
+  assert(!busyTableFull)
+  val anotherWay = PriorityEncoder(~busyTable(set_s2).asUInt)
+  val chosenWay = Mux(inv, invalidWay, Mux(replWayIsBusy, anotherWay, replaceWay))
 
   hit_s2 := Cat(hitVec).orR
   way_s2 := Mux(hit_s2, hitWay, chosenWay)
 
+  when(valid_s2) {
+    // busyTable(set_s2)(way_s2) := true.B
+    busyTableCnts(set_s2)(way_s2) := busyTableCnts(set_s2)(way_s2) + 1.U
+  }
+
+  when(io.busyWakeup.fire) {
+    val wakeupSet = io.busyWakeup.bits.set
+    val wakeupWay = io.busyWakeup.bits.way
+    assert(!(valid_s2 && set_s2 === wakeupSet && way_s2 === wakeupWay && busyTable(wakeupSet)(wakeupWay) && !hit_s2), "set:%d way:%d hit:%d", set_s2, way_s2, hit_s2)
+    // assert(!(io.busyWakeup.fire && !busyTable(wakeupSet)(wakeupWay)), "trying to write a not busy entry of busyTable set:%d way:%d", wakeupSet, wakeupWay)
+
+    // busyTable(wakeupSet)(wakeupWay) := false.B
+    when(busyTableCnts(wakeupSet)(wakeupWay) =/= 0.U) {
+      busyTableCnts(wakeupSet)(wakeupWay) := busyTableCnts(wakeupSet)(wakeupWay) - 1.U
+    }
+  }
+
+  val busyWakeupTimers = RegInit(VecInit.tabulate(sets, ways)( (_, _) => 0.U(64.W)))
+  busyWakeupTimers.zipWithIndex.foreach{
+    case (timers, i) =>
+      timers.zipWithIndex.foreach{
+        case (t, j) =>
+          val wakeupSet = io.busyWakeup.bits.set
+          val wakeupWay = io.busyWakeup.bits.way
+          when(io.busyWakeup.fire && wakeupSet === i.U && wakeupWay === j.U) {
+            t := 0.U
+          }.elsewhen(busyTable(i)(j)) {
+            t := t + 1.U
+            assert(t < 10000.U, "busyTable leak!! set:%d way:%d", i.U, j.U)
+          }
+      } 
+  }
 
   // ---------------------------------------------------------------------------
   //  Stage3: output latched hit/way and chosen meta/tag by way

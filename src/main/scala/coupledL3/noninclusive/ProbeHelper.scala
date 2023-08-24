@@ -47,7 +47,14 @@ class ProbeHelper(entries: Int = 5, enqDelay: Int = 1)(implicit p: Parameters) e
   val metaOccupied = dir.metas.zip(dir.hits).map { case (s, hit) => !hit && s.state =/= MetaData.INVALID }
   val dirConflict = !dir.tagMatch() && Cat(metaOccupied).orR()
 
-  io.dirConflict := dirConflict // send to MainPipe
+  io.dirConflict := dirConflict && io.clientDirResult.valid // send to MainPipe
+  
+  when(RegNext(io.dirConflict)) {
+    printf("[L3 WARNING] trig probehelper!!\n")
+  }
+  // assert(RegNext(!io.dirConflict), "probehelper will not happen!!")
+
+
 
   val formA = replacerInfo.channel === 1.U
   val reqAcquire = formA && (replacerInfo.opcode === AcquirePerm || replacerInfo.opcode === AcquireBlock)

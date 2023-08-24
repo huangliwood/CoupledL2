@@ -34,6 +34,11 @@ class PipeBufferResp(implicit p: Parameters) extends L3Bundle {
   val data = Vec(beatSize, UInt((beatBytes * 8).W))
 }
 
+class TaskStatusSinkC(implicit p: Parameters) extends L3Bundle {
+  val valid = Bool()
+  val sourceId = UInt(sourceIdBits.W)
+}
+
 // SinkC receives upwards Release or ProbeAck:
 // (1) For Release/ReleaseData, send it to RequestArb directly
 // (2) For ProbeAck/ProbeAckData, wakeup w_probeack in MSHR
@@ -47,7 +52,7 @@ class SinkC(implicit p: Parameters) extends L3Module {
     val bufRead = Input(ValidIO(new PipeBufferRead))
     val bufResp = Output(new PipeBufferResp)
     val mshrStatus  = Vec(mshrsAll, Flipped(ValidIO(new MSHRBlockAInfo)))
-    val mshrFull = Input(Bool())
+    val taskStatus = Output(Vec(bufBlocks, new TaskStatusSinkC))
   })
   
   val (first, last, _, beat) = edgeIn.count(io.c)
@@ -64,6 +69,13 @@ class SinkC(implicit p: Parameters) extends L3Module {
   val taskValids = RegInit(VecInit(Seq.fill(bufBlocks)(false.B)))
   val taskArb = Module(new FastArbiter(new TaskBundle, bufBlocks))
   val bufValids = taskValids.asUInt | dataValids
+
+
+  io.taskStatus.zipWithIndex.foreach{
+    case(status, i) =>
+      status.valid := taskValids(i)
+      status.sourceId := taskBuf(i).sourceId
+  }
 
   val full = bufValids.andR
   val noSpace = full && hasData

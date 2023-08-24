@@ -42,7 +42,7 @@ class MSHRTaskInfo(implicit p: Parameters) extends L3Bundle {
   val mshrId = UInt(mshrBits.W)
 }
 
-class MSHRCtl(implicit p: Parameters) extends L3Module {
+class MSHRCtl(implicit p: Parameters) extends L3Module with noninclusive.HasClientInfo{
   val io = IO(new Bundle() {
     /* interact with req arb */
     val fromReqArb = Input(new Bundle() {
@@ -98,6 +98,11 @@ class MSHRCtl(implicit p: Parameters) extends L3Module {
     val toReqBuf = Vec(mshrsAll, ValidIO(new MSHRBlockAInfo))
     val toSinkC = Output(new Bundle{
       val mshrFull = Bool()
+    })
+
+    val fromReqBufSinkA = Input(new Bundle{
+      val valid = Bool()
+      val set = UInt(setBits.W)
     })
 
     /* for TopDown Monitor */
@@ -189,9 +194,11 @@ class MSHRCtl(implicit p: Parameters) extends L3Module {
   
   val setMatchVec_c = mshrs.map(m => m.io.status.valid && m.io.status.bits.set === io.fromReqArb.status_s1.c_set)
   val setConflictVec_c = (setMatchVec_c zip mshrs.map(_.io.status.bits.nestC)).map(x => x._1 && !x._2)
+  
+  val clientSetMatch_a = mshrs.map(m => m.io.status.valid && m.io.status.bits.fromC && io.fromReqBufSinkA.valid && m.io.status.bits.set(clientSetBits - 1, 0) === io.fromReqBufSinkA.set(clientSetBits - 1, 0))
   io.toReqArb.blockC_s1 := mshrFull || Cat(setConflictVec_c).orR || !hasEmptyWay
   io.toReqArb.blockB_s1 := b_mshrFull || Cat(setConflictVec_b).orR
-  io.toReqArb.blockA_s1 := a_mshrFull // conflict logic moved to ReqBuf
+  io.toReqArb.blockA_s1 := a_mshrFull || Cat(clientSetMatch_a).orR // conflict logic moved to ReqBuf
 
   /* Acquire downwards */
   val acquireUnit = Module(new AcquireUnit())

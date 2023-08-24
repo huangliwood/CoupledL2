@@ -140,7 +140,7 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   mainPipe.io.clientDirResp_s3 <> clientDirectory.io.resp
   mainPipe.io.fromReqBufSinkA.valid := a_reqBuf.io.out.valid
   mainPipe.io.fromReqBufSinkA.set := a_reqBuf.io.out.bits.set
-  
+  mainPipe.io.clientBusyWakeup <> clientDirectory.io.busyWakeup
 
   sinkA.io.fromMainPipe.putReqGood_s3 := mainPipe.io.toSinkA.putReqGood_s3
   sinkA.io.fromPutDataBuf.full := putDataBuf.io.full
@@ -163,9 +163,11 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   mshrCtl.io.pipeStatusVec(1) := reqArb.io.status_vec(1) // s2 status
   mshrCtl.io.pipeStatusVec(2) := mainPipe.io.status_vec(0) // s3 status
   mshrCtl.io.fromReqArb.mshrTaskInfo <> reqArb.io.mshrTaskInfo
+  mshrCtl.io.fromReqBufSinkA.valid := a_reqBuf.io.out.valid
+  mshrCtl.io.fromReqBufSinkA.set := a_reqBuf.io.out.bits.set
 
   sinkC.io.mshrStatus <> mshrCtl.io.toReqBuf
-  sinkC.io.mshrFull := mshrCtl.io.toSinkC.mshrFull
+  a_reqBuf.io.taskStatusSinkC <> sinkC.io.taskStatus
 
   /* input & output signals */
   val inBuf = cacheParams.innerBuf
