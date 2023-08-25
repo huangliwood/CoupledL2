@@ -97,100 +97,100 @@ class SRAMWriteBus[T <: Data](private val gen: T, val set: Int, val way: Int = 1
   }
 }
 
-class SRAMTemplate[T <: Data]
-(
-  gen: T, set: Int, way: Int = 1,
-  shouldReset: Boolean = false, holdRead: Boolean = false,
-  singlePort: Boolean = false, bypassWrite: Boolean = false,
-  clk_div_by_2: Boolean = false
-) extends Module {
-  val io = IO(new Bundle {
-    val r = Flipped(new SRAMReadBus(gen, set, way))
-    val w = Flipped(new SRAMWriteBus(gen, set, way))
-  })
+// class SRAMTemplate[T <: Data]
+// (
+//   gen: T, set: Int, way: Int = 1,
+//   shouldReset: Boolean = false, holdRead: Boolean = false,
+//   singlePort: Boolean = false, bypassWrite: Boolean = false,
+//   clk_div_by_2: Boolean = false
+// ) extends Module {
+//   val io = IO(new Bundle {
+//     val r = Flipped(new SRAMReadBus(gen, set, way))
+//     val w = Flipped(new SRAMWriteBus(gen, set, way))
+//   })
 
-  val wordType = UInt(gen.getWidth.W)
-  val array = SyncReadMem(set, Vec(way, wordType))
-  val (resetState, resetSet) = (WireInit(false.B), WireInit(0.U))
+//   val wordType = UInt(gen.getWidth.W)
+//   val array = SyncReadMem(set, Vec(way, wordType))
+//   val (resetState, resetSet) = (WireInit(false.B), WireInit(0.U))
 
-  if (shouldReset) {
-    val _resetState = RegInit(true.B)
-    val (_resetSet, resetFinish) = Counter(_resetState, set)
-    when (resetFinish) { _resetState := false.B }
+//   if (shouldReset) {
+//     val _resetState = RegInit(true.B)
+//     val (_resetSet, resetFinish) = Counter(_resetState, set)
+//     when (resetFinish) { _resetState := false.B }
 
-    resetState := _resetState
-    resetSet := _resetSet
-  }
+//     resetState := _resetState
+//     resetSet := _resetSet
+//   }
 
-  val (ren, wen) = (io.r.req.valid, io.w.req.valid || resetState)
-  val realRen = (if (singlePort) ren && !wen else ren)
+//   val (ren, wen) = (io.r.req.valid, io.w.req.valid || resetState)
+//   val realRen = (if (singlePort) ren && !wen else ren)
 
-  val setIdx = Mux(resetState, resetSet, io.w.req.bits.setIdx)
-  val wdata = VecInit(Mux(resetState, 0.U.asTypeOf(Vec(way, gen)), io.w.req.bits.data).map(_.asTypeOf(wordType)))
-  val waymask = Mux(resetState, Fill(way, "b1".U), io.w.req.bits.waymask.getOrElse("b1".U))
-  when (wen) { array.write(setIdx, wdata, waymask.asBools) }
+//   val setIdx = Mux(resetState, resetSet, io.w.req.bits.setIdx)
+//   val wdata = VecInit(Mux(resetState, 0.U.asTypeOf(Vec(way, gen)), io.w.req.bits.data).map(_.asTypeOf(wordType)))
+//   val waymask = Mux(resetState, Fill(way, "b1".U), io.w.req.bits.waymask.getOrElse("b1".U))
+//   when (wen) { array.write(setIdx, wdata, waymask.asBools) }
 
-  val raw_rdata = array.read(io.r.req.bits.setIdx, realRen)
+//   val raw_rdata = array.read(io.r.req.bits.setIdx, realRen)
 
-  // bypass for dual-port SRAMs
-  require(!bypassWrite || bypassWrite && !singlePort)
-  def need_bypass(wen: Bool, waddr: UInt, wmask: UInt, ren: Bool, raddr: UInt) : UInt = {
-    val need_check = RegNext(ren && wen)
-    val waddr_reg = RegNext(waddr)
-    val raddr_reg = RegNext(raddr)
-    require(wmask.getWidth == way)
-    val bypass = Fill(way, need_check && waddr_reg === raddr_reg) & RegNext(wmask)
-    bypass.asTypeOf(UInt(way.W))
-  }
-  val bypass_wdata = if (bypassWrite) VecInit(RegNext(io.w.req.bits.data).map(_.asTypeOf(wordType)))
-  else VecInit((0 until way).map(_ => LFSR64().asTypeOf(wordType)))
-  val bypass_mask = need_bypass(io.w.req.valid, io.w.req.bits.setIdx, io.w.req.bits.waymask.getOrElse("b1".U), io.r.req.valid, io.r.req.bits.setIdx)
-  val mem_rdata = {
-    if (singlePort) raw_rdata
-    else VecInit(bypass_mask.asBools.zip(raw_rdata).zip(bypass_wdata).map {
-      case ((m, r), w) => Mux(m, w, r)
-    })
-  }
+//   // bypass for dual-port SRAMs
+//   require(!bypassWrite || bypassWrite && !singlePort)
+//   def need_bypass(wen: Bool, waddr: UInt, wmask: UInt, ren: Bool, raddr: UInt) : UInt = {
+//     val need_check = RegNext(ren && wen)
+//     val waddr_reg = RegNext(waddr)
+//     val raddr_reg = RegNext(raddr)
+//     require(wmask.getWidth == way)
+//     val bypass = Fill(way, need_check && waddr_reg === raddr_reg) & RegNext(wmask)
+//     bypass.asTypeOf(UInt(way.W))
+//   }
+//   val bypass_wdata = if (bypassWrite) VecInit(RegNext(io.w.req.bits.data).map(_.asTypeOf(wordType)))
+//   else VecInit((0 until way).map(_ => LFSR64().asTypeOf(wordType)))
+//   val bypass_mask = need_bypass(io.w.req.valid, io.w.req.bits.setIdx, io.w.req.bits.waymask.getOrElse("b1".U), io.r.req.valid, io.r.req.bits.setIdx)
+//   val mem_rdata = {
+//     if (singlePort) raw_rdata
+//     else VecInit(bypass_mask.asBools.zip(raw_rdata).zip(bypass_wdata).map {
+//       case ((m, r), w) => Mux(m, w, r)
+//     })
+//   }
 
-  // hold read data for SRAMs
-  val rdata = (
-    if(clk_div_by_2){
-      DelayTwoCycle(mem_rdata, realRen)
-    } else if (holdRead) {
-      HoldUnless(mem_rdata, RegNext(realRen))
-    } else {
-      mem_rdata
-    }).map(_.asTypeOf(gen))
+//   // hold read data for SRAMs
+//   val rdata = (
+//     if(clk_div_by_2){
+//       DelayTwoCycle(mem_rdata, realRen)
+//     } else if (holdRead) {
+//       HoldUnless(mem_rdata, RegNext(realRen))
+//     } else {
+//       mem_rdata
+//     }).map(_.asTypeOf(gen))
 
-  if(clk_div_by_2){
-    CustomAnnotations.annotateClkDivBy2(this)
-  }
-  if(!isPow2(set)){
-    CustomAnnotations.annotateSpecialDepth(this)
-  }
+//   if(clk_div_by_2){
+//     CustomAnnotations.annotateClkDivBy2(this)
+//   }
+//   if(!isPow2(set)){
+//     CustomAnnotations.annotateSpecialDepth(this)
+//   }
 
-  io.r.resp.data := VecInit(rdata)
-  io.r.req.ready := !resetState && (if (singlePort) !wen else true.B)
-  io.w.req.ready := true.B
+//   io.r.resp.data := VecInit(rdata)
+//   io.r.req.ready := !resetState && (if (singlePort) !wen else true.B)
+//   io.w.req.ready := true.B
 
-}
+// }
 
-class SRAMTemplateWithArbiter[T <: Data](nRead: Int, gen: T, set: Int, way: Int = 1,
-                                         shouldReset: Boolean = false) extends Module {
-  val io = IO(new Bundle {
-    val r = Flipped(Vec(nRead, new SRAMReadBus(gen, set, way)))
-    val w = Flipped(new SRAMWriteBus(gen, set, way))
-  })
+// class SRAMTemplateWithArbiter[T <: Data](nRead: Int, gen: T, set: Int, way: Int = 1,
+//                                          shouldReset: Boolean = false) extends Module {
+//   val io = IO(new Bundle {
+//     val r = Flipped(Vec(nRead, new SRAMReadBus(gen, set, way)))
+//     val w = Flipped(new SRAMWriteBus(gen, set, way))
+//   })
 
-  val ram = Module(new SRAMTemplate(gen, set, way, shouldReset, holdRead = false, singlePort = true))
-  ram.io.w <> io.w
+//   val ram = Module(new SRAMTemplate(gen, set, way, shouldReset, holdRead = false, singlePort = true))
+//   ram.io.w <> io.w
 
-  val readArb = Module(new Arbiter(chiselTypeOf(io.r(0).req.bits), nRead))
-  readArb.io.in <> io.r.map(_.req)
-  ram.io.r.req <> readArb.io.out
+//   val readArb = Module(new Arbiter(chiselTypeOf(io.r(0).req.bits), nRead))
+//   readArb.io.in <> io.r.map(_.req)
+//   ram.io.r.req <> readArb.io.out
 
-  // latch read results
-  io.r.map{ case r => {
-    r.resp.data := HoldUnless(ram.io.r.resp.data, RegNext(r.req.fire()))
-  }}
-}
+//   // latch read results
+//   io.r.map{ case r => {
+//     r.resp.data := HoldUnless(ram.io.r.resp.data, RegNext(r.req.fire()))
+//   }}
+// }

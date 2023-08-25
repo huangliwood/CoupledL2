@@ -127,7 +127,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
 
   io.prefetch.foreach {
     p =>
-      p.train <> mainPipe.io.prefetchTrain.get
+      p.train <> sinkA.io.prefetchTrain.get
       sinkA.io.prefetchReq.get <> p.req
       p.resp <> grantBuf.io.prefetchResp.get
       p.recv_addr := 0.U.asTypeOf(ValidIO(UInt(64.W)))

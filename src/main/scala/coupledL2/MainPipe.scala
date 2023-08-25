@@ -27,7 +27,8 @@ import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink.TLPermissions._
 import coupledL2.utils._
 import coupledL2.debug._
-import coupledL2.prefetch.{PrefetchTrain, HyperPrefetchParams, PrefetchEvict}
+import coupledL2.prefetch.{PrefetchTrain, HyperPrefetchParams, PrefetchEvict, AccessState}
+import coupledL2.prefetch.{HyperPrefetchParams, PrefetchEvict, AccessState}
 
 class MainPipe(implicit p: Parameters) extends L2Module {
   val io = IO(new Bundle() {
@@ -98,8 +99,6 @@ class MainPipe(implicit p: Parameters) extends L2Module {
     val l1Hint = ValidIO(new L2ToL1Hint())
     val grantBufferHint = Flipped(ValidIO(new L2ToL1Hint()))
     val globalCounter = Input(UInt(log2Ceil(mshrsAll).W))
-    /* send prefetchTrain to Prefetch to trigger a prefetch req */
-    val prefetchTrain = prefetchOpt.map(_ => DecoupledIO(new PrefetchTrain))
     val prefetchEvict = prefetchOpt.get match {
       case hyper: HyperPrefetchParams => Some(DecoupledIO(new PrefetchEvict))
       case _ => None
@@ -189,8 +188,8 @@ class MainPipe(implicit p: Parameters) extends L2Module {
   // For channel C reqs, Release will always hit on MainPipe, no need for MSHR
   val need_mshr_s3 = need_mshr_s3_a || need_mshr_s3_b
 
-  // For evict address
-  val need_evict = acquire_on_miss_s3 && (!dirResult_s3.hit )
+  // // For evict address
+  // val need_evict = acquire_on_miss_s3 && (!dirResult_s3.hit ) && meta_s3.state =/= INVALID
   /* Signals to MSHR Ctl */
   // Allocation of MSHR: new request only
   val alloc_state = WireInit(0.U.asTypeOf(new FSMState()))
@@ -282,6 +281,13 @@ class MainPipe(implicit p: Parameters) extends L2Module {
   val source_req_s3 = Wire(new TaskBundle)
   source_req_s3 := Mux(sink_resp_s3.valid, sink_resp_s3.bits, req_s3)
 
+  //  TODO: debug address consider multi-bank
+  def restoreAddr(set: UInt, tag: UInt) = {
+    (set << offsetBits).asUInt + (tag << (setBits + offsetBits)).asUInt
+  }
+  val debug_addr_s3 = restoreAddr(task_s3.bits.set, task_s3.bits.tag) // (task_s3.bits.set << offsetBits).asUInt + (task_s3.bits.tag << (setBits + offsetBits)).asUInt
+  dontTouch(debug_addr_s3)
+
   /* ======== Interact with DS ======== */
   val data_s3 = Mux(io.refillBufResp_s3.valid, io.refillBufResp_s3.bits.data, io.releaseBufResp_s3.bits.data)
   val hasData_s3 = source_req_s3.opcode(0)
@@ -343,7 +349,8 @@ class MainPipe(implicit p: Parameters) extends L2Module {
     Mux(req_needT_s3 || sink_resp_s3_a_promoteT, TRUNK, meta_s3.state),
     Fill(clientBits, true.B),
     Some(metaW_s3_a_alias),
-    accessed = true.B
+    accessed = true.B,
+    prefetch = Mux(meta_s3.prefetch.get && dirResult_s3.hit, false.B, meta_s3.prefetch.get)
   )
   val metaW_s3_b = Mux(req_s3.param === toN, MetaEntry(),
     MetaEntry(false.B, BRANCH, meta_s3.clients, meta_s3.alias, accessed = meta_s3.accessed))
@@ -402,27 +409,19 @@ class MainPipe(implicit p: Parameters) extends L2Module {
   io.nestedwb.set := req_s3.set
   io.nestedwb.tag := req_s3.tag
   io.nestedwb.b_toN := task_s3.valid && metaW_valid_s3_b && req_s3.param === toN
-  io.nestedwb.b_toB := task_s3.valid && metaW_valid_s3_b && req_s3.param =/= toB // assume L3 won't send Probe toT
+  io.nestedwb.b_toB := task_s3.valid && metaW_valid_s3_b && req_s3.param === toB // assume L3 won't send Probe toT
   io.nestedwb.b_clr_dirty := task_s3.valid && metaW_valid_s3_b && meta_s3.dirty
   // c_set_dirty is true iff Release has Data
   io.nestedwb.c_set_dirty := task_s3.valid && metaW_valid_s3_c && wen_c
 
   io.nestedwbData := bufResp_s3.asTypeOf(new DSBlock)
 
-  io.prefetchTrain.foreach {
-    train =>
-      train.valid := task_s3.valid && (req_acquire_s3 || req_get_s3) && req_s3.needHint.getOrElse(false.B) &&
-        (!dirResult_s3.hit || meta_s3.prefetch.get)
-      train.bits.tag := req_s3.tag
-      train.bits.set := req_s3.set
-      train.bits.needT := req_needT_s3
-      train.bits.source := req_s3.sourceId
-  }
   io.prefetchEvict match {
     case Some(evict) =>
       evict.bits.tag := ms_task.tag
       evict.bits.set := ms_task.set
-      evict.valid := !need_evict
+      evict.bits.is_prefetch := meta_s3.prefetch.get
+      evict.valid := a_need_replacement
     case None => 
   }
 
@@ -680,15 +679,9 @@ class MainPipe(implicit p: Parameters) extends L2Module {
   // XSPerfAccumulate(cacheParams, "a_req_tigger_prefetch", io.prefetchTrain.)
   prefetchOpt.foreach {
     _ =>
-      XSPerfAccumulate(cacheParams, "a_req_trigger_prefetch", io.prefetchTrain.get.fire())
-      XSPerfAccumulate(cacheParams, "a_req_trigger_prefetch_not_ready", io.prefetchTrain.get.valid && !io.prefetchTrain.get.ready)
-      XSPerfAccumulate(cacheParams, "acquire_trigger_prefetch_on_miss", io.prefetchTrain.get.fire() && req_acquire_s3 && !dirResult_s3.hit)
-      XSPerfAccumulate(cacheParams, "acquire_trigger_prefetch_on_hit_pft", io.prefetchTrain.get.fire() && req_acquire_s3 && dirResult_s3.hit && meta_s3.prefetch.get)
       XSPerfAccumulate(cacheParams, "release_all", mshr_release_s3)
       XSPerfAccumulate(cacheParams, "release_prefetch_accessed", mshr_release_s3 && meta_s3.prefetch.get && meta_s3.accessed)
       XSPerfAccumulate(cacheParams, "release_prefetch_not_accessed", mshr_release_s3 && meta_s3.prefetch.get && !meta_s3.accessed)
-      XSPerfAccumulate(cacheParams, "get_trigger_prefetch_on_miss", io.prefetchTrain.get.fire() && req_get_s3 && !dirResult_s3.hit)
-      XSPerfAccumulate(cacheParams, "get_trigger_prefetch_on_hit_pft", io.prefetchTrain.get.fire() && req_get_s3 && dirResult_s3.hit && meta_s3.prefetch.get)
   }
 
   /* ===== Monitor ===== */

@@ -52,6 +52,11 @@ trait HasCoupledL2Parameters {
   val bufBlocks = 8 // hold data that flows in MainPipe
   val bufIdxBits = log2Up(bufBlocks)
 
+  val enableClockGate = cacheParams.enableClockGate
+
+  val dataEccCode = cacheParams.dataEccCode
+  val dataEccEnable = dataEccCode != None && dataEccCode != Some("none")
+
   // 1 cycle for sram read, and latch for another cycle
   val sramLatency = 2
 
@@ -59,6 +64,7 @@ trait HasCoupledL2Parameters {
   
   // Prefetch
   val prefetchOpt = cacheParams.prefetch
+  val sppMultiLevelRefillOpt = cacheParams.sppMultiLevelRefill
   val hasPrefetchBit = prefetchOpt.nonEmpty && prefetchOpt.get.hasPrefetchBit
   val topDownOpt = if(cacheParams.elaboratedTopDown) Some(true) else None
 
@@ -165,7 +171,15 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
         supports = TLSlaveToMasterTransferSizes(
           probe = xfer
         ),
-        sourceId = IdRange(0, idsAll)
+        sourceId = {
+          println(s"[Diplomacy stage] ${cacheParams.name} client num: ${m.masters.length}")
+          println(s"[Diplomacy stage] ${cacheParams.name} client sourceId:")
+          m.masters.zipWithIndex.foreach{case(m, i) => println(s"[Diplomacy stage] \t[${i}]${m.name} => start: ${m.sourceId.start} end: ${m.sourceId.end}")}
+          val idEnd = 64 // TODO：Parameterize
+          println(s"[Diplomacy stage] ${cacheParams.name} sourceId idRange(0, ${idEnd})\n")
+          IdRange(0, 64)
+        }
+        
       )
     ),
     channelBytes = cacheParams.channelBytes,
@@ -204,6 +218,7 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
     managerFn = managerPortParams
   )
 
+<<<<<<< HEAD
   val pf_recv_node: Option[BundleBridgeSink[PrefetchRecv]] = prefetchOpt match {
     case Some(_: PrefetchReceiverParams) =>
       Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
@@ -212,6 +227,28 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
     case Some(_: FakePrefetchPrarameters) =>
       Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
     case _ => None
+=======
+ val pf_recv_node: Option[BundleBridgeSink[PrefetchRecv]] = prefetchOpt match {
+  case Some(receive: PrefetchReceiverParams) => Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
+  case Some(sms_sender_hyper: HyperPrefetchParams) => Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
+  case _ => None
+}
+
+  val spp_send_node: Option[BundleBridgeSource[LlcPrefetchRecv]] = prefetchOpt match {
+    case Some(hyper_pf: HyperPrefetchParams) =>
+      sppMultiLevelRefillOpt match{
+        case Some(receive: PrefetchReceiverParams) =>
+          Some(BundleBridgeSource(() => new LlcPrefetchRecv()))
+        case _ => None
+      }
+    case Some(spp_only: SPPParameters) =>
+      sppMultiLevelRefillOpt match{
+        case Some(receive: PrefetchReceiverParams) => 
+          Some(BundleBridgeSource(Some(() => new LlcPrefetchRecv())))
+        case _ => None
+      }
+    case _ => None //Spp not exist, can not use multl-level refill
+>>>>>>> pf_train_modify
   }
 
   lazy val module = new LazyModuleImp(this) {
@@ -287,6 +324,15 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
         prefetcher.foreach(_.io_l2_pf_en := false.B)
     }
 
+
+    spp_send_node match{
+      case Some(sender) =>
+        sender.out.head._1.addr       := prefetcher.get.io.hint2llc.get.bits.addr
+        sender.out.head._1.addr_valid := prefetcher.get.io.hint2llc.get.valid
+        sender.out.head._1.needT      := prefetcher.get.io.hint2llc.get.bits.needT
+        sender.out.head._1.source     := prefetcher.get.io.hint2llc.get.bits.source
+      case None =>
+    }
     def restoreAddress(x: UInt, idx: Int) = {
       restoreAddressUInt(x, idx.U)
     }
@@ -303,6 +349,12 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
       if(bankBits == 0) true.B else set(bankBits - 1, 0) === bankId.U
     }
 
+    spp_send_node match{
+      case Some(x) =>
+       XSPerfAccumulate(cacheParams, "L2_sender_sended", x.out.head._1.addr_valid)
+      case None =>
+    }
+  
     val slices = node.in.zip(node.out).zipWithIndex.map {
       case (((in, edgeIn), (out, edgeOut)), i) =>
         require(in.params.dataBits == out.params.dataBits)
@@ -324,6 +376,10 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
 
         slice.io.prefetch.zip(prefetcher).foreach {
           case (s, p) =>
+            s.hint2llc match{
+              case Some(x) => x := DontCare
+              case _ => None
+            }
             s.req.valid := p.io.req.valid && bank_eq(p.io.req.bits.set, i, bankBits)
             s.req.bits := p.io.req.bits
             prefetchReqsReady(i) := s.req.ready && bank_eq(p.io.req.bits.set, i, bankBits)

@@ -25,6 +25,14 @@ test-top-fullsys:
 	mill -i CoupledL2.test.runMain coupledL2.TestTop_fullSys -td build
 	mv build/TestTop_fullSys.v build/TestTop.v
 
+test-top-fullsys_1:
+	mill -i CoupledL2.test.runMain coupledL2.TestTop_fullSys_1 -td build
+	mv build/TestTop_fullSys_1.v build/TestTop.v
+
+test-top-l3:
+	mill -i CoupledL2.test.runMain coupledL3.TestTop_L3 -td build
+	mv build/TestTop_L3.v build/TestTop.v
+
 clean:
 	rm -rf ./build
 
