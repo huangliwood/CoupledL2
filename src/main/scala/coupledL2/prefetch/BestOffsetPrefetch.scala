@@ -299,14 +299,14 @@ class BestOffsetPrefetch(implicit p: Parameters) extends BOPModule {
   when(scoreTable.io.req.fire()) {
     req.tag := parseFullAddress(newAddr)._1
     req.set := parseFullAddress(newAddr)._2
-    req.needT := io.train.bits.needT
-    req.source := io.train.bits.source
     req_valid := !crossPage // stop prefetch when prefetch req crosses pages
   }
 
   io.req.valid := req_valid
   io.req.bits := req
   io.req.bits.isBOP := true.B
+  io.req.bits.source := 0.U
+  io.req.bits.needT := false.B
   io.train.ready := scoreTable.io.req.ready && (!req_valid || io.req.ready)
   io.resp.ready := rrTable.io.w.ready
 

@@ -54,12 +54,10 @@ class PrefetchTrain(implicit p: Parameters) extends PrefetchBundle {
   // val addr = UInt(addressBits.W)
   val tag = UInt(fullTagBits.W)
   val set = UInt(setBits.W)
-  val needT = Bool()
-  val source = UInt(sourceIdBits.W)
   // prefetch only when L2 receives a miss or prefetched hit req
   // val miss = Bool()
   // val prefetched = Bool()
-  val state = UInt(AccessState.bits.W)
+  // val state = UInt(AccessState.bits.W)
   def addr = Cat(tag, set, 0.U(offsetBits.W))
 }
 
@@ -262,10 +260,10 @@ class Prefetcher(implicit p: Parameters) extends PrefetchModule {
       hybrid_pfts.io.db_degree.bits := pf_state
     case _ => assert(cond = false, "Unknown prefetcher")
   }
-  XSPerfAccumulate(cacheParams, "prefetch_train", io.train.fire())
-  XSPerfAccumulate(cacheParams, "prefetch_train_on_miss", io.train.fire() && io.train.bits.state === AccessState.MISS)
-  XSPerfAccumulate(cacheParams, "prefetch_train_on_pf_hit", io.train.fire() && io.train.bits.state === AccessState.PREFETCH_HIT)
-  XSPerfAccumulate(cacheParams, "prefetch_train_on_cache_hit", io.train.fire() && io.train.bits.state === AccessState.HIT)
+  // XSPerfAccumulate(cacheParams, "prefetch_train", io.train.fire())
+  // XSPerfAccumulate(cacheParams, "prefetch_train_on_miss", io.train.fire() && io.train.bits.state === AccessState.MISS)
+  // XSPerfAccumulate(cacheParams, "prefetch_train_on_pf_hit", io.train.fire() && io.train.bits.state === AccessState.PREFETCH_HIT)
+  // XSPerfAccumulate(cacheParams, "prefetch_train_on_cache_hit", io.train.fire() && io.train.bits.state === AccessState.HIT)
   XSPerfAccumulate(cacheParams, "prefetch_send2_pfq", io.req.fire())
   XSPerfHistogram(cacheParams, "prefetch_dead_block", deadPfEviction, counterWrap, 0, 200, 5)
   XSPerfHistogram(cacheParams, "prefetch_dead_ratio", pf_state, counterWrap, 0, 4, 1)

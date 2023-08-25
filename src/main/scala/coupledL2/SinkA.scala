@@ -23,13 +23,14 @@ import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink.TLHints._
-import coupledL2.prefetch.PrefetchReq
+import coupledL2.prefetch.{PrefetchTrain, PrefetchReq}
 import coupledL2.utils.XSPerfAccumulate
 
 class SinkA(implicit p: Parameters) extends L2Module {
   val io = IO(new Bundle() {
     val a = Flipped(DecoupledIO(new TLBundleA(edgeIn.bundle)))
     val prefetchReq = prefetchOpt.map(_ => Flipped(DecoupledIO(new PrefetchReq)))
+    val prefetchTrain = prefetchOpt.map(_ => DecoupledIO(new PrefetchTrain))
     val toReqArb = DecoupledIO(new TaskBundle)
     val pbRead = Flipped(DecoupledIO(new PutBufferRead))
     val pbResp = ValidIO(new PutBufferEntry)
@@ -133,6 +134,10 @@ class SinkA(implicit p: Parameters) extends L2Module {
   commonReq.valid := io.a.valid && first && !noSpace
   commonReq.bits := fromTLAtoTaskBundle(io.a.bits)
   if (prefetchOpt.nonEmpty) {
+    io.prefetchTrain.get.valid := commonReq.valid && io.a.fire && commonReq.bits.needHint.getOrElse(false.B) &&
+                            (commonReq.bits.opcode === AcquireBlock || commonReq.bits.opcode === AcquirePerm)
+    io.prefetchTrain.get.bits.set := commonReq.bits.set
+    io.prefetchTrain.get.bits.tag := commonReq.bits.tag
     prefetchReq.get.valid := io.prefetchReq.get.valid
     prefetchReq.get.bits := fromPrefetchReqtoTaskBundle(io.prefetchReq.get.bits)
     io.prefetchReq.get.ready := prefetchReq.get.ready

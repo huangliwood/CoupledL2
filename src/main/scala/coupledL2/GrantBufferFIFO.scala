@@ -216,7 +216,6 @@ class GrantBufferFIFO(implicit p: Parameters) extends BaseGrantBuffer with HasCi
           in.bits.tag := tasks(i).tag
           in.bits.set := tasks(i).set
           when (in.fire()) {
-            beat_valids(i).foreach(_ := false.B)
             flush(i) := true.B
           }
       }
@@ -232,6 +231,7 @@ class GrantBufferFIFO(implicit p: Parameters) extends BaseGrantBuffer with HasCi
   when(flush(deqPtr)) {
     flush(deqPtr) := false.B
     deqPtrExt := deqPtrExt + 1.U
+    beat_valids(deqPtr).foreach(_ := false.B)
   }
 
   io.e.ready := true.B

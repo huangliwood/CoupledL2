@@ -28,6 +28,7 @@ import freechips.rocketchip.tilelink.TLPermissions._
 import coupledL2.utils._
 import coupledL2.debug._
 import coupledL2.prefetch.{PrefetchTrain, HyperPrefetchParams, PrefetchEvict, AccessState}
+import coupledL2.prefetch.{HyperPrefetchParams, PrefetchEvict, AccessState}
 
 class MainPipe(implicit p: Parameters) extends L2Module {
   val io = IO(new Bundle() {
@@ -98,8 +99,6 @@ class MainPipe(implicit p: Parameters) extends L2Module {
     val l1Hint = ValidIO(new L2ToL1Hint())
     val grantBufferHint = Flipped(ValidIO(new L2ToL1Hint()))
     val globalCounter = Input(UInt(log2Ceil(mshrsAll).W))
-    /* send prefetchTrain to Prefetch to trigger a prefetch req */
-    val prefetchTrain = prefetchOpt.map(_ => DecoupledIO(new PrefetchTrain))
     val prefetchEvict = prefetchOpt.get match {
       case hyper: HyperPrefetchParams => Some(DecoupledIO(new PrefetchEvict))
       case _ => None
@@ -417,17 +416,6 @@ class MainPipe(implicit p: Parameters) extends L2Module {
 
   io.nestedwbData := bufResp_s3.asTypeOf(new DSBlock)
 
-  io.prefetchTrain.foreach {
-    train =>
-      train.valid := task_s3.valid && (req_acquire_s3 || req_get_s3) && req_s3.needHint.getOrElse(false.B)
-      train.bits.tag := req_s3.tag
-      train.bits.set := req_s3.set
-      train.bits.needT := req_needT_s3
-      train.bits.source := req_s3.sourceId
-      train.bits.state:= Mux(!dirResult_s3.hit, AccessState.MISS,
-                       Mux(!meta_s3.prefetch.get, AccessState.HIT,
-                          AccessState.PREFETCH_HIT))
-  }
   io.prefetchEvict match {
     case Some(evict) =>
       evict.bits.tag := ms_task.tag
@@ -691,15 +679,9 @@ class MainPipe(implicit p: Parameters) extends L2Module {
   // XSPerfAccumulate(cacheParams, "a_req_tigger_prefetch", io.prefetchTrain.)
   prefetchOpt.foreach {
     _ =>
-      XSPerfAccumulate(cacheParams, "a_req_trigger_prefetch", io.prefetchTrain.get.fire())
-      XSPerfAccumulate(cacheParams, "a_req_trigger_prefetch_not_ready", io.prefetchTrain.get.valid && !io.prefetchTrain.get.ready)
-      XSPerfAccumulate(cacheParams, "acquire_trigger_prefetch_on_miss", io.prefetchTrain.get.fire() && req_acquire_s3 && !dirResult_s3.hit)
-      XSPerfAccumulate(cacheParams, "acquire_trigger_prefetch_on_hit_pft", io.prefetchTrain.get.fire() && req_acquire_s3 && dirResult_s3.hit && meta_s3.prefetch.get)
       XSPerfAccumulate(cacheParams, "release_all", mshr_release_s3)
       XSPerfAccumulate(cacheParams, "release_prefetch_accessed", mshr_release_s3 && meta_s3.prefetch.get && meta_s3.accessed)
       XSPerfAccumulate(cacheParams, "release_prefetch_not_accessed", mshr_release_s3 && meta_s3.prefetch.get && !meta_s3.accessed)
-      XSPerfAccumulate(cacheParams, "get_trigger_prefetch_on_miss", io.prefetchTrain.get.fire() && req_get_s3 && !dirResult_s3.hit)
-      XSPerfAccumulate(cacheParams, "get_trigger_prefetch_on_hit_pft", io.prefetchTrain.get.fire() && req_get_s3 && dirResult_s3.hit && meta_s3.prefetch.get)
   }
 
   /* ===== Monitor ===== */
