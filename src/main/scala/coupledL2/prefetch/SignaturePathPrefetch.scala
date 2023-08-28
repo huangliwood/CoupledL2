@@ -297,8 +297,8 @@ class PatternTable(implicit p: Parameters) extends SPPModule {
     is(s_lookahead) {
       when(RegNext(pTable.io.r.req.fire())) {
         when(hit) {
-          val testOffset = RegEnable((current.block.asSInt + maxEntry.delta).asUInt, issued =/= 0.U)
           val issued = delta_list_checked.map(a => Mux(a =/= 0.S, 1.U, 0.U)).reduce(_ +& _)
+          val testOffset = RegEnable((current.block.asSInt + maxEntry.delta).asUInt, issued =/= 0.U)
           when(issued =/= 0.U) {
             enprefetch := true.B
             // val testOffset = (current.block.asSInt + maxEntry.delta).asUInt
