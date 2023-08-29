@@ -121,8 +121,7 @@ case class L2Param
   reqField: Seq[BundleFieldBase] = Nil, 
   respKey: Seq[BundleKeyBase] = Seq(IsHitKey),
   // Manager
-  // reqKey: Seq[BundleKeyBase] = Seq(AliasKey, PrefetchKey, ReqSourceKey),
-  reqKey: Seq[BundleKeyBase] = Seq(AliasKey, PrefetchKey),
+  reqKey: Seq[BundleKeyBase] = Seq(AliasKey, VaddrKey, PrefetchKey, ReqSourceKey),
   respField: Seq[BundleFieldBase] = Nil,
 
   innerBuf: TLBufferParams = TLBufferParams(),
@@ -137,6 +136,8 @@ case class L2Param
   hartIds: Seq[Int] = Seq[Int](),
   // Prefetch
   prefetch: Option[PrefetchParameters] = None,
+  // Signature Path Prefetch multi-level cache refill support option
+  sppMultiLevelRefill : Option[PrefetchParameters] = None,
   // Performance analysis
   enablePerf: Boolean = true,
   // Monitor

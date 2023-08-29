@@ -144,6 +144,14 @@ class Slice()(implicit p: Parameters) extends L2Module {
       sinkA.io.prefetchReq.get <> p.req
       p.resp <> grantBuf.io.prefetchResp.get
       p.recv_addr := 0.U.asTypeOf(ValidIO(UInt(64.W)))
+      p.evict match {
+      case Some(evict) => 
+        evict <> mainPipe.io.prefetchEvict.get
+      case None =>
+    }
+      p.tlb_req.req.ready := true.B
+      p.tlb_req.resp.valid := false.B
+      p.tlb_req.resp.bits := DontCare
   }
 
   /* input & output signals */
