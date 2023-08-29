@@ -5,8 +5,6 @@ module FakePrefetch(
   input         pf_train_valid,
   input  [20:0] pf_train_bits_tag,
   input  [8:0]  pf_train_bits_set,
-  input         pf_train_bits_needT,
-  input  [6:0]  pf_train_bits_source,
   input         pf_req_ready,
   output        pf_req_valid,
   output [20:0] pf_req_bits_tag,
@@ -20,17 +18,18 @@ module FakePrefetch(
   input  [8:0]  pf_resp_bits_set,
   input         pf_recv_addr_valid,
   input  [63:0] pf_recv_addr_bits,
-  input         pf_l2_pf_en
+  input         perf_XSPERF_CLEAN,
+  input         perf_XSPERF_DUMP,
+  input         XSPERF_CLEAN,
+  input         XSPERF_DUMP
 );
-  pf_SppPrefetch spp (
+  pf_SppDev2Prefetch spp (
     .clock(clock),
     .reset(reset),
     .io_train_ready(pf_train_ready),
     .io_train_valid(pf_train_valid),
     .io_train_bits_tag(pf_train_bits_tag),
     .io_train_bits_set(pf_train_bits_set),
-    .io_train_bits_needT(pf_train_bits_needT),
-    .io_train_bits_source(pf_train_bits_source),
     .io_req_ready(pf_req_ready),
     .io_req_valid(pf_req_valid),
     .io_req_bits_tag(pf_req_bits_tag),
@@ -39,8 +38,10 @@ module FakePrefetch(
     .io_req_bits_source(pf_req_bits_source),
     .io_req_bits_isBOP(pf_req_bits_isBOP),
     .io_resp_ready(pf_resp_ready),
-    .io_resp_valid(pf_reso_valid),
+    .io_resp_valid(pf_resp_valid),
     .io_resp_bits_tag(pf_resp_bits_tag),
-    .io_resp_bits_set(pf_resp_bits_set)
+    .io_resp_bits_set(pf_resp_bits_set),
+    .perf_XSPERF_CLEAN(XSPERF_CLEAN),
+    .perf_XSPERF_DUMP(XSPERF_DUMP)
   );
 endmodule

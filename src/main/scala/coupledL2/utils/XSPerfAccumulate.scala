@@ -23,6 +23,25 @@ object XSPerfAccumulate {
       }
     }
   }
+
+  def apply(enable: Boolean=true, perfName: String, perfCnt: UInt) = {
+    if (enable) {
+      val logTimestamp = WireInit(0.U(64.W))
+      val perfClean = WireInit(false.B)
+      val perfDump = WireInit(false.B)
+      BoringUtils.addSink(logTimestamp, "logTimestamp")
+      BoringUtils.addSink(perfClean, "XSPERF_CLEAN")
+      BoringUtils.addSink(perfDump, "XSPERF_DUMP")
+
+      val counter = RegInit(0.U(64.W))
+      val next_counter = counter + perfCnt
+      counter := Mux(perfClean, 0.U, next_counter)
+
+      when(perfDump) {
+        XSPerfPrint(p"$perfName, $next_counter\n")
+      }
+    }
+  }
 }
 
 object XSPerfHistogram {

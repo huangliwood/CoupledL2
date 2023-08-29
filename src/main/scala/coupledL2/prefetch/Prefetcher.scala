@@ -24,7 +24,7 @@ import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.tilelink._
 import coupledL2._
 import coupledL2.utils.{XSPerfAccumulate, XSPerfHistogram}
-
+import chisel3.util.experimental.BoringUtils
 object AccessState {
   val bits = 2
 
@@ -168,40 +168,6 @@ class Prefetcher(implicit p: Parameters) extends PrefetchModule {
   }
 
   prefetchOpt.get match {
-    case spp: SPPParameters => // case spp only
-      val pft = Module(new SignaturePathPrefetch)
-      val pftQueue = Module(new PrefetchQueue)
-      val pipe = Module(new Pipeline(io.req.bits.cloneType, 1))
-      pft.io.train <> io.train
-      pft.io.resp <> io.resp
-      pftQueue.io.enq <> pft.io.req
-      pipe.io.in <> pftQueue.io.deq
-      io.req <> pipe.io.out
-      io.hint2llc match{
-      case Some(sender) =>
-        println(s"${cacheParams.name} Prefetch Config: SPP + SPP cross-level refill")
-        pftQueue.io.enq.valid := pft.io.req.valid && (!pft.io.hint2llc)
-        pftQueue.io.enq.bits <> pft.io.req.bits
-        pipe.io.in <> pftQueue.io.deq
-        io.req <> pipe.io.out
-        sender.valid := pft.io.hint2llc
-        sender.bits := pft.io.req.bits
-      case _ =>
-        println(s"${cacheParams.name} Prefetch Config: SPP")
-        pftQueue.io.enq <> pft.io.req
-        pipe.io.in <> pftQueue.io.deq
-        io.req <> pipe.io.out
-    }
-    case bop: BOPParameters => // case bop only
-      println(s"${cacheParams.name} Prefetch Config: BOP")
-      val pft = Module(new BestOffsetPrefetch)
-      val pftQueue = Module(new PrefetchQueue)
-      val pipe = Module(new Pipeline(io.req.bits.cloneType, 1))
-      pft.io.train <> io.train
-      pft.io.resp <> io.resp
-      pftQueue.io.enq <> pft.io.req
-      pipe.io.in <> pftQueue.io.deq
-      io.req <> pipe.io.out
     case receiver: PrefetchReceiverParams => // case sms+bop 
       println(s"${cacheParams.name} Prefetch Config: BOP + SMS receiver")
       val l1_pf = Module(new PrefetchReceiver())
@@ -231,23 +197,6 @@ class Prefetcher(implicit p: Parameters) extends PrefetchModule {
       XSPerfAccumulate(cacheParams, "prefetch_req_fromL1", l1_pf.io.req.valid)
       XSPerfAccumulate(cacheParams, "prefetch_req_fromL2", bop_en && bop.io.req.valid)
       XSPerfAccumulate(cacheParams, "prefetch_req_L1L2_overlapped", l1_pf.io.req.valid && bop_en && bop.io.req.valid)
-    
-    case hyperPf: HyperPrefetchParams => // case spp +  bop + smsReceiver
-      val hybrid_pfts = Module(new HyperPrefetcher())
-      val pftQueue = Module(new PrefetchQueue)
-      val pipe = Module(new Pipeline(io.req.bits.cloneType, 1))
-      hybrid_pfts.io.train <> io.train
-      hybrid_pfts.io.resp <> io.resp
-      hybrid_pfts.io.recv_addr := ValidIODelay(io.recv_addr, 2)
-      io.evict match {
-        case Some(evict) =>
-        hybrid_pfts.io.evict <> evict
-        pftQueue.io.enq <> hybrid_pfts.io.req
-        pipe.io.in <> pftQueue.io.deq
-        io.req <> pipe.io.out
-        case None =>
-        hybrid_pfts.io.evict := DontCare
-      }
     case fake: FakePrefetchPrarameters =>
       val fakePF = Module(new FakePrefetch())
       val l1_pf = Module(new PrefetchReceiver())
@@ -274,6 +223,14 @@ class Prefetcher(implicit p: Parameters) extends PrefetchModule {
       fakePF.io.pf.req.ready := true.B
       pipe.io.in <> pftQueue.io.deq
       io.req <> pipe.io.out
+
+      val pf_perfClean = WireInit(false.B)
+      val pf_perfDump = WireInit(false.B)
+      BoringUtils.addSink(pf_perfClean, "XSPERF_CLEAN")
+      BoringUtils.addSink(pf_perfDump, "XSPERF_DUMP")
+      fakePF.io.perf.XSPERF_CLEAN := pf_perfClean
+      fakePF.io.perf.XSPERF_DUMP := pf_perfDump
+
       XSPerfAccumulate(cacheParams, "prefetch_req_fromL1", l1_pf.io.req.valid)
       XSPerfAccumulate(cacheParams, "prefetch_req_fromL2", l2pf_en && pftQueue.io.deq.valid)
       XSPerfAccumulate(cacheParams, "prefetch_req_L1L2_overlapped", l1_pf.io.req.valid && l2pf_en && fakePF.io.pf.req.valid)
