@@ -8,7 +8,7 @@ import coupledL2.HasCoupledL2Parameters
 import coupledL2.utils.XSPerfAccumulate
 import coupledL2.utils.ReplaceableQueueV2
 import coupledL2.prefetch.{HasPrefetchParameters, PrefetchParameters, PrefetchReq, PrefetchResp, PrefetchTrain}
-import utility.SRAMTemplate
+import utility.{CircularShift,SRAMTemplate}
 
 case class SPPParameters(
   sTableEntries: Int = 256,
@@ -70,8 +70,7 @@ class SignatureTableReq(implicit p: Parameters) extends SPPBundle {
 }
 class BreakPointReq(implicit p: Parameters) extends SPPBundle{
   val pageAddr = UInt(pageAddrBits.W)
-  val sig1 = UInt(signatureBits.W)
-  val sig2 = UInt(signatureBits.W)
+  val parent_sig = Vec(1,UInt(signatureBits.W))
   val offset = UInt(blkOffsetBits.W)
 }
 
@@ -112,7 +111,6 @@ class SignatureTable(implicit p: Parameters) extends SPPModule {
     val req = Flipped(DecoupledIO(new SignatureTableReq))
     val resp = DecoupledIO(new SignatureTableResp) //output old signature and delta to write PT
     val bp_update = Flipped(ValidIO(new BreakPointReq))
-    val bp_req = ValidIO(new BreakPointReq)
   })
   assert(pageAddrBits>=(2 * log2Up(sTableEntries)),s"pageAddrBits as least 20 bits to use hash")
   def hash1(addr:    UInt) = addr(log2Up(sTableEntries) - 1, 0)
@@ -130,25 +128,6 @@ class SignatureTable(implicit p: Parameters) extends SPPModule {
   println(s"fullAddressBits: ${fullAddressBits}")
   println(s"pageOffsetBits: ${pageOffsetBits}")
   println(s"sTagBits: ${sTagBits}")
-
-  //bp, reg realize
-  def breakPointEntry() = new Bundle() {
-    val valid = Bool()
-    val tag = UInt(sTagBits.W)
-    val sig1 = UInt(signatureBits.W)
-    val sig2 = UInt(signatureBits.W)
-    val offset = UInt(blkOffsetBits.W)
-  }
-  val bpTable = RegInit(VecInit(Seq.fill(32)(0.U.asTypeOf(breakPointEntry()))))
-  val bp_page = io.bp_update.bits.pageAddr
-  when(io.bp_update.valid) {
-    bpTable(idx(bp_page)).valid := io.bp_update.valid
-    bpTable(idx(bp_page)).tag := tag(bp_page)
-    bpTable(idx(bp_page)).sig1 := io.bp_update.bits.sig1
-    bpTable(idx(bp_page)).sig2 := io.bp_update.bits.sig2
-    bpTable(idx(bp_page)).offset := io.bp_update.bits.offset
-  }
-
 
   val sTable = Module(
     new SRAMTemplate(sTableEntry(), set = sTableEntries, way = 1, bypassWrite = true, shouldReset = true)
@@ -179,11 +158,47 @@ class SignatureTable(implicit p: Parameters) extends SPPModule {
   // stage 2
   // --------------------------------------------------------------------------------
   // update sTable & req pTable
+  val bp_hit = WireInit(false.B)
+  val bp_prePredicted_blkOff = WireInit(0.U(blkOffsetBits.W))
+  val bp_matched_sig = WireInit(0.U(signatureBits.W))
+
+  //bp, reg realize
+  def breakPointEntry() = new Bundle() {
+    val valid = Bool()
+    val tag = UInt(pageAddrBits.W)
+    val parent_sig = Vec(1, UInt(signatureBits.W))
+    val prePredicted_blkOffset = UInt(blkOffsetBits.W)
+  }
+
+  // write
+  val bpTable = RegInit(VecInit(Seq.fill(32)(0.U.asTypeOf(breakPointEntry()))))
+  val bp_page = io.bp_update.bits.pageAddr
+  when(io.bp_update.valid) {
+    bpTable(idx(bp_page)).valid := io.bp_update.valid
+    bpTable(idx(bp_page)).tag := bp_page
+    bpTable(idx(bp_page)).parent_sig.zip(io.bp_update.bits.parent_sig).foreach(x => x._1 := x._2)
+    bpTable(idx(bp_page)).prePredicted_blkOffset := io.bp_update.bits.offset
+  }
+
+
   val rValid_s2 = RegNext(rValid_s1)
   val hit_s2 = rData_s2.tag === tag(accessedPage_s2) && rData_s2.valid
   val oldSignature_s2 = Mux(hit_s2, rData_s2.signature, 0.U)
   val newDelta_s2     = Mux(hit_s2, accessedBlock_s2.asSInt - rData_s2.lastBlock.asSInt, accessedBlock_s2.asSInt)
   val stableWriteValid_s2 = newDelta_s2 =/= 0.S && rValid_s2
+
+  // bp read
+  val s2_bp_access_index = idx(accessedPage_s2)(4, 0)
+  val rotate_sig = VecInit(Seq.fill(4)(0.U(signatureBits.W)));
+  dontTouch(rotate_sig)
+  for (i <- 0 until (4)) {
+    rotate_sig(i) := CircularShift(bpTable(s2_bp_access_index).parent_sig.head).left(3 * i)
+  }
+  bp_hit := rValid_s2 && bpTable(s2_bp_access_index).tag === accessedPage_s2 && rotate_sig.map(_ === oldSignature_s2).reduce(_ || _)
+  bp_prePredicted_blkOff := bpTable(s2_bp_access_index).prePredicted_blkOffset
+  val bp_matched_index = WireInit(0.U(2.W))
+  bp_matched_sig := rotate_sig(bp_matched_index)
+
 
   sTable.io.w.req.valid := stableWriteValid_s2
   sTable.io.w.req.bits.setIdx := idx(accessedPage_s2)
@@ -193,20 +208,15 @@ class SignatureTable(implicit p: Parameters) extends SPPModule {
   sTable.io.w.req.bits.data(0).lastBlock := accessedBlock_s2
 
   io.resp.valid := stableWriteValid_s2
-  io.resp.bits.signature := oldSignature_s2
   io.resp.bits.delta  := newDelta_s2
-  io.resp.bits.block := accessedAddr_s2
 
-  io.bp_req.valid := rValid_s2 && bpTable(idx(accessedPage_s2)).valid && tag(accessedPage_s2) === bpTable(idx(accessedPage_s2)).tag
-  when(io.bp_req.valid){
-    io.bp_req.bits.pageAddr := accessedPage_s2
-    io.bp_req.bits.sig1 := bpTable(idx(accessedPage_s2)).sig1
-    io.bp_req.bits.sig2 := bpTable(idx(accessedPage_s2)).sig2
-    io.bp_req.bits.offset := bpTable(idx(accessedPage_s2)).offset
-  }.otherwise{
-    io.bp_req.bits := 0.U.asTypeOf(io.bp_req.bits.cloneType)
+  when(bp_hit){
+    io.resp.bits.signature := bp_matched_sig
+    io.resp.bits.block := (accessedAddr_s2 >> blkOffsetBits << blkOffsetBits) + bp_prePredicted_blkOff
+  }.otherwise {
+    io.resp.bits.signature := oldSignature_s2
+    io.resp.bits.block := accessedAddr_s2
   }
-
 
   io.req.ready := sTable.io.r.req.ready
 }
@@ -217,7 +227,6 @@ class PatternTable(implicit p: Parameters) extends SPPModule {
     val resp = DecoupledIO(new PatternTableResp)
     val db_degree = Input(UInt(2.W))
     val queue_used_degree = Input(UInt(2.W))
-    val st2pt_bp = Flipped(ValidIO(new BreakPointReq))
     val pt2st_bp = ValidIO(new BreakPointReq)
   })
 
@@ -254,8 +263,8 @@ class PatternTable(implicit p: Parameters) extends SPPModule {
   val enread_reg = RegInit(false.B)
   val enprefetch = WireDefault(false.B)
   val enprefetchnl = WireDefault(false.B)
-  val enwrite = RegNext(q.io.deq.fire() && pTable.io.r.req.fire()) //we only modify-write on demand requests
-  val current = Reg(new SignatureTableResp) // RegInit(0.U.asTypeOf(new PatternTableResp))
+  val enwrite = RegNext(q.io.deq.fire() && pTable.io.r.req.fire(),0.U) //we only modify-write on demand requests
+  val current = RegInit(0.U.asTypeOf(new SignatureTableResp))
   val lookCount = RegInit(0.U(lookCountBits.W))
   val miniCount = lookCount
 
@@ -288,18 +297,13 @@ class PatternTable(implicit p: Parameters) extends SPPModule {
     io.resp.bits.deltas := delta_list_nl
   }
 
-  //bp operation
-  val bp_valid = RegNext(io.st2pt_bp.valid)
-  val bp_sig1 = RegNext(io.st2pt_bp.bits.sig1)
-  val bp_sig2 = RegNext(io.st2pt_bp.bits.sig2)
-  val bp_block = RegNext(io.st2pt_bp.bits.offset)
+  //bp update operation
   val enbp = WireInit(true.B)
   val bp_update = WireInit(false.B)
   io.pt2st_bp.valid := enbp && bp_update
   when(io.pt2st_bp.valid){
     io.pt2st_bp.bits.pageAddr := current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits)
-    io.pt2st_bp.bits.sig1 := lastSignature
-    io.pt2st_bp.bits.sig2 := RegNext(lastSignature)
+    io.pt2st_bp.bits.parent_sig(0) := lastSignature
     io.pt2st_bp.bits.offset := current.block(blkOffsetBits - 1, 0)
   }.otherwise{
     io.pt2st_bp.bits := 0.U.asTypeOf(io.pt2st_bp.bits.cloneType)
@@ -363,11 +367,6 @@ class PatternTable(implicit p: Parameters) extends SPPModule {
     is(s_lookahead0) {
       enread := true.B
       readSignature := (lastSignature << 3) ^ strideMap(lastDelta)
-      val is_bp_matched = WireInit(bp_valid && (lastSignature === bp_sig1 || lastSignature === bp_sig2) && bp_sig1.orR && bp_sig2.orR)
-      when(is_bp_matched) {
-        readSignature := bp_sig1
-        current.block := Cat(current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits), bp_block)
-      }
       state := s_lookahead
     }
     is(s_lookahead) {
@@ -437,7 +436,7 @@ class Unpack(implicit p: Parameters) extends SPPModule {
   q.io.enq <> io.req //change logic to replace the tail entry
 
   val req = RegEnable(q.io.deq.bits, q.io.deq.fire())
-  val req_deltas = Reg(Vec(pTableDeltaEntries, SInt((blkOffsetBits + 1).W)))
+  val req_deltas = RegInit(VecInit(Seq.fill(pTableDeltaEntries)(0.S((blkOffsetBits + 1).W))))
   val issue_finish = req_deltas.map(_ === 0.S).reduce(_ && _)
   q.io.deq.ready := !inProcess || issue_finish || endeq
   when(q.io.deq.fire()) {
@@ -515,7 +514,6 @@ class SignaturePathPrefetch(implicit p: Parameters) extends SPPModule {
   sTable.io.req.valid := io.train.fire()
 
   pTable.io.req <> sTable.io.resp //to detail
-  pTable.io.st2pt_bp <> sTable.io.bp_req
   pTable.io.pt2st_bp <> sTable.io.bp_update
   pTable.io.resp <> unpack.io.req
 

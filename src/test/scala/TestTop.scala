@@ -510,7 +510,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
         clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
         echoField = Seq(huancun.DirtyField()),
         // prefetch = Some(BOPParameters(rrTableEntries = 16,rrTagBits = 6))
-        prefetch = Some(HyperPrefetchParams()),/* 
+        prefetch = Some(FakePrefetchPrarameters()),/*
         del L2 prefetche recv option, move into: prefetch =  PrefetchReceiverParams
         prefetch options:
           SPPParameters          => spp only
