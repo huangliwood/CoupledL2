@@ -112,6 +112,16 @@ class Directory(implicit p: Parameters) extends L3Module with DontCareInnerLogic
     (has_invalid_way, way)
   }
 
+  //  TODO: debug address consider multi-bank
+  def restoreAddr(set: UInt, tag: UInt) = {
+    (set << offsetBits).asUInt + (tag << (setBits + offsetBits)).asUInt
+  }
+
+  val debug_addr_resp = restoreAddr(io.resp.set, io.resp.tag)
+  val debug_addr_wreq = restoreAddr(io.tagWReq.bits.set, io.tagWReq.bits.wtag)
+  dontTouch(debug_addr_resp)
+  dontTouch(debug_addr_wreq)
+
   val sets = cacheParams.sets
   val ways = cacheParams.ways
   val banks = cacheParams.dirNBanks

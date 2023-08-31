@@ -23,7 +23,6 @@ import utility._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import chipsalliance.rocketchip.config.Parameters
-import huancun.{PreferCacheKey, DirtyKey}
 
 class AcquireUnit(implicit p: Parameters) extends L2Module {
   val io = IO(new Bundle() {
@@ -42,7 +41,7 @@ class AcquireUnit(implicit p: Parameters) extends L2Module {
   a.bits.mask := Fill(edgeOut.manager.beatBytes, 1.U(1.W))
   a.bits.data := DontCare
   a.bits.echo.lift(huancun.DirtyKey).foreach(_ := true.B)
-  a.bits.user.lift(PreferCacheKey).foreach(_ := false.B)
+  a.bits.user.lift(huancun.PreferCacheKey).foreach(_ := false.B)
   a.bits.user.lift(utility.ReqSourceKey).foreach(_ := task.reqSource)
   a.bits.corrupt := false.B
 

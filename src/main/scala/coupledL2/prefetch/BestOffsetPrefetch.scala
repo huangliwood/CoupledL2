@@ -17,7 +17,7 @@
 
 package coupledL2.prefetch
 
-import xs.utils.sram.SRAMTemplate
+import xs.utils.sram.{SRAMReadBus, SRAMTemplate, SRAMWriteBus}
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
@@ -133,9 +133,25 @@ class RecentRequestTable(implicit p: Parameters) extends BOPModule {
     val tag = UInt(rrTagBits.W)
   }
 
-  val rrTable = Module(
-    new SRAMTemplate(rrTableEntry(), set = rrTableEntries, way = 1, shouldReset = true, singlePort = true, hasMbist = false)
-  )
+  class RRTable(implicit p: Parameters) extends BOPModule {
+    val io = IO(new Bundle {
+      val r = Flipped(new SRAMReadBus(rrTableEntry(), rrTableEntries, 1))
+      val w = Flipped(new SRAMWriteBus(rrTableEntry(), rrTableEntries, 1))
+    })
+    private val tags = Mem(rrTableEntries, UInt(rrTagBits.W))
+    private val valids = RegInit(VecInit(Seq.fill(rrTagBits)(false.B)))
+    io.w.req.ready := true.B
+    when(io.w.req.valid){
+      tags(io.w.req.bits.setIdx) := io.w.req.bits.data.head.tag
+      valids(io.w.req.bits.setIdx) := io.w.req.bits.data.head.valid
+    }
+    io.r.req.ready := !io.w.req.valid
+
+    io.r.resp.data.head.valid := RegEnable(valids(io.r.req.bits.setIdx), io.r.req.fire)
+    io.r.resp.data.head.tag := RegEnable(tags(io.r.req.bits.setIdx), io.r.req.fire)
+  }
+
+  val rrTable = Module(new RRTable)
 
   val wAddr = io.w.bits
   rrTable.io.w.req.valid := io.w.valid && !io.r.req.valid
