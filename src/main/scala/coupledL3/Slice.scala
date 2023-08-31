@@ -125,11 +125,8 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   mainPipe.io.bufResp <> sinkC.io.bufResp
   mainPipe.io.toDS.rdata_s5 := dataStorage.io.rdata
   mainPipe.io.toDS.error_s5 := dataStorage.io.error
-  mainPipe.io.refillBufResp_s3.valid := RegNext(mshrBuf.io.r.req.fire, false.B)
-  mainPipe.io.refillBufResp_s3.bits := mshrBuf.io.r.resp.bits
-
-  mainPipe.io.releaseBufResp_s3.valid := RegNext(mshrBuf.io.r.req.fire, false.B)
-  mainPipe.io.releaseBufResp_s3.bits := mshrBuf.io.r.resp.bits
+  mainPipe.io.mshrBufResp_s3.valid := RegNext(mshrBuf.io.r.req.fire, false.B)
+  mainPipe.io.mshrBufResp_s3.bits := mshrBuf.io.r.resp.bits
 
   mainPipe.io.putDataBufResp_s3.valid := RegNext(putDataBuf.io.r.valid, false.B)
   mainPipe.io.putDataBufResp_s3.bits := putDataBuf.io.r.data
@@ -157,8 +154,8 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   mshrCtl.io.grantStatus := grantBuf.io.grantStatus
 
   grantBuf.io.d_task <> mainPipe.io.toSourceD
-  grantBuf.io.fromReqArb.status_s1 := reqArb.io.status_s1
-  grantBuf.io.pipeStatusVec := reqArb.io.status_vec ++ mainPipe.io.status_vec
+  // grantBuf.io.fromReqArb.status_s1 := reqArb.io.status_s1
+  // grantBuf.io.pipeStatusVec := reqArb.io.status_vec ++ mainPipe.io.status_vec
   mshrCtl.io.pipeStatusVec(0) := reqArb.io.status_vec(0) // s1 status
   mshrCtl.io.pipeStatusVec(1) := reqArb.io.status_vec(1) // s2 status
   mshrCtl.io.pipeStatusVec(2) := mainPipe.io.status_vec(0) // s3 status

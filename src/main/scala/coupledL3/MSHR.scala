@@ -181,14 +181,6 @@ class MSHR(implicit p: Parameters) extends L3Module with noninclusive.HasClientI
     timer       := 1.U
   }
 
-  // for debug
-  //  TODO: debug address consider multi-bank
-  def restoreAddr(set: UInt, tag: UInt) = {
-    (set << offsetBits).asUInt + (tag << (setBits + offsetBits)).asUInt
-  }
-  val debug_addr_req = restoreAddr(req.set, req.tag)
-  dontTouch(debug_addr_req)
-
 
   // --------------------------------------------------------------------------
   //  Enchantment
@@ -928,6 +920,7 @@ class MSHR(implicit p: Parameters) extends L3Module with noninclusive.HasClientI
   io.toReqBuf.valid := status_reg.valid
   io.toReqBuf.bits.set := req.set
   io.toReqBuf.bits.way := req.way
+  io.toReqBuf.bits.clientWay := clientDirResult.way
   io.toReqBuf.bits.reqTag := req.tag
   io.toReqBuf.bits.needRelease := !state.w_release_sent
   io.toReqBuf.bits.metaTag := dirResult.tag
@@ -1186,7 +1179,7 @@ class MSHR(implicit p: Parameters) extends L3Module with noninclusive.HasClientI
 
   dontTouch(state)
 
-  assert(!(status_reg.valid && timer >= 15000.U), "mshr timeout! cnt:%d id:%d addr:0x%x", timer, io.id, Cat(status_reg.bits.tag, status_reg.bits.set))
+  assert(!(status_reg.valid && timer >= 5000.U), "mshr timeout! cnt:%d id:%d addr:0x%x", timer, io.id, Cat(status_reg.bits.tag, status_reg.bits.set) << 6.U)
 
   /* ======== Performance counters ======== */
   // time stamp

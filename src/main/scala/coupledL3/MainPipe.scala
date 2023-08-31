@@ -79,9 +79,8 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
       val putReqGood_s3 = Bool()
     })
 
-    /* get ReleaseBuffer and RefillBuffer read result */
-    val refillBufResp_s3 = Flipped(ValidIO(new MSHRBufReadResp))
-    val releaseBufResp_s3 = Flipped(ValidIO(new MSHRBufReadResp))
+    /* get MSHR buffer read result */
+    val mshrBufResp_s3 = Flipped(ValidIO(new MSHRBufReadResp))
 
     /* get PutDataBuffer read result */
     val putDataBufResp_s3 = Flipped(ValidIO(new DSBlock))
@@ -210,6 +209,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   )
   // s3_fire := s3_valid && s4_ready
   s3_fire := s3_valid && s5_ready // TODO:
+  // s3_fire := s3_valid && (s4_ready && !req_drop_s3 || req_drop_s3)
   when(s2_fire) {
     s3_full := true.B 
   }.elsewhen(s3_fire) {
@@ -289,6 +289,16 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   val clientMetas_s3 = clientDirResult_s3.metas
   val hasClientHit = clientDirResult_s3.hits.asUInt.orR
   dontTouch(clientDirResult_s3) // TODO: NINE
+
+  val clientDirMetaNotMatch = !Cat(dirResult_s3.meta.clientStates.zipWithIndex.map{
+    case(clientState, i) =>
+      clientState === clientDirResult_s3_1.metas(i).state
+  }).andR
+  val clientHasHit = clientDirResult_s3_1.hits.asUInt.orR
+  assert(!(dirResult_s3.hit && clientHasHit && clientDirMetaNotMatch && s3_valid), 
+          "clientState not match self clientState, set:%x tag:%x mshrTask:%d sourceId:%d channel:%x addr:%x", 
+          task_s3.bits.set, task_s3.bits.tag, task_s3.bits.mshrTask, task_s3.bits.sourceId, task_s3.bits.channel, debug_addr_s3
+        )
 
   when(s3_fire) { 
     gotClientDirResult_s3 := false.B
@@ -472,31 +482,17 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
 
 
   /* ======== Interact with DS ======== */
-  val gotRefillBufResp_s3 = RegInit(false.B)
-  val gotReleaseBufResp_s3 = RegInit(false.B)
-  val refillBufRespReg_s3 = RegInit(0.U.asTypeOf(io.refillBufResp_s3.bits.data))
-  val releaseBufRespReg_s3 = RegInit(0.U.asTypeOf(io.releaseBufResp_s3.bits.data))
+  val gotMSHRBufResp_s3 = RegInit(false.B)
+  val mshrBufRespReg_s3 = RegInit(0.U.asTypeOf(io.mshrBufResp_s3.bits.data))
   when(s3_fire) { 
-    gotRefillBufResp_s3 := false.B
-  }.elsewhen(io.refillBufResp_s3.valid && !gotRefillBufResp_s3) {
-    refillBufRespReg_s3 := io.refillBufResp_s3.bits.data
-    gotRefillBufResp_s3 := true.B
+    gotMSHRBufResp_s3 := false.B
+  }.elsewhen(io.mshrBufResp_s3.valid && !gotMSHRBufResp_s3) {
+    mshrBufRespReg_s3 := io.mshrBufResp_s3.bits.data
+    gotMSHRBufResp_s3 := true.B
   }
 
-  when(s3_fire) { 
-    gotReleaseBufResp_s3 := false.B
-  }.elsewhen(io.releaseBufResp_s3.valid && !gotReleaseBufResp_s3) {
-    releaseBufRespReg_s3 := io.releaseBufResp_s3.bits.data
-    gotReleaseBufResp_s3 := true.B
-  }
-  
-  // val data_s3 = Mux(io.refillBufResp_s3.valid, io.refillBufResp_s3.bits.data, io.releaseBufResp_s3.bits.data)
-  val refillBufData = Mux(gotRefillBufResp_s3, refillBufRespReg_s3, io.refillBufResp_s3.bits.data)
-  val releaseBufData = Mux(gotReleaseBufResp_s3, releaseBufRespReg_s3, io.releaseBufResp_s3.bits.data)
-  val data_s3 = Mux(io.refillBufResp_s3.valid || gotRefillBufResp_s3, 
-                  refillBufData, 
-                  releaseBufData
-                )
+  val mshrBufData = Mux(gotMSHRBufResp_s3, mshrBufRespReg_s3, io.mshrBufResp_s3.bits.data)
+  val data_s3 = mshrBufData
 
   val hasData_s3 = source_req_s3.opcode(0)
   // assert(!(io.refillBufResp_s3.valid && io.releaseBufResp_s3.valid), "can not read both refillBuf and releaseBuf at the same time")
@@ -511,7 +507,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   val need_data_on_miss_c = c_need_replacement
   val need_data_b = sinkB_req_s3 && dirResult_s3.hit &&
     (meta_s3.state === TRUNK || meta_s3.state === TIP && meta_s3.dirty || req_s3.needProbeAckData)
-  val ren = Mux(dirResult_s3.hit, need_data_on_hit_a, need_data_on_miss_a || need_data_on_miss_c) || need_data_b || task_s3.bits.selfHasData && mshr_req_s3
+  val ren = Mux(mshr_req_s3, task_s3.bits.selfHasData, Mux(dirResult_s3.hit, need_data_on_hit_a, need_data_on_miss_a || need_data_on_miss_c) || need_data_b)
   val bufResp_s3 = io.bufResp.data.asUInt
   val putBufResp_s3 = RegNext(io.putBufResp) // for Put from A-channel // TODO: half freq
   val putData_s3 = VecInit(putBufResp_s3.map(_.data)).asUInt // only for putFull data
@@ -522,17 +518,14 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     ((~full_wmask & old_data) | (full_wmask & new_data))
   }
 
-  val putOldData_s3 = Mux(io.refillBufResp_s3.valid, io.refillBufResp_s3.bits.data, Mux(io.releaseBufResp_s3.valid, io.releaseBufResp_s3.bits.data, io.putDataBufResp_s3.bits.data)) // TODO: half freq
+  val putOldData_s3 = Mux(gotMSHRBufResp_s3 || io.mshrBufResp_s3.valid, mshrBufData, io.putDataBufResp_s3.bits.data)
   val putPartialData = mergePutData(putOldData_s3, putData_s3, putMask_s3) // TODO: put miss should not use putDataBuf
   val putFullData = putData_s3
-  // val releaseBufData = io.releaseBufResp_s3.bits.data
-  // val refillBufData = io.refillBufResp_s3.bits.data
   val mshrWrData = ParallelPriorityMux(Seq(
                       mshr_putpartial_s3 -> putPartialData,
                       mshr_putfull_s3 -> putFullData,
                       mshr_releaseack_s3 -> bufResp_s3, // only for NINE
-                      req_s3.useProbeData -> releaseBufData,
-                      !req_s3.useProbeData -> refillBufData
+                      (req_s3.useProbeData || !req_s3.useProbeData) -> mshrBufData // TODO:
                     ))
   dontTouch(mshr_putpartial_s3)
   dontTouch(mshr_putfull_s3)
@@ -642,7 +635,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
       when(reqClient === client.U) {
         clientMeta.state := Mux(sink_resp_s3_a_promoteT || req_s3.param === NtoT || req_s3.param === BtoT, TIP, BRANCH)
       }.otherwise{
-        clientMeta.state := clientMetas_s3(client).state
+        clientMeta.state := Mux(clientDirResult_s3.hits(client), clientMetas_s3(client).state, INVALID)
       }
   }
   clientMetaW_s3_c.zipWithIndex.foreach{
@@ -650,7 +643,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
       when(reqClient === client.U) {
         clientMeta.state := INVALID
       }.otherwise{
-        clientMeta.state := clientMetas_s3(client).state
+        clientMeta.state := Mux(clientDirResult_s3.hits(client), clientMetas_s3(client).state, INVALID)
       }
   }
   clientMetaW_s3_mshr := req_s3.clientMeta
@@ -740,7 +733,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
 
   io.clientBusyWakeup := DontCare
   val sinkReqWakeUp = !need_mshr_s3 && sink_req_s3 && s3_fire
-  val mshrReqWakeUp = mshr_req_s3 && s3_fire && !(mshr_release_s3 && !req_s3.fromC)
+  val mshrReqWakeUp = mshr_req_s3 && s3_fire && !(mshr_release_s3 && (!req_s3.fromC && !req_s3.fromProbeHelper))
   io.clientBusyWakeup.valid := sinkReqWakeUp || mshrReqWakeUp
   io.clientBusyWakeup.bits.set := Mux(sinkReqWakeUp, clientDirResult_s3.set, task_s3.bits.clientSet)
   io.clientBusyWakeup.bits.way := Mux(sinkReqWakeUp, clientDirResult_s3.way, task_s3.bits.clientWay)
@@ -978,19 +971,28 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     s.set === s1_set && (if(allTask) true.B else !s.mshrTask) && (if(tag) s.tag === s1_tag else true.B)
   }
 
-  io.toReqBuf(0) := task_s2.valid && pipelineBlock('a', task_s2.bits, allTask = true)
-  io.toReqBuf(1) := task_s3.valid && pipelineBlock('a', task_s3.bits)
+  // io.toReqBuf(0) := task_s2.valid && pipelineBlock('a', task_s2.bits, allTask = true)
+  // io.toReqBuf(1) := task_s3.valid && pipelineBlock('a', task_s3.bits)
+
+  io.toReqBuf(0) := task_s2.valid && (
+                    pipelineBlock('a', task_s2.bits, allTask = true) 
+                    || io.fromReqArb.status_s1.a_tag(clientSetBits-1, 0) === task_s2.bits.set(clientSetBits-1, 0)
+                  )
+  io.toReqBuf(1) := task_s3.valid && (
+                    pipelineBlock('a', task_s3.bits) 
+                    || io.fromReqArb.status_s1.a_tag(clientSetBits-1, 0) === task_s2.bits.set(clientSetBits-1, 0) && !task_s2.bits.mshrTask
+                  )
 
   val stage3IsBlocked = s3_full && !s3_fire
   val fromReqBufSinkA_valid = WireInit(false.B)
   val fromReqBufSinkA_set = WireInit(0.U.asTypeOf(task_s2.bits.set))
   val fromReqBufSinkA_blockFromS2 = fromReqBufSinkA_valid && task_s2.valid && (
-      fromReqBufSinkA_set === task_s2.bits.set || 
-      fromReqBufSinkA_set(clientSetBits-1, 0) === task_s2.bits.set(clientSetBits-1, 0) && task_s2.bits.fromC
+      fromReqBufSinkA_set === task_s2.bits.set 
+      || fromReqBufSinkA_set(clientSetBits-1, 0) === task_s2.bits.set(clientSetBits-1, 0) && task_s2.bits.fromC
   )
   val fromReqBufSinkA_blockFromS3 = fromReqBufSinkA_valid && task_s3.valid && (
-      fromReqBufSinkA_set === task_s3.bits.set || 
-      fromReqBufSinkA_set(clientSetBits-1, 0) === task_s3.bits.set(clientSetBits-1, 0) && task_s3.bits.fromC
+      fromReqBufSinkA_set === task_s3.bits.set 
+      || fromReqBufSinkA_set(clientSetBits-1, 0) === task_s3.bits.set(clientSetBits-1, 0) && task_s3.bits.fromC
   )
   fromReqBufSinkA_valid := io.fromReqBufSinkA.valid
   fromReqBufSinkA_set := io.fromReqBufSinkA.set
@@ -1005,6 +1007,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     task_s4.valid && pipelineBlock('b', task_s4.bits, tag = true)     ||
     task_s5.valid && pipelineBlock('b', task_s5.bits, tag = true)
   io.toReqArb.blockA_s1 := io.toReqBuf(0) || io.toReqBuf(1) || fromReqBufSinkA_blockFromS2 || fromReqBufSinkA_blockFromS3
+  // io.toReqArb.blockA_s1 := fromReqBufSinkA_blockFromS2 || fromReqBufSinkA_blockFromS3
 
 
 
@@ -1012,6 +1015,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   //  Pipeline Status
   // --------------------------------------------------------------------------
   require(io.status_vec.size == 3)
+  io.status_vec.foreach( _ := DontCare )
   io.status_vec(0).valid := task_s3.valid && Mux(
     mshr_req_s3,
     mshr_grant_s3 || mshr_accessackdata_s3 || mshr_accessack_s3,
@@ -1023,14 +1027,14 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   io.status_vec(0).bits.channel := task_s3.bits.channel
   io.status_vec(0).bits.set     := task_s3.bits.set
   io.status_vec(0).bits.mshrTask := task_s3.bits.mshrTask
-  io.status_vec(1).valid        := task_s4.valid && isD_s4 && !needWriteMSHRBuf_s4
-  io.status_vec(1).bits.channel := task_s4.bits.channel
-  io.status_vec(1).bits.set     := task_s4.bits.set
-  io.status_vec(1).bits.mshrTask := task_s4.bits.mshrTask
-  io.status_vec(2).valid        := d_s5.valid
-  io.status_vec(2).bits.channel := task_s5.bits.channel
-  io.status_vec(2).bits.set     := task_s5.bits.set
-  io.status_vec(2).bits.mshrTask := task_s5.bits.mshrTask
+  // io.status_vec(1).valid        := task_s4.valid && isD_s4 && !needWriteMSHRBuf_s4
+  // io.status_vec(1).bits.channel := task_s4.bits.channel
+  // io.status_vec(1).bits.set     := task_s4.bits.set
+  // io.status_vec(1).bits.mshrTask := task_s4.bits.mshrTask
+  // io.status_vec(2).valid        := d_s5.valid
+  // io.status_vec(2).bits.channel := task_s5.bits.channel
+  // io.status_vec(2).bits.set     := task_s5.bits.set
+  // io.status_vec(2).bits.mshrTask := task_s5.bits.mshrTask
 
   // make sure we don't send two reqs continuously with the same set
   assert(!(task_s2.bits.set === task_s3.bits.set &&
@@ -1060,8 +1064,8 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   io.toSourceD <> d_arb.io.out
 
   assert(!(d_s3.valid && d_s3.bits.task.opcode === 7.U), "d_s3 invalid opcode: 7  mshrTask:%d mshrId:%d Tag:0x%x Set:0x%x", req_s3.mshrTask, req_s3.mshrId, req_s3.tag, req_s3.set)
-  assert(!(d_s4.valid && d_s4.bits.task.opcode === 7.U), "d_s4 invalid opcode: 7  mshrTask:%d mshrId:%d Tag:0x%x Set:0x%x", task_s4.bits.mshrTask, task_s4.bits.mshrId, task_s4.bits.tag, task_s4.bits.set)
-  assert(!(d_s5.valid && d_s5.bits.task.opcode === 7.U), "d_s5 invalid opcode: 7  mshrTask:%d mshrId:%d Tag:0x%x Set:0x%x", task_s5.bits.mshrTask, task_s5.bits.mshrId, task_s5.bits.tag, task_s5.bits.set)
+  // assert(!(d_s4.valid && d_s4.bits.task.opcode === 7.U), "d_s4 invalid opcode: 7  mshrTask:%d mshrId:%d Tag:0x%x Set:0x%x", task_s4.bits.mshrTask, task_s4.bits.mshrId, task_s4.bits.tag, task_s4.bits.set)
+  // assert(!(d_s5.valid && d_s5.bits.task.opcode === 7.U), "d_s5 invalid opcode: 7  mshrTask:%d mshrId:%d Tag:0x%x Set:0x%x", task_s5.bits.mshrTask, task_s5.bits.mshrId, task_s5.bits.tag, task_s5.bits.set)
 
   val s2HasGrant = task_s2.valid && task_s2.bits.mshrTask && task_s2.bits.fromA && (task_s2.bits.opcode === GrantData || task_s2.bits.opcode === Grant)
   val s3HasRelease = task_s3.valid && !task_s3.bits.mshrTask && task_s3.bits.fromC && (task_s3.bits.opcode === ReleaseData || task_s3.bits.opcode === Release)
@@ -1082,8 +1086,8 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   XSPerfAccumulate(cacheParams, "mshr_release_req", task_s3.valid && mshr_release_s3)
 
   // directory access result
-  val hit_s3 = task_s3.valid && !mshr_req_s3 && dirResult_s3.hit
-  val miss_s3 = task_s3.valid && !mshr_req_s3 && !dirResult_s3.hit
+  val hit_s3 = task_s3.valid && !mshr_req_s3 && dirResult_s3.hit && s3_fire
+  val miss_s3 = task_s3.valid && !mshr_req_s3 && !dirResult_s3.hit && s3_fire
   XSPerfAccumulate(cacheParams, "a_req_hit", hit_s3 && req_s3.fromA)
   XSPerfAccumulate(cacheParams, "acquire_hit", hit_s3 && req_s3.fromA &&
     (req_s3.opcode === AcquireBlock || req_s3.opcode === AcquirePerm))
@@ -1094,10 +1098,13 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     (req_s3.opcode === AcquireBlock || req_s3.opcode === AcquirePerm))
   XSPerfAccumulate(cacheParams, "get_miss", miss_s3 && req_s3.fromA && req_s3.opcode === Get)
 
-  // XSPerfAccumulate(cacheParams, "a_req_need_replacement",
-  //   io.toMSHRCtl.mshr_alloc_s3.valid && !alloc_state.s_release || task_s3.valid && mainpipe_release)
+  XSPerfAccumulate(cacheParams, "c_req_miss", miss_s3 && req_s3.fromC)
+  XSPerfAccumulate(cacheParams, "c_req_hit", hit_s3 && req_s3.fromC)
+
   XSPerfAccumulate(cacheParams, "a_req_need_replacement",
-    io.toMSHRCtl.mshr_alloc_s3.valid && !io.toMSHRCtl.mshr_alloc_s3.bits.state.s_release || task_s3.valid && mainpipe_release)
+    io.toMSHRCtl.mshr_alloc_s3.valid && a_need_replacement && req_s3.fromA)
+  XSPerfAccumulate(cacheParams, "c_req_need_replacement",
+    io.toMSHRCtl.mshr_alloc_s3.valid && c_need_replacement && req_s3.fromC)
 
   XSPerfAccumulate(cacheParams, "b_req_hit", hit_s3 && req_s3.fromB)
   XSPerfAccumulate(cacheParams, "b_req_miss", miss_s3 && req_s3.fromB)

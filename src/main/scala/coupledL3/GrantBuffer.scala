@@ -23,11 +23,11 @@ class GrantBuffer(implicit p: Parameters) extends L3Module {
         val e = Flipped(DecoupledIO(new TLBundleE(edgeIn.bundle)))
         val e_resp = Output(new RespBundle)
 
-        val fromReqArb = Input(new Bundle() {
-            val status_s1 = new PipeEntranceStatus
-        })
+        // val fromReqArb = Input(new Bundle() {
+        //     val status_s1 = new PipeEntranceStatus
+        // })
 
-        val pipeStatusVec = Flipped(Vec(5, ValidIO(new PipeStatus)))
+        // val pipeStatusVec = Flipped(Vec(5, ValidIO(new PipeStatus)))
         val toReqArb = Output(new Bundle() {
             val blockSinkReqEntrance = new BlockInfo()
             val blockMSHRReqEntrance = Bool()
@@ -43,16 +43,17 @@ class GrantBuffer(implicit p: Parameters) extends L3Module {
     val inflightGrantBuf = RegInit(VecInit(Seq.fill(grantQueueEntries){ 0.U.asTypeOf(Valid(new InflightGrantEntry)) }))
     val inflightGrantBufValidVec = VecInit(inflightGrantBuf.map(_.valid))
     val inflightGrantBufFull = inflightGrantBufValidVec.asUInt.andR
+    val full = WireInit(false.B)
 
     val grantQueue = Module(new Queue(new GrantQueueEntry, grantQueueEntries, pipe = true, flow = false))
     grantQueue.io.enq.bits.task <> io.d_task.bits.task
     grantQueue.io.enq.bits.data <> io.d_task.bits.data
-    grantQueue.io.enq.valid := io.d_task.valid && !inflightGrantBufFull
-    io.d_task.ready := grantQueue.io.enq.ready && !inflightGrantBufFull
+    grantQueue.io.enq.valid := io.d_task.fire
+    io.d_task.ready := grantQueue.io.enq.ready && !inflightGrantBufFull && !full
 
     val beatValids = RegInit(VecInit.tabulate(grantQueueEntries, beatSize)((_, _) => false.B))
     val blockValids = VecInit(beatValids.map(_.asUInt.orR)).asUInt
-    val full = blockValids.andR
+    full := blockValids.andR
 
     val insertIdx = PriorityEncoder(~blockValids)
     grantQueue.io.enq.bits.insertIdx := insertIdx
@@ -145,7 +146,7 @@ class GrantBuffer(implicit p: Parameters) extends L3Module {
     val i = grantQueue.io.deq.bits.insertIdx
 
     io.d.valid := grantQueue.io.deq.valid
-    grantQueue.io.deq.ready := io.d.ready && Mux(hasData, PopCount(Cat(beatValids(i))) === 1.U, Cat(beatValids(i)).andR)
+    grantQueue.io.deq.ready := io.d.fire && Mux(hasData, PopCount(Cat(beatValids(i))) === 1.U, true.B)
 
     val (beat, next_beatsOH) = getBeat(grantQueue.io.deq.bits.data.data, beatValids(i).asUInt)
     io.d.bits := toTLBundleD(grantQueue.io.deq.bits.task, beat)

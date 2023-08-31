@@ -7,7 +7,7 @@ import chisel3.util._
 import coupledL3.utils._
 import utility._
 
-class ReqEntry(entries: Int = 4)(implicit p: Parameters) extends L3Bundle() {
+class ReqEntry(entries: Int = 4)(implicit p: Parameters) extends L3Bundle with noninclusive.HasClientInfo {
   val valid    = Bool()
   val rdy      = Bool()
   val task     = new TaskBundle()
@@ -32,6 +32,8 @@ class ReqEntry(entries: Int = 4)(implicit p: Parameters) extends L3Bundle() {
 
   /* ways in the set that are occupied by unfinished MSHR task */
   val occWays = UInt(cacheParams.ways.W)
+
+  val occClientWays = UInt(clientWays.W)
 }
 
 class ChosenQBundle(idWIdth: Int = 2)(implicit p: Parameters) extends L3Bundle {
@@ -39,7 +41,7 @@ class ChosenQBundle(idWIdth: Int = 2)(implicit p: Parameters) extends L3Bundle {
   val id = UInt(idWIdth.W)
 }
 
-class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Parameters) extends L3Module {
+class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Parameters) extends L3Module with noninclusive.HasClientInfo {
 
   val io = IO(new Bundle() {
     val in          = Flipped(DecoupledIO(new TaskBundle))
@@ -74,15 +76,17 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   // --------------------------------------------------------------------------
   //  Enchantment
   // --------------------------------------------------------------------------
-  val NWay = cacheParams.ways
-
   // count conflict
   def sameAddr(a: TaskBundle, b: TaskBundle):     Bool = Cat(a.tag, a.set) === Cat(b.tag, b.set)
   def sameAddr(a: TaskBundle, b: MSHRBlockAInfo): Bool = Cat(a.tag, a.set) === Cat(b.reqTag, b.set)
   def sameSet (a: TaskBundle, b: TaskBundle):     Bool = a.set === b.set
   def sameSet (a: TaskBundle, b: MSHRBlockAInfo): Bool = a.set === b.set
+  def sameClientSet (a: TaskBundle, b: TaskBundle):     Bool = a.set(clientSetBits-1, 0) === b.set(clientSetBits-1, 0)
+  def sameClientSet (a: TaskBundle, b: MSHRBlockAInfo): Bool = a.set(clientSetBits-1, 0) === b.set(clientSetBits-1, 0)
+
   def addrConflict(a: TaskBundle, s: MSHRBlockAInfo): Bool = {
     a.set === s.set // && (a.tag === s.reqTag || a.tag === s.metaTag && s.needRelease) // TODO: reduce set blocking for L3 ?
+    //a.set === s.set && (a.tag === s.reqTag || a.tag === s.metaTag) // TODO: reduce set blocking for L3 ?
   }
   def conflictMask(a: TaskBundle): UInt = VecInit(io.mshrStatus.map(s =>
     s.valid && addrConflict(a, s.bits) && !s.bits.willFree)).asUInt
@@ -93,36 +97,38 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
     VecInit(io.mshrStatus.map(s =>
       Mux(
         s.valid && cond(s.bits),
-        UIntToOH(s.bits.way, NWay),
-        0.U(NWay.W)
+        UIntToOH(s.bits.way, cacheParams.ways),
+        0.U(cacheParams.ways.W)
       )
     )).reduceTree(_ | _)
   }
   def occWays     (a: TaskBundle): UInt = countWaysOH(s => !s.willFree && sameSet(a, s))
   def willFreeWays(a: TaskBundle): UInt = countWaysOH(s =>  s.willFree && sameSet(a, s))
-  def willFreeWays_1(a: TaskBundle): UInt = {
-    val willFreeWays_2 = countWaysOH(s =>  s.willFree && sameSet(a, s))
-    val sameSetWays = VecInit(io.mshrStatus.map(s =>
+  // count client ways
+  def countClientWaysOH(cond: (MSHRBlockAInfo => Bool)): UInt = {
+    VecInit(io.mshrStatus.map(s =>
       Mux(
-        s.valid && sameSet(a, s.bits),
-        UIntToOH(s.bits.way, NWay),
-        0.U(NWay.W)
+        s.valid && cond(s.bits),
+        UIntToOH(s.bits.clientWay, clientWays),
+        0.U(clientWays.W)
       )
-    ))
-    val sameSetWaysCount = PopCount(sameSetWays.map( s => s === willFreeWays_2 ))
-    Mux(sameSetWaysCount <= 1.U, willFreeWays_2, 0.U)
+    )).reduceTree(_ | _)
   }
+  def occClientWays(a: TaskBundle): UInt = countClientWaysOH(s => !s.willFree && sameClientSet(a, s))
+  def willFreeClientWays(a: TaskBundle): UInt = countClientWaysOH(s =>  s.willFree && sameClientSet(a, s))
 
   def noFreeWay(a: TaskBundle): Bool = !Cat(~occWays(a)).orR
   def noFreeWay(occWays: UInt): Bool = !Cat(~occWays).orR
+
+  def noFreeClientWay(a: TaskBundle): Bool = !Cat(~occClientWays(a)).orR
+  def noFreeClientWay(occClientWays: UInt): Bool = !Cat(~occClientWays).orR
 
   // other flags
   val in      = io.in.bits
   val full    = Cat(buffer.map(_.valid)).andR
 
   // flow not allowed when full, or entries might starve
-  val sourceConflictIn = Cat(io.taskStatusSinkC.map( s => s.valid && s.sourceId === io.in.bits.sourceId)).orR
-  val canFlow = flow.B && !full && !conflict(in) && !chosenQValid && !Cat(io.mainPipeBlock).orR && !noFreeWay(in) && !sourceConflictIn
+  val canFlow = flow.B && !full && !conflict(in) && !chosenQValid && !Cat(io.mainPipeBlock).orR && !noFreeWay(in) && !noFreeClientWay(in)
   val doFlow  = canFlow && io.out.ready
 
 
@@ -139,13 +145,16 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   when(alloc){
     val entry = buffer(insertIdx)
     val mpBlock = Cat(io.mainPipeBlock).orR
+    // val pipeBlockOut = io.out.fire && ( sameSet(in, io.out.bits) || sameClientSet(in, io.out.bits) )
     val pipeBlockOut = io.out.fire && sameSet(in, io.out.bits)
     val probeBlock   = io.sinkEntrance.valid && io.sinkEntrance.bits.set === in.set // wait for same-addr req to enter MSHR
     val s1Block      = pipeBlockOut || probeBlock
 
     entry.valid   := true.B
     // when Addr-Conflict / Same-Addr-Dependent / MainPipe-Block / noFreeWay-in-Set, entry not ready
-    entry.rdy     := !conflict(in) && !mpBlock && !noFreeWay(in) && !s1Block // && !Cat(depMask).orR
+    val hasFreeClientWay = PopCount(occClientWays(in)) <= (clientWays.U - 2.U)
+    // entry.rdy     := !conflict(in) && !mpBlock && !noFreeWay(in) && !noFreeClientWay(in) && !s1Block // && !Cat(depMask).orR
+    entry.rdy     := !conflict(in) && !mpBlock && !noFreeWay(in) && hasFreeClientWay && !s1Block
     entry.task    := io.in.bits
 
     entry.waitMP  := Cat(
@@ -156,6 +165,7 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
     )
     entry.waitMS  := conflictMask(in)
     entry.occWays := Mux(mpBlock, 0.U, occWays(in))
+    entry.occClientWays := Mux(mpBlock, 0.U, occClientWays(in))
   }
 
 
@@ -165,10 +175,11 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   issueArb.io.in zip buffer foreach {
     case(in, e) =>
       // when io.out.valid, we temporarily stall all entries of the same set
+      // val pipeBlockOut = io.out.valid && ( sameSet(e.task, io.out.bits) || sameClientSet(e.task, io.out.bits) )
       val pipeBlockOut = io.out.valid && sameSet(e.task, io.out.bits)
-      val sourceConflict = Cat(io.taskStatusSinkC.map( s => s.valid && s.sourceId === e.task.sourceId)).orR
+      // val sourceConflict = Cat(io.taskStatusSinkC.map( s => s.valid && s.sourceId === e.task.sourceId)).orR
 
-      in.valid := e.valid && e.rdy && !pipeBlockOut && !sourceConflict
+      in.valid := e.valid && e.rdy && !pipeBlockOut //&& !sourceConflict
       in.bits  := e
   }
 
@@ -202,11 +213,13 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
       // val waitMPUpdate  = WireInit(e.waitMP)
       val waitMSUpdate  = WireInit(e.waitMS)
       val occWaysUpdate = WireInit(e.occWays)
+      val occClientWaysUpdate = WireInit(0.U(clientWays.U))
 
       // when mshr will_free, clear it in other reqs' waitMS and occWays
       val willFreeMask = VecInit(io.mshrStatus.map(s => s.valid && s.bits.willFree)).asUInt
       waitMSUpdate  := e.waitMS & (~willFreeMask).asUInt
       occWaysUpdate := e.occWays & (~willFreeWays(e.task)).asUInt
+      occClientWaysUpdate := e.occClientWays & (~willFreeClientWays(e.task)).asUInt
       e.waitMP  := PriorityMux(Seq(
         e.waitMP(1) -> (e.waitMP >> pipeFlow_s3.asUInt),
         e.waitMP(2) -> (e.waitMP >> pipeFlow_s2.asUInt)
@@ -215,10 +228,12 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
       when(e.waitMP(1) === 0.U && e.waitMP(0) === 1.U) {
         waitMSUpdate  := conflictMask(e.task)
         occWaysUpdate := occWays(e.task)
+        occClientWaysUpdate := occClientWays(e.task)
       }
 
 
       // set waitMP if fired-s1-req is the same set
+      // val s1A_Block = io.out.fire && ( sameSet(e.task, io.out.bits) || sameClientSet(e.task, io.out.bits) )
       val s1A_Block = io.out.fire && sameSet(e.task, io.out.bits)
       val s1B_Block = io.sinkEntrance.valid && io.sinkEntrance.bits.set === e.task.set
       val s1_Block  = s1A_Block || s1B_Block
@@ -230,7 +245,12 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
       // e.waitMP  := waitMPUpdate
       e.waitMS  := waitMSUpdate
       e.occWays := occWaysUpdate
-      e.rdy     := !waitMSUpdate.orR && !Cat(e.waitMP(2, 1)).orR && !noFreeWay(occWaysUpdate) && !s1_Block
+      e.occClientWays := occClientWaysUpdate
+
+      val hasFreeClientWay = PopCount(occClientWaysUpdate) <= (clientWays.U - 2.U)
+      // e.rdy     := !waitMSUpdate.orR && !Cat(e.waitMP(2, 1)).orR && !noFreeWay(occWaysUpdate) && !noFreeClientWay(occClientWaysUpdate) && !s1_Block
+      e.rdy     := !waitMSUpdate.orR && !Cat(e.waitMP(2, 1)).orR && !noFreeWay(occWaysUpdate) && hasFreeClientWay && !s1_Block
+
     }
   }
 
@@ -253,8 +273,9 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
 
   // for Dir to choose a way not occupied by some unfinished MSHR task
   io.out.bits.wayMask := Mux(canFlow, ~occWays(io.in.bits), ~chosenQ.io.deq.bits.bits.occWays)
+  io.out.bits.clientWayMask := Mux(canFlow, ~occClientWays(io.in.bits), ~chosenQ.io.deq.bits.bits.occClientWays)
 
-
+  assert(!(io.out.fire && ~Cat(io.out.bits.wayMask).orR && ~Cat(io.out.bits.clientWayMask).orR), "not enough wayMask set:%x tag:%x", io.out.bits.set, io.out.bits.tag)
   
   // add XSPerf to see how many cycles the req is held in Buffer
   if(cacheParams.enablePerf) {
