@@ -110,10 +110,6 @@ class SinkA(implicit p: Parameters) extends L2Module {
   commonReq.valid := io.a.valid
   commonReq.bits := fromTLAtoTaskBundle(io.a.bits)
   if (prefetchOpt.nonEmpty) {
-    prefetchReq.get.valid := io.prefetchReq.get.valid
-    prefetchReq.get.bits := fromPrefetchReqtoTaskBundle(io.prefetchReq.get.bits)
-    io.prefetchReq.get.ready := prefetchReq.get.ready
-    fastArb(Seq(commonReq, prefetchReq.get), io.task)
     val pipe = Module(new Pipeline(io.prefetchReq.get.bits.cloneType, 1))
     pipe.io.in <> io.prefetchReq.get
     prefetchReq.get.valid := pipe.io.out.valid
