@@ -45,7 +45,7 @@ trait HasSPPParams extends HasCoupledL2Parameters {
   val fTagBits = fullAddressBits - offsetBits - log2Up(fTableEntries)
 
   def strideMap(a: SInt) : UInt = {
-    val out = WireInit(UInt(3.W))
+    val out = WireInit(0.U(3.W))
     when(a <= -5.S) {
       out := "b100".U
     } .elsewhen(a >= 5.S) {
