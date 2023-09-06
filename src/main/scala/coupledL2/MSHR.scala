@@ -584,7 +584,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
     state.s_merge_probeack := false.B
     state.s_release := true.B
     state.w_releaseack := true.B
-    when (meta.clients.orR && !alreadySendProbe) {
+    when (meta.clients.orR && !alreadySendProbe && state.s_rprobe =/= false.B) {
       state.s_rprobe := false.B
       state.w_rprobeackfirst := false.B
       state.w_rprobeacklast := false.B
