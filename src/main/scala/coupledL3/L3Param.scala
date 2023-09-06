@@ -86,7 +86,7 @@ case class L3Param
   pageBytes: Int = 4096,
   channelBytes: TLChannelBeatBytes = TLChannelBeatBytes(32),
   clientCaches: Seq[CacheParameters] = Nil,
-  replacement: String = "plru",
+  replacement: String =  "random", // "plru"
   mshrs: Int = 16,
   grantQueueEntries: Int = 16,
   enableClockGate: Boolean = true,

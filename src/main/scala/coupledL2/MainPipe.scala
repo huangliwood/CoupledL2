@@ -658,25 +658,25 @@ class MainPipe(implicit p: Parameters) extends L2Module {
   // directory access result
   val hit_s3 = task_s3.valid && !mshr_req_s3 && dirResult_s3.hit
   val miss_s3 = task_s3.valid && !mshr_req_s3 && !dirResult_s3.hit
-  XSPerfAccumulate(cacheParams, "a_req_hit", hit_s3 && req_s3.fromA)
-  XSPerfAccumulate(cacheParams, "acquire_hit", hit_s3 && req_s3.fromA &&
+  XSPerfAccumulate(cacheParams, cacheParams.name+"_a_req_hit", hit_s3 && req_s3.fromA)
+  XSPerfAccumulate(cacheParams, cacheParams.name+"_acquire_hit", hit_s3 && req_s3.fromA &&
     (req_s3.opcode === AcquireBlock || req_s3.opcode === AcquirePerm))
-  XSPerfAccumulate(cacheParams, "get_hit", hit_s3 && req_s3.fromA && req_s3.opcode === Get)
-  XSPerfAccumulate(cacheParams, "retry", mshr_refill_s3 && retry)
+  XSPerfAccumulate(cacheParams, cacheParams.name+"_get_hit", hit_s3 && req_s3.fromA && req_s3.opcode === Get)
+  XSPerfAccumulate(cacheParams, cacheParams.name+"_retry", mshr_refill_s3 && retry)
 
-  XSPerfAccumulate(cacheParams, "a_req_miss", miss_s3 && req_s3.fromA)
-  XSPerfAccumulate(cacheParams, "acquire_miss", miss_s3 && req_s3.fromA &&
+  XSPerfAccumulate(cacheParams, cacheParams.name+"_a_req_miss", miss_s3 && req_s3.fromA)
+  XSPerfAccumulate(cacheParams, cacheParams.name+"_acquire_miss", miss_s3 && req_s3.fromA &&
     (req_s3.opcode === AcquireBlock || req_s3.opcode === AcquirePerm))
-  XSPerfAccumulate(cacheParams, "get_miss", miss_s3 && req_s3.fromA && req_s3.opcode === Get)
+  XSPerfAccumulate(cacheParams, cacheParams.name+"_get_miss", miss_s3 && req_s3.fromA && req_s3.opcode === Get)
 
-  XSPerfAccumulate(cacheParams, "b_req_hit", hit_s3 && req_s3.fromB)
-  XSPerfAccumulate(cacheParams, "b_req_miss", miss_s3 && req_s3.fromB)
+  XSPerfAccumulate(cacheParams, cacheParams.name+"_b_req_hit", hit_s3 && req_s3.fromB)
+  XSPerfAccumulate(cacheParams, cacheParams.name+"_b_req_miss", miss_s3 && req_s3.fromB)
 
-  XSPerfHistogram(cacheParams, "a_req_access_way", perfCnt = dirResult_s3.way,
+  XSPerfHistogram(cacheParams, cacheParams.name+"_a_req_access_way", perfCnt = dirResult_s3.way,
     enable = task_s3.valid && !mshr_req_s3 && req_s3.fromA, start = 0, stop = cacheParams.ways, step = 1)
-  XSPerfHistogram(cacheParams, "a_req_hit_way", perfCnt = dirResult_s3.way,
+  XSPerfHistogram(cacheParams, cacheParams.name+"_a_req_hit_way", perfCnt = dirResult_s3.way,
     enable = hit_s3 && req_s3.fromA, start = 0, stop = cacheParams.ways, step = 1)
-  XSPerfHistogram(cacheParams, "a_req_miss_way_choice", perfCnt = dirResult_s3.way,
+  XSPerfHistogram(cacheParams, cacheParams.name+"_a_req_miss_way_choice", perfCnt = dirResult_s3.way,
     enable = miss_s3 && req_s3.fromA, start = 0, stop = cacheParams.ways, step = 1)
 
   // pipeline stages for sourceC and sourceD reqs

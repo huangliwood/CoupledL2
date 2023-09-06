@@ -23,11 +23,11 @@ class GrantBuffer(implicit p: Parameters) extends L3Module {
         val e = Flipped(DecoupledIO(new TLBundleE(edgeIn.bundle)))
         val e_resp = Output(new RespBundle)
 
-        // val fromReqArb = Input(new Bundle() {
-        //     val status_s1 = new PipeEntranceStatus
-        // })
+        val fromReqArb = Input(new Bundle() {
+            val status_s1 = new PipeEntranceStatus
+        })
 
-        // val pipeStatusVec = Flipped(Vec(5, ValidIO(new PipeStatus)))
+        val pipeStatusVec = Flipped(Vec(5, ValidIO(new PipeStatus)))
         val toReqArb = Output(new Bundle() {
             val blockSinkReqEntrance = new BlockInfo()
             val blockMSHRReqEntrance = Bool()
@@ -120,25 +120,23 @@ class GrantBuffer(implicit p: Parameters) extends L3Module {
     // handle capacity conflict of GrantBuffer
     // count the number of valid blocks + those in pipe that might use GrantBuf
     // so that GrantBuffer will not exceed capacity
-    // val noSpaceForSinkReq = PopCount(Cat(VecInit(io.pipeStatusVec.tail.map { case s =>
-    //     s.valid && (s.bits.fromA || s.bits.fromC)
-    // }).asUInt, blockValids)) >= mshrsAll.U
-    // val noSpaceForMSHRReq = PopCount(Cat(VecInit(io.pipeStatusVec.map { case s =>
-    //     s.valid && s.bits.fromA
-    // }).asUInt, blockValids)) >= mshrsAll.U
+    val noSpaceForSinkReq = PopCount(Cat(VecInit(io.pipeStatusVec.tail.map { case s =>
+        s.valid && (s.bits.fromA || s.bits.fromC)
+    }).asUInt, blockValids)) >= grantQueueEntries.U
+    val noSpaceForMSHRReq = PopCount(Cat(VecInit(io.pipeStatusVec.map { case s =>
+        s.valid && s.bits.fromA
+    }).asUInt, blockValids)) >= grantQueueEntries.U
 
-    // io.toReqArb.blockSinkReqEntrance.blockA_s1 := noSpaceForSinkReq
-    // io.toReqArb.blockSinkReqEntrance.blockB_s1 := Cat(inflightGrantBuf.map(g => g.valid &&
-    //     g.bits.set === io.fromReqArb.status_s1.b_set && g.bits.tag === io.fromReqArb.status_s1.b_tag)).orR
-    // //TODO: or should we still Stall B req?
-    // // A-replace related rprobe is handled in SourceB
-    // io.toReqArb.blockSinkReqEntrance.blockC_s1 := noSpaceForSinkReq
-    // io.toReqArb.blockMSHRReqEntrance := noSpaceForMSHRReq
+    io.toReqArb.blockSinkReqEntrance.blockA_s1 := noSpaceForSinkReq
+    io.toReqArb.blockSinkReqEntrance.blockB_s1 := Cat(inflightGrantBuf.map(g => g.valid &&
+        g.bits.set === io.fromReqArb.status_s1.b_set && g.bits.tag === io.fromReqArb.status_s1.b_tag)).orR
+    io.toReqArb.blockSinkReqEntrance.blockC_s1 := noSpaceForSinkReq
+    io.toReqArb.blockMSHRReqEntrance := noSpaceForMSHRReq
 
-    io.toReqArb.blockSinkReqEntrance.blockA_s1 := false.B
-    io.toReqArb.blockSinkReqEntrance.blockB_s1 := false.B
-    io.toReqArb.blockSinkReqEntrance.blockC_s1 := false.B
-    io.toReqArb.blockMSHRReqEntrance := false.B
+    // io.toReqArb.blockSinkReqEntrance.blockA_s1 := false.B
+    // io.toReqArb.blockSinkReqEntrance.blockB_s1 := false.B
+    // io.toReqArb.blockSinkReqEntrance.blockC_s1 := false.B
+    // io.toReqArb.blockMSHRReqEntrance := false.B
 
 
 

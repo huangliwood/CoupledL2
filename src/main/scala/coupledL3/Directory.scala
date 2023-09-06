@@ -116,8 +116,8 @@ class Directory(implicit p: Parameters) extends L3Module with DontCareInnerLogic
   val ways = cacheParams.ways
   val banks = cacheParams.dirNBanks
 
-  val tagWen  = io.tagWReq.valid
-  val metaWen = io.metaWReq.valid
+  val tagWen  = io.tagWReq.fire
+  val metaWen = io.metaWReq.fire
   val replacerWen = RegInit(false.B)
 
   val tagArray  = Module(new BankedSRAM(UInt(tagBits.W), sets, ways, banks, singlePort = true, enableClockGate = enableClockGate))
@@ -215,7 +215,7 @@ class Directory(implicit p: Parameters) extends L3Module with DontCareInnerLogic
     val repl_init = Wire(Vec(ways, UInt(2.W)))
     repl_init.foreach(_ := 2.U(2.W))
     replacer_sram_opt.get.io.w(
-      !resetFinish || replacerWen,
+      !resetFinish && metaWen || replacerWen,
       Mux(resetFinish, RegNext(next_state, 0.U.asTypeOf(next_state)), repl_init.asUInt),
       Mux(resetFinish, RegNext(reqReg.set, 0.U.asTypeOf(reqReg.set)), resetIdx),
       1.U
@@ -228,7 +228,7 @@ class Directory(implicit p: Parameters) extends L3Module with DontCareInnerLogic
     repl_state_hold := HoldUnless(repl_sram_r, RegNext(io.read.fire, false.B))
     val next_state = repl.get_next_state(repl_state_hold, way_s2)
     replacer_sram_opt.get.io.w(
-      !resetFinish || replacerWen,
+      !resetFinish && metaWen || replacerWen,
       Mux(resetFinish, RegNext(next_state, 0.U.asTypeOf(next_state)), 0.U),
       Mux(resetFinish, RegNext(reqReg.set, 0.U.asTypeOf(reqReg.set)), resetIdx),
       1.U
@@ -286,7 +286,7 @@ class Directory(implicit p: Parameters) extends L3Module with DontCareInnerLogic
     val writeFullMeta = RegInit(false.B)
     val writeFullTag = RegInit(false.B)
 
-    io.read.ready := tagArray.io.r.req.ready && metaArray.io.r.req.ready && replacerRready && !readFull
+    io.read.ready := resetFinish && tagArray.io.r.req.ready && metaArray.io.r.req.ready && replacerRready && !readFull
     when(io.read.fire) {
       readFull := true.B
     }.otherwise{
@@ -314,7 +314,7 @@ class Directory(implicit p: Parameters) extends L3Module with DontCareInnerLogic
       assert(!(RegNext(io.tagWReq.fire) && io.tagWReq.fire), "[half freq] Consecutively tagW!")
     }
   } else {
-    io.read.ready := tagArray.io.r.req.ready && metaArray.io.r.req.ready && replacerRready
+    io.read.ready := resetFinish && tagArray.io.r.req.ready && metaArray.io.r.req.ready && replacerRready
     io.metaWReq.ready := true.B
     io.tagWReq.ready := true.B 
   }
@@ -329,10 +329,10 @@ class Directory(implicit p: Parameters) extends L3Module with DontCareInnerLogic
     replacerWen := false.B
   }
 
-  when(resetIdx === 0.U) {
+  when(resetIdx === 0.U && io.metaWReq.fire) {
     resetFinish := true.B
   }
-  when(!resetFinish) {
+  when(!resetFinish && resetIdx =/= 0.U && io.metaWReq.fire) {
     resetIdx := resetIdx - 1.U
   }
 

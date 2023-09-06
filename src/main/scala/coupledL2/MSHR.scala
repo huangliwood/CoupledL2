@@ -397,7 +397,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
     )
     mp_grant.metaWen := true.B
     mp_grant.tagWen := !dirResult.hit
-    mp_grant.dsWen := !dirResult.hit && gotGrantData || probeDirty && (req_get || req.aliasTask.getOrElse(false.B))
+    mp_grant.dsWen := (!dirResult.hit || gotDirty) && gotGrantData || probeDirty && (req_get || req.aliasTask.getOrElse(false.B))
     mp_grant.fromL2pft.foreach(_ := req.fromL2pft.get)
     mp_grant.needHint.foreach(_ := false.B)
     mp_grant.replTask := !dirResult.hit // Get and Alias are hit that does not need replacement
@@ -584,7 +584,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
     state.s_merge_probeack := false.B
     state.s_release := true.B
     state.w_releaseack := true.B
-    when (meta.clients.orR && !alreadySendProbe) {
+    when (meta.clients.orR && !alreadySendProbe && state.s_rprobe =/= false.B) {
       state.s_rprobe := false.B
       state.w_rprobeackfirst := false.B
       state.w_rprobeacklast := false.B

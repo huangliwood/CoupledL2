@@ -100,6 +100,8 @@ class MSHR(implicit p: Parameters) extends L3Module with noninclusive.HasClientI
   val probeAckParamVec = RegInit(VecInit(Seq.fill(clientBits)(0.U.asTypeOf(chiselTypeOf(io.resps.sink_c.bits.param)))))
   val stateAfterProbe = RegInit(0.U(stateBits.W))
 
+  val metaNeedRelease = RegInit(false.B)
+
   val timer = RegInit(0.U(64.W)) // for performance analysis
 
 
@@ -178,6 +180,7 @@ class MSHR(implicit p: Parameters) extends L3Module with noninclusive.HasClientI
     aNeedProbe := !io.alloc.bits.state.s_rprobe
     probeAckParamVec.foreach( _ := DontCare)
     stateAfterProbe := INVALID
+    metaNeedRelease := !io.alloc.bits.dirResult.hit && !io.alloc.bits.state.w_release_sent
     timer       := 1.U
   }
 
@@ -202,6 +205,7 @@ class MSHR(implicit p: Parameters) extends L3Module with noninclusive.HasClientI
       (req.opcode === Get || req_put || client.U =/= reqClient) && clientHit
   }).asUInt.orR
 
+
   // --------------------------------------------------------------------------
   //  Task allocation
   // --------------------------------------------------------------------------
@@ -210,8 +214,8 @@ class MSHR(implicit p: Parameters) extends L3Module with noninclusive.HasClientI
   assert(!((!state.s_pprobe || !state.s_rprobe) && !io.tasks.source_b.bits.clients.orR && !req.fromProbeHelper), "Need schedule probe but without clients Set:0x%x Tag:0x%x mshr:%d fromProbeHelper:%d rprobe:%d pprobe:%d ob.param:%d", req.set, req.tag, io.id, req.fromProbeHelper, state.s_rprobe, state.s_pprobe, io.tasks.source_b.bits.param)
   io.tasks.source_b.valid := (!state.s_pprobe || !state.s_rprobe) && state.w_release_sent
     
-  // val mp_release_valid = !state.s_release && state.w_rprobeacklast && state.w_pprobeacklast && !waitNestedC && !waitNestedB && !nestedValid // && state.w_probehelper_done // && !waitNestedC && !waitNestedB && !nestedValid
   val mp_release_valid = !state.s_release && state.w_pprobeacklast && !waitNestedC && !waitNestedB && !nestedValid && !needWaitNestedC
+  // val mp_release_valid = !state.s_release && state.w_pprobeacklast !(waitNestedC && !needWaitNestedC) && !waitNestedB && !nestedValid
   val mp_releaseack_valid = !state.s_releaseack && state.w_release_sent
   val mp_probeack_valid = !state.s_probeack && state.w_pprobeacklast && !waitNestedC && !waitNestedB && !needWaitNestedC
   val mp_grant_valid = !state.s_refill && state.w_grantlast && state.w_rprobeacklast && state.s_release && state.w_probehelper_done && !req_put && !waitNestedC && !waitNestedB && !nestedValid && !needWaitNestedC
@@ -279,9 +283,6 @@ class MSHR(implicit p: Parameters) extends L3Module with noninclusive.HasClientI
     )
 
 
-    val temp_clientDirResultHits = clientDirResult.hits.asUInt
-    dontTouch(temp_clientDirResultHits)
-
     ob.clients := Mux(
       req.fromProbeHelper,
       clientDirResult.hits.asUInt,
@@ -340,6 +341,8 @@ class MSHR(implicit p: Parameters) extends L3Module with noninclusive.HasClientI
       mp_release.clientWay := clientDirResult.way
       mp_release.clientMetaWen := false.B
       mp_release.clientTagWen := false.B // NINE directory is inclusive
+      // mp_release.clientMetaWen := true.B
+      // mp_release.clientTagWen := true.B // NINE directory is inclusive
     }.otherwise{
       mp_release.meta := MetaEntry()
       mp_release.metaWen := Mux(nestedProbeToN, true.B, !nestedReleaseNeedRelease)
@@ -385,7 +388,7 @@ class MSHR(implicit p: Parameters) extends L3Module with noninclusive.HasClientI
     mp_probeack.way := req.way
     mp_probeack.dirty := meta.dirty && meta.state =/= INVALID || probeDirty
     mp_probeack.meta := MetaEntry(
-      dirty = meta.dirty && meta.state =/= INVALID || probeDirty,
+      dirty = meta.dirty && meta.state =/= INVALID || probeDirty || stateAfterProbe === TIP,
       state = Mux(
         req.param === toN,
         Mux(req.fromProbeHelper, Mux(nestedReleaseToN, dirResult.meta.state, stateAfterProbe), INVALID),
@@ -786,7 +789,7 @@ class MSHR(implicit p: Parameters) extends L3Module with noninclusive.HasClientI
         probeAckParamVec(client) := c_resp.bits.param
         stateAfterProbe := MuxLookup(c_resp.bits.param, INVALID, Seq(
                                 TtoN -> TIP,
-                                BtoN -> BRANCH,
+                                BtoN -> Mux(dirResult.hit && dirResult.meta.state === TIP, TIP, BRANCH),
                                 TtoB -> TIP
                               )
                             )
@@ -873,12 +876,14 @@ class MSHR(implicit p: Parameters) extends L3Module with noninclusive.HasClientI
     timer := timer + 1.U
   }
   
-  val no_schedule = state.s_refill && state.s_probeack
-  val no_wait = state.w_rprobeacklast && state.w_pprobeacklast && state.w_grantlast && state.w_releaseack && state.w_grantack && state.w_probehelper_done && state.w_release_sent 
-  val will_free = no_schedule && no_wait && !waitNestedC && !waitNestedB && !nestedWbMatch && !needWaitNestedC
-  
   val mshrTaskIsFireReg = RegInit(false.B)
   val mshrTaskIsFire = Mux(io.mshrTaskIsFire, true.B, mshrTaskIsFireReg)
+
+  val no_schedule = state.s_refill && state.s_probeack
+  val no_wait = state.w_rprobeacklast && state.w_pprobeacklast && state.w_grantlast && state.w_releaseack && state.w_grantack && state.w_probehelper_done && state.w_release_sent 
+  val will_free = no_schedule && no_wait && !waitNestedC && !waitNestedB && !nestedWbMatch && !needWaitNestedC && mshrTaskIsFire
+  
+
   when (io.alloc.valid) {
     mshrTaskIsFireReg := false.B
   }.elsewhen(io.mshrTaskIsFire) {
@@ -899,6 +904,7 @@ class MSHR(implicit p: Parameters) extends L3Module with noninclusive.HasClientI
   // For A reqs, we only concern about the tag to be replaced
   io.status.bits.tag := Mux(state.w_release_sent, req.tag, dirResult.tag) // s_release is low-as-valid
   io.status.bits.nestB := status_reg.valid && state.w_releaseack && state.w_rprobeacklast && state.w_pprobeacklast && !waitNestedC && (!state.w_grantfirst || !state.w_probehelper_done) && !status_reg.bits.fromC // allow nested probehelper req
+  // io.status.bits.nestC := status_reg.valid && Mux(waitNestedB || req.fromProbeHelper, true.B, state.w_releaseack || needWaitNestedC) && MuxCase(false.B, Seq(
   io.status.bits.nestC := status_reg.valid && Mux(waitNestedB || req.fromProbeHelper, true.B, state.w_releaseack) && MuxCase(false.B, Seq(
     req.fromA -> (!state.s_refill && !mp_grant_valid),
     req.fromB -> (!mp_probeack_valid && !mp_release_valid),
@@ -922,7 +928,7 @@ class MSHR(implicit p: Parameters) extends L3Module with noninclusive.HasClientI
   io.toReqBuf.bits.way := req.way
   io.toReqBuf.bits.clientWay := clientDirResult.way
   io.toReqBuf.bits.reqTag := req.tag
-  io.toReqBuf.bits.needRelease := !state.w_release_sent
+  io.toReqBuf.bits.needRelease := metaNeedRelease //!state.w_release_sent || !state.w_releaseack
   io.toReqBuf.bits.metaTag := dirResult.tag
   io.toReqBuf.bits.willFree := will_free
   io.toReqBuf.bits.isAcqOrPrefetch := req_acquire

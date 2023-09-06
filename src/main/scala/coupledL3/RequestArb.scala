@@ -72,8 +72,9 @@ class RequestArb(implicit p: Parameters) extends L3Module {
       val blockSinkA = Bool()
     })
 
-    val mshrTaskInfo = Output(new MSHRTaskInfo)
     val pipeFlow_s1 = Output(Bool())
+
+    val resetFinish = Input(Bool())
   })
 
   // --------------------------------------------------------------------------
@@ -85,21 +86,6 @@ class RequestArb(implicit p: Parameters) extends L3Module {
 
   val s1_full = RegInit(false.B)
   val s2_full = RegInit(false.B)
-
-
-  // --------------------------------------------------------------------------
-  //  Reset
-  // --------------------------------------------------------------------------
-  val resetFinish = RegInit(false.B)
-  val resetIdx = RegInit((cacheParams.sets - 1).U)
-
-  // block reqs when reset
-  when(!resetFinish) {
-    resetIdx := resetIdx - 1.U
-  }
-  when(resetIdx === 0.U) {
-    resetFinish := true.B
-  }
 
 
   // --------------------------------------------------------------------------
@@ -156,7 +142,7 @@ class RequestArb(implicit p: Parameters) extends L3Module {
   val sinkValids       = VecInit(Seq(sinkC_valid, probeHelperValid, sinkB_valid, sinkA_valid)).asUInt
 
 
-  val sinkReadyBasic        = io.dirRead_s1.ready && io.clientDirRead_s1.ready && resetFinish && !mshrTask_s1.valid && s2_ready
+  val sinkReadyBasic        = io.dirRead_s1.ready && io.clientDirRead_s1.ready && io.resetFinish && !mshrTask_s1.valid && s2_ready
   val sinkB_ready           = sinkReadyBasic && !blockB && !sinkC_valid
   val probeHelperFire       = probeHelperValid & sinkB_ready
   io.sinkA.ready           := sinkReadyBasic && !blockA && !sinkB_valid && !sinkC_valid && !probeHelperValid // SinkC prior to SinkA & SinkB
@@ -166,7 +152,7 @@ class RequestArb(implicit p: Parameters) extends L3Module {
 
   val chnlTask_s1    = Wire(Valid(new TaskBundle()))
   val taskVec         = Seq(taskSinkC, taskProbeHelper, taskSinkB, taskSinkA)
-  chnlTask_s1.valid := io.dirRead_s1.ready && io.clientDirRead_s1.ready && sinkValids.orR && resetFinish
+  chnlTask_s1.valid := io.dirRead_s1.ready && io.clientDirRead_s1.ready && sinkValids.orR && io.resetFinish
   chnlTask_s1.bits  := ParallelPriorityMux(sinkValids, taskVec)
 
   // mshrTask_s1 is s1_[reg]
@@ -177,7 +163,6 @@ class RequestArb(implicit p: Parameters) extends L3Module {
 
   // Meta read request
   // only sinkA/B/C tasks need to read directory
-  // io.dirRead_s1.valid                       := chnlTask_s1.valid && !mshrTask_s1.valid
   io.dirRead_s1.valid                       := s1_fire && !mshrTask_s1.valid
   io.dirRead_s1.bits.set                    := task_s1.bits.set
   io.dirRead_s1.bits.tag                    := task_s1.bits.tag
@@ -186,7 +171,6 @@ class RequestArb(implicit p: Parameters) extends L3Module {
   io.dirRead_s1.bits.replacerInfo.channel   := task_s1.bits.channel
   io.dirRead_s1.bits.replacerInfo.reqSource := task_s1.bits.reqSource
 
-  // io.clientDirRead_s1.valid                       := chnlTask_s1.valid && !mshrTask_s1.valid
   io.clientDirRead_s1.valid                       := s1_fire && !mshrTask_s1.valid
   io.clientDirRead_s1.bits.set                    := task_s1.bits.set
   io.clientDirRead_s1.bits.tag                    := task_s1.bits.tag
@@ -194,6 +178,9 @@ class RequestArb(implicit p: Parameters) extends L3Module {
   io.clientDirRead_s1.bits.replacerInfo.opcode    := task_s1.bits.opcode
   io.clientDirRead_s1.bits.replacerInfo.channel   := task_s1.bits.channel
   io.clientDirRead_s1.bits.replacerInfo.reqSource := task_s1.bits.reqSource
+
+  assert(!(io.dirRead_s1.fire && !io.clientDirRead_s1.fire))
+  assert(!(io.clientDirRead_s1.fire && !io.dirRead_s1.fire))
 
   // probe block same-set A req for s2/s3
   val sink_tag = PriorityMux(Seq(
@@ -206,11 +193,12 @@ class RequestArb(implicit p: Parameters) extends L3Module {
                   io.probeHelperTask.fire -> taskProbeHelper.set,
                   io.sinkB.fire           -> taskSinkB.set
                 ))
-  io.sinkEntrance.valid     := io.sinkB.fire || io.sinkC.fire || io.probeHelperTask.fire
-  io.sinkEntrance.bits.tag  := sink_tag
-  io.sinkEntrance.bits.set  := sink_set
+  io.sinkEntrance <> DontCare
+  // io.sinkEntrance.valid     := io.sinkB.fire || io.sinkC.fire || io.probeHelperTask.fire
+  // io.sinkEntrance.bits.tag  := sink_tag
+  // io.sinkEntrance.bits.set  := sink_set
 
-  val dirReady = io.dirRead_s1.ready && io.clientDirRead_s1.ready
+  val dirReady = io.dirRead_s1.ready && io.clientDirRead_s1.ready && io.resetFinish
   s1_valid := mshrTask_s1.valid || chnlTask_s1.valid && dirReady
   s1_ready := (!s1_full || s1_fire) && !io.fromGrantBuffer.blockMSHRReqEntrance
   s1_fire := s1_valid && s2_ready 
@@ -259,9 +247,6 @@ class RequestArb(implicit p: Parameters) extends L3Module {
 
   s2_fire := s2_valid && io.taskToPipe_s2.ready
 
-  io.mshrTaskInfo.valid := s2_fire && task_s2.valid && task_s2.bits.mshrTask
-  io.mshrTaskInfo.mshrId := task_s2.bits.mshrId
-
   io.pipeFlow_s1 := s1_fire
 
   // MSHR task
@@ -295,8 +280,8 @@ class RequestArb(implicit p: Parameters) extends L3Module {
   // status of each pipeline stage
   val b_set = Mux(io.probeHelperTask.valid, taskProbeHelper.set, taskSinkB.set)
   val b_tag = Mux(io.probeHelperTask.valid, taskProbeHelper.tag, taskSinkB.tag)
-  io.status_s1.sets            := VecInit(Seq(taskSinkC.set, b_set, io.ASet))
-  io.status_s1.tags            := VecInit(Seq(taskSinkC.tag, b_tag, io.ATag))
+  io.status_s1.sets            := VecInit(Seq(taskSinkC.set, b_set, taskSinkA.set))
+  io.status_s1.tags            := VecInit(Seq(taskSinkC.tag, b_tag, taskSinkA.tag))
   io.status_s1.fromProbeHelper := io.probeHelperTask.valid
 
   require(io.status_vec.size == 2)

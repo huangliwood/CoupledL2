@@ -113,9 +113,7 @@ class MSHRCtl(implicit p: Parameters) extends L3Module with noninclusive.HasClie
   val mshrValids = VecInit(mshrs.map(m => m.io.status.valid))
 
   val s2s3PipeStatusVec = VecInit(Seq(io.pipeStatusVec(1), io.pipeStatusVec(2)))
-  // val pipeReqCount = PopCount(Cat(io.pipeStatusVec.map(_.valid))) // TODO: consider add !mshrTask to optimize
   val pipeReqCount = PopCount(Cat(s2s3PipeStatusVec.map(status => status.valid && !status.bits.mshrTask))) // TODO: consider add !mshrTask to optimize
-  // val pipeReqCount = PopCount(Cat(s2s3PipeStatusVec.map(status => status.valid))) // TODO: consider add !mshrTask to optimize
   val mshrCount = PopCount(Cat(mshrs.map(_.io.status.valid)))
   val mshrFull = pipeReqCount + mshrCount >= mshrsAll.U
   val b_mshrFull = pipeReqCount + mshrCount >= (mshrsAll-1).U
@@ -169,43 +167,19 @@ class MSHRCtl(implicit p: Parameters) extends L3Module with noninclusive.HasClie
   }
 
   val setMatchVec_b = mshrs.map(m => m.io.status.valid && m.io.status.bits.set === io.fromReqArb.status_s1.b_set)
-  // val setConflictVec_b = (setMatchVec_b zip mshrs.map(_.io.status.bits.nestB)).map(x => x._1 && !x._2)
   val setConflictVec_b = (setMatchVec_b zip mshrs.map(_.io.status.bits.nestB)).map(x => x._1 && !x._2)
-  val setConflictVec_b_1 = setConflictVec_b.zip(mshrs.map(_.io.status.bits)).map{
-    case(conflict, channel) => conflict && (io.fromReqArb.status_s1.fromProbeHelper && channel.fromC || !io.fromReqArb.status_s1.fromProbeHelper)
-  } 
-
-  def getMSHRSameSetVec(valid: Bool, set: UInt) = {
-    val mshrSameSetVec = VecInit(io.toReqBuf.map { status =>
-      status.valid && valid && status.bits.set === set
-    })
-    mshrSameSetVec
-  }
-  def getOccWayVec(valid: Bool, set: UInt) = {
-    val mshrSameSetVec = getMSHRSameSetVec(valid, set)
-    val occWay = mshrSameSetVec.zip(io.toReqBuf).map{
-      case(sameSet, status) => 
-        Mux(sameSet, UIntToOH(status.bits.way), 0.U(cacheParams.ways.W))
-    }.reduce(_|_)
-    occWay
-  }
-  val occWay = getOccWayVec(true.B, io.fromReqArb.status_s1.c_set)
-  val hasEmptyWay = ~occWay.andR
   
   val setMatchVec_c = mshrs.map(m => m.io.status.valid && m.io.status.bits.set === io.fromReqArb.status_s1.c_set)
   val setConflictVec_c = (setMatchVec_c zip mshrs.map(_.io.status.bits.nestC)).map(x => x._1 && !x._2)
   
-  // val clientSetMatch_a = mshrs.map(m => m.io.status.valid && m.io.status.bits.fromC && io.fromReqBufSinkA.valid && m.io.status.bits.set(clientSetBits - 1, 0) === io.fromReqBufSinkA.set(clientSetBits - 1, 0))
-  io.toReqArb.blockC_s1 := mshrFull || Cat(setConflictVec_c).orR //|| !hasEmptyWay
+  io.toReqArb.blockC_s1 := mshrFull || Cat(setConflictVec_c).orR
   io.toReqArb.blockB_s1 := b_mshrFull || Cat(setConflictVec_b).orR
-  io.toReqArb.blockA_s1 := a_mshrFull //|| Cat(clientSetMatch_a).orR // conflict logic moved to ReqBuf
+  io.toReqArb.blockA_s1 := a_mshrFull 
 
   /* Acquire downwards */
   val acquireUnit = Module(new AcquireUnit())
   fastArb(mshrs.map(_.io.tasks.source_a), acquireUnit.io.task, Some("source_a"))
   io.sourceA <> acquireUnit.io.sourceA
-//  io.pbRead <> acquireUnit.io.pbRead
-//  io.pbResp <> acquireUnit.io.pbResp
 
   /* Probe upwards */
   val sourceB = Module(new SourceB())

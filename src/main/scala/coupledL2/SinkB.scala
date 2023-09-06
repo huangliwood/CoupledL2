@@ -45,6 +45,7 @@ class SinkB(implicit p: Parameters) extends L2Module {
     task.set := parseAddress(b.address)._2
     task.off := parseAddress(b.address)._3
     task.alias.foreach(_ := 0.U)
+    task.vaddr.foreach(_ := 0.U)
     task.opcode := b.opcode
     task.param := b.param
     task.size := b.size
@@ -91,7 +92,7 @@ class SinkB(implicit p: Parameters) extends L2Module {
   assert(PopCount(replaceConflictMask) <= 1.U)
   assert(PopCount(mergeBMask) <= 1.U)
 
-  val mergeB = mergeBMask.orR
+  val mergeB = mergeBMask.orR // TODO: && task.param === toN // only toN can merge with MSHR-Release
   val mergeBId = OHToUInt(mergeBMask)
 
   // when conflict, we block B req from entering SinkB
@@ -104,5 +105,6 @@ class SinkB(implicit p: Parameters) extends L2Module {
   io.bMergeTask.bits.id := mergeBId
   io.bMergeTask.bits.task := task
 
-  // TODO: add conflict XSPerf counter
+  XSPerfAccumulate(cacheParams, "mergeBTask", io.bMergeTask.valid)
+  //!!WARNING: TODO: if this is zero, that means fucntion [Probe merge into MSHR-Release] is never tested, and may have flaws
 }
