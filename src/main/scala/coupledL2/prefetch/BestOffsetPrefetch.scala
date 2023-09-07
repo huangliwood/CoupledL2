@@ -138,7 +138,8 @@ class RecentRequestTable(implicit p: Parameters) extends BOPModule {
       val r = Flipped(new SRAMReadBus(rrTableEntry(), rrTableEntries, 1))
       val w = Flipped(new SRAMWriteBus(rrTableEntry(), rrTableEntries, 1))
     })
-    private val tags = Mem(rrTableEntries, UInt(rrTagBits.W))
+    // private val tags = Mem(rrTableEntries, UInt(rrTagBits.W))
+    private val tags = RegInit(VecInit(Seq.fill(rrTableEntries)(0.U(rrTagBits.W))))
     private val valids = RegInit(VecInit(Seq.fill(rrTagBits)(false.B)))
     io.w.req.ready := true.B
     when(io.w.req.valid){

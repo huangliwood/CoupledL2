@@ -142,5 +142,6 @@ class GrantBufferFIFO(implicit p: Parameters) extends BaseGrantBuffer with HasCi
   when(flush(deqPtr)) {
     flush(deqPtr) := false.B
     deqPtrExt := deqPtrExt + 1.U
+    // beat_valids(deqPtr).foreach(_ := false.B)
   }
 }
