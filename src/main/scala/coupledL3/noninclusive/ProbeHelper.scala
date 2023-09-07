@@ -53,8 +53,6 @@ class ProbeHelper(entries: Int = 5, enqDelay: Int = 1)(implicit p: Parameters) e
   when(RegNext(io.dirConflict)) {
     printf("[L3 WARNING] trig probehelper!!\n")
   }
-  // assert(RegNext(!io.dirConflict), "probehelper will not happen!!")
-
 
 
   val formA = replacerInfo.channel === 1.U

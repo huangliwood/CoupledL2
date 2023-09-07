@@ -52,7 +52,6 @@ class SinkC(implicit p: Parameters) extends L3Module with noninclusive.HasClient
     val bufRead = Input(ValidIO(new PipeBufferRead))
     val bufResp = Output(new PipeBufferResp)
     val mshrStatus  = Vec(mshrsAll, Flipped(ValidIO(new MSHRBlockAInfo)))
-    val taskStatus = Output(Vec(bufBlocks, new TaskStatusSinkC))
   })
   
   val (first, last, _, beat) = edgeIn.count(io.c)
@@ -70,12 +69,6 @@ class SinkC(implicit p: Parameters) extends L3Module with noninclusive.HasClient
   val taskArb = Module(new FastArbiter(new TaskBundle, bufBlocks))
   val bufValids = taskValids.asUInt | dataValids
 
-
-  io.taskStatus.zipWithIndex.foreach{
-    case(status, i) =>
-      status.valid := taskValids(i)
-      status.sourceId := taskBuf(i).sourceId
-  }
 
   val full = bufValids.andR
   val noSpace = full && hasData
@@ -125,7 +118,8 @@ class SinkC(implicit p: Parameters) extends L3Module with noninclusive.HasClient
     }
   }
 
-  when (io.c.fire() && isRelease && last && (!io.toReqArb.ready || taskArb.io.out.valid)) {
+  val hasEmptyWay = WireInit(false.B)
+  when (io.c.fire() && isRelease && last && (!io.toReqArb.ready || taskArb.io.out.valid || !hasEmptyWay)) {
     when (hasData) {
       taskValids(nextPtrReg) := true.B
       taskBuf(nextPtrReg) := toTaskBundle(io.c.bits)
@@ -169,14 +163,17 @@ class SinkC(implicit p: Parameters) extends L3Module with noninclusive.HasClient
     occWay
   }
   val occWay = Mux(taskArb.io.out.valid, getOccWayVec(true.B, taskArb.io.out.bits.set), getOccWayVec(true.B, parseAddress(io.c.bits.address)._2))
-  val hasFreeWay = !Cat(occWay).andR
+  hasEmptyWay := Cat(~occWay).orR
+  dontTouch(hasEmptyWay)
 
-  // io.toReqArb.valid := ( cValid || taskArb.io.out.valid ) && hasFreeWay
-  io.toReqArb.valid := cValid || taskArb.io.out.valid
+  taskArb.io.out.ready :=io.toReqArb.ready && hasEmptyWay
+  io.toReqArb.valid := ( cValid || taskArb.io.out.valid ) && hasEmptyWay
   io.toReqArb.bits := Mux(taskArb.io.out.valid, taskArb.io.out.bits, toTaskBundle(io.c.bits))
   io.toReqArb.bits.bufIdx := Mux(taskArb.io.out.valid, taskArb.io.out.bits.bufIdx, nextPtrReg)
   io.toReqArb.bits.wayMask := ~occWay
   io.toReqArb.bits.clientWayMask := Fill(clientWays, 1.U)
+  assert(!(io.toReqArb.fire && !hasEmptyWay), "[SinkC] not enough wayMask set:%x tag:%x", io.toReqArb.bits.set, io.toReqArb.bits.tag)
+
 
   io.resp := DontCare
   io.resp.valid := io.c.fire && (first || last) && !isRelease
@@ -195,12 +192,7 @@ class SinkC(implicit p: Parameters) extends L3Module with noninclusive.HasClient
   io.releaseBufWrite.bits.data.data := Fill(beatSize, io.c.bits.data)
   io.releaseBufWrite.bits.id := 0.U(mshrBits.W) // id is given by MSHRCtl by comparing address to the MSHRs
 
-  // io.c.ready := !isRelease || !first || !full || !hasData && io.toReqArb.ready
   io.c.ready := !(isRelease && first && full && (hasData || !io.toReqArb.ready)) && !(isProbeAck && hasData && !io.releaseBufWrite.ready)
-
-  // when(RegNext(io.c.valid && isProbeAck && hasData && !io.releaseBufWrite.ready)) {
-  //   printf(p"ProbeAckData want to write releaseBuf and releaseBuf is not ready! address: ${io.c.bits.address} source: ${io.c.bits.source}")
-  // }
 
   io.bufResp.data := dataBuf(io.bufRead.bits.bufIdx)
 

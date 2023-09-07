@@ -118,43 +118,47 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     val nestedwb = Output(new NestedWriteback)
     val nestedwbData = Output(new DSBlock)
 
-    val probeHelperWakeup = Output(new ProbeHelperWakeupInfo) // Only for NINE
+    val probeHelperWakeup = Output(new ProbeHelperWakeupInfo)
 
     val pipeFlow_s2 = Output(Bool())
     val pipeFlow_s3 = Output(Bool())
     val acceptDirResp = Output(Bool())
 
-    val fromReqBufSinkA = Input(new Bundle{
-      val valid = Bool()
-      val set = UInt(setBits.W)
-    })
+    val mshrTaskInfo = Output(new MSHRTaskInfo)
+    val resetFinish = Output(Bool())
   })
 
   val resetFinish = RegInit(false.B)
   val resetIdx = RegInit((cacheParams.sets - 1).U)
   val resetFinishClient = RegInit(false.B)
   val resetIdxClient = RegInit((clientSets - 1).U)
+
+  val resetFinishForReqArb = RegInit(false.B)
+  val resetFinishClientForReqArb = RegInit(false.B)
   /* block reqs when reset */
-  when(!resetFinish && io.metaWReq.fire) {
+  when(!resetFinish && resetIdx =/= 0.U && io.metaWReq.fire) {
     resetIdx := resetIdx - 1.U
   }
-  when(resetIdx === 0.U) {
+  when(resetIdx === 0.U && io.metaWReq.fire) {
     resetFinish := true.B
+    resetFinishForReqArb := true.B // for better timming
   }
 
-  when(!resetFinishClient && io.clientMetaWReq.fire) {
+  when(!resetFinishClient && resetIdxClient =/= 0.U && io.clientMetaWReq.fire) {
     resetIdxClient := resetIdxClient - 1.U
   }
-  when(resetIdxClient === 0.U) {
+  when(resetIdxClient === 0.U && io.clientMetaWReq.fire) {
     resetFinishClient := true.B
-  } 
+    resetFinishClientForReqArb := true.B // for better timming
+  }
+
+  io.resetFinish := resetFinishForReqArb && resetFinishClientForReqArb
 
   val c_s3, c_s5 = Wire(io.toSourceC.cloneType)
   val d_s3, d_s5 = Wire(io.toSourceD.cloneType)
   val c_s4 = WireInit(0.U.asTypeOf(io.toSourceC))
   val d_s4 = WireInit(0.U.asTypeOf(io.toSourceD))
 
-  require(cacheParams.inclusionPolicy == "NINE", "For this repo, L3 only support NINE")
 
   val s3_valid, s3_ready, s3_fire = Wire(Bool())
   val s4_valid, s4_ready, s4_fire = Wire(Bool())
@@ -180,7 +184,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   io.putBufRead.bits.idx := task_s2.bits.pbIdx
   io.putBufRead.bits.isMSHRTask := task_s2.bits.mshrTask
 
-  task_s2.ready := s3_ready
+  task_s2.ready := s3_ready && resetFinish && resetFinishClient
 
   // --------------------------------------------------------------------------
   //  Stage3: 
@@ -207,9 +211,10 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     !(willSendSourceC && !c_s3.ready && !sendSourceC     ) &&
     !(willSendSourceD && !d_s3.ready && !sendSourceD     )
   )
-  // s3_fire := s3_valid && s4_ready
-  s3_fire := s3_valid && s5_ready // TODO:
-  // s3_fire := s3_valid && (s4_ready && !req_drop_s3 || req_drop_s3)
+  
+  s3_fire := s3_valid && s4_ready
+  // dontTouch(s3_fire)
+  // s3_fire := s3_valid && s5_ready // TODO:
   when(s2_fire) {
     s3_full := true.B 
   }.elsewhen(s3_fire) {
@@ -222,11 +227,6 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
 
 
   val task_s3 = RegInit(0.U.asTypeOf(Valid(new TaskBundle())))
-  // val task_s3 = RegInit(0.U.asTypeOf(Decoupled(new TaskBundle())))
-  // task_s3.valid := task_s2.valid
-  // when(task_s2.valid) {
-  //   task_s3.bits := task_s2.bits
-  // }
 
   io.acceptDirResp := s3_fire && !task_s3.bits.mshrTask
 
@@ -545,7 +545,6 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   io.toDS.req_s3.bits.way := Mux(mshr_req_s3, req_s3.way, dirResult_s3.way)
   io.toDS.req_s3.bits.set := Mux(mshr_req_s3, req_s3.set, dirResult_s3.set)
   io.toDS.req_s3.bits.wen := wen
-  //[Alias] TODO: may change this according to four || signals of wen, use ParallelPriorityMux
   io.toDS.wdata_s3.data := Mux(
     !mshr_req_s3,
     Mux(wen_a, putData_s3, bufResp_s3),
@@ -676,7 +675,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     case(selfMeta, clientMeta) =>
       selfMeta =/= clientMeta.state
   })
-  assert(!(io.metaWReq.valid && io.clientMetaWReq.valid && metaWrNotMatch.asUInt.orR), 
+  assert(!(io.metaWReq.fire && io.clientMetaWReq.fire && metaWrNotMatch.asUInt.orR), 
         "self client meta not match client meta! addr:0x%x channel:%d opcode:%d param:%d mshrTask:%d mshrId:%d sourceId:%d",
         debug_addr_s3, task_s3.bits.channel, task_s3.bits.opcode, task_s3.bits.param, task_s3.bits.mshrTask, task_s3.bits.mshrId, task_s3.bits.sourceId)
 
@@ -712,13 +711,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   val clientTagW_valid_s3_a = clientMetaW_valid_s3_a && !clientDirResult_s3.tagMatch
   val clientTagW_valid_s3_mshr = (mshr_grant_s3 || mshr_accessack_s3 || mshr_accessackdata_s3) && req_s3.clientTagWen
   willAccessClientDirTag := task_s3.valid && (clientTagW_valid_s3_mshr || clientTagW_valid_s3_a)
-  // io.clientTagWReq.valid := willAccessClientDirTag && s3_fire
-  // io.clientTagWReq.bits.apply(
-  //   Cat(req_s3.tag, req_s3.set),
-  //   Mux(clientTagW_valid_s3_mshr, req_s3.clientWay, clientDirResult_s3.way)
-  // )
-
-  io.clientTagWReq.valid := willAccessClientDirTag && s3_fire || !resetFinishClient
+  io.clientTagWReq.valid := willAccessClientDirTag && s3_fire
   when(resetFinishClient) {
     io.clientTagWReq.bits.apply(
       Cat(req_s3.tag, req_s3.set),
@@ -822,7 +815,8 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   io.probeHelperWakeup.set := req_s3.set
   io.probeHelperWakeup.tag := req_s3.tag
   
-
+  io.mshrTaskInfo.valid := s3_fire && task_s3.valid && task_s3.bits.mshrTask
+  io.mshrTaskInfo.mshrId := task_s3.bits.mshrId
 
   // --------------------------------------------------------------------------
   //  Stage4: 
@@ -953,8 +947,6 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   d_s5.bits.task := task_s5.bits
   d_s5.bits.data.data := rdata_s5
 
-  // assert(!(d_s5.valid && !d_s5.ready), "d_s5 should be ready when given valid")
-
 
   // --------------------------------------------------------------------------
   //  BlockInfo
@@ -971,31 +963,18 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     s.set === s1_set && (if(allTask) true.B else !s.mshrTask) && (if(tag) s.tag === s1_tag else true.B)
   }
 
-  // io.toReqBuf(0) := task_s2.valid && pipelineBlock('a', task_s2.bits, allTask = true)
-  // io.toReqBuf(1) := task_s3.valid && pipelineBlock('a', task_s3.bits)
 
+  val status_s1 = io.fromReqArb.status_s1
   io.toReqBuf(0) := task_s2.valid && (
-                    pipelineBlock('a', task_s2.bits, allTask = true) 
-                    || io.fromReqArb.status_s1.a_tag(clientSetBits-1, 0) === task_s2.bits.set(clientSetBits-1, 0)
+                    status_s1.a_set === task_s2.bits.set && !task_s2.bits.mshrTask  ||
+                    status_s1.a_set(clientSetBits-1, 0) === task_s2.bits.set(clientSetBits-1, 0) && !task_s3.bits.mshrTask 
                   )
   io.toReqBuf(1) := task_s3.valid && (
-                    pipelineBlock('a', task_s3.bits) 
-                    || io.fromReqArb.status_s1.a_tag(clientSetBits-1, 0) === task_s2.bits.set(clientSetBits-1, 0) && !task_s2.bits.mshrTask
+                    status_s1.a_set === task_s3.bits.set && !task_s3.bits.mshrTask ||
+                    status_s1.a_set(clientSetBits-1, 0) === task_s3.bits.set(clientSetBits-1, 0) && !task_s3.bits.mshrTask 
                   )
 
   val stage3IsBlocked = s3_full && !s3_fire
-  val fromReqBufSinkA_valid = WireInit(false.B)
-  val fromReqBufSinkA_set = WireInit(0.U.asTypeOf(task_s2.bits.set))
-  val fromReqBufSinkA_blockFromS2 = fromReqBufSinkA_valid && task_s2.valid && (
-      fromReqBufSinkA_set === task_s2.bits.set 
-      || fromReqBufSinkA_set(clientSetBits-1, 0) === task_s2.bits.set(clientSetBits-1, 0) && task_s2.bits.fromC
-  )
-  val fromReqBufSinkA_blockFromS3 = fromReqBufSinkA_valid && task_s3.valid && (
-      fromReqBufSinkA_set === task_s3.bits.set 
-      || fromReqBufSinkA_set(clientSetBits-1, 0) === task_s3.bits.set(clientSetBits-1, 0) && task_s3.bits.fromC
-  )
-  fromReqBufSinkA_valid := io.fromReqBufSinkA.valid
-  fromReqBufSinkA_set := io.fromReqBufSinkA.set
 
   io.toReqArb.blockC_s1 :=
     task_s2.valid && task_s2.bits.set === io.fromReqArb.status_s1.c_set ||
@@ -1006,8 +985,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     // task_s3.valid && pipelineBlock('b', task_s3.bits)                 ||
     task_s4.valid && pipelineBlock('b', task_s4.bits, tag = true)     ||
     task_s5.valid && pipelineBlock('b', task_s5.bits, tag = true)
-  io.toReqArb.blockA_s1 := io.toReqBuf(0) || io.toReqBuf(1) || fromReqBufSinkA_blockFromS2 || fromReqBufSinkA_blockFromS3
-  // io.toReqArb.blockA_s1 := fromReqBufSinkA_blockFromS2 || fromReqBufSinkA_blockFromS3
+  io.toReqArb.blockA_s1 := io.toReqBuf(0) || io.toReqBuf(1)
 
 
 
@@ -1016,14 +994,15 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   // --------------------------------------------------------------------------
   require(io.status_vec.size == 3)
   io.status_vec.foreach( _ := DontCare )
-  io.status_vec(0).valid := task_s3.valid && Mux(
-    mshr_req_s3,
-    mshr_grant_s3 || mshr_accessackdata_s3 || mshr_accessack_s3,
-    true.B
-    // TODO: To consider grantBuffer capacity conflict,
-    // only " req_s3.fromC || req_s3.fromA && !need_mshr_s3 " is needed
-    // But to consider mshrFull, all channel_reqs are needed
-  )
+  // io.status_vec(0).valid := task_s3.valid && Mux(
+  //   mshr_req_s3,
+  //   mshr_grant_s3 || mshr_accessackdata_s3 || mshr_accessack_s3,
+  //   true.B
+  //   // TODO: To consider grantBuffer capacity conflict,
+  //   // only " req_s3.fromC || req_s3.fromA && !need_mshr_s3 " is needed
+  //   // But to consider mshrFull, all channel_reqs are needed
+  // )
+  io.status_vec(0).valid := task_s3.valid && (willSendSourceD && !sendSourceD || !mshr_req_s3)
   io.status_vec(0).bits.channel := task_s3.bits.channel
   io.status_vec(0).bits.set     := task_s3.bits.set
   io.status_vec(0).bits.mshrTask := task_s3.bits.mshrTask
@@ -1032,9 +1011,10 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   // io.status_vec(1).bits.set     := task_s4.bits.set
   // io.status_vec(1).bits.mshrTask := task_s4.bits.mshrTask
   // io.status_vec(2).valid        := d_s5.valid
-  // io.status_vec(2).bits.channel := task_s5.bits.channel
-  // io.status_vec(2).bits.set     := task_s5.bits.set
-  // io.status_vec(2).bits.mshrTask := task_s5.bits.mshrTask
+  io.status_vec(2).valid := task_s5.valid && willSendSourceD_s5 && !sendSourceD_s5
+  io.status_vec(2).bits.channel := task_s5.bits.channel
+  io.status_vec(2).bits.set     := task_s5.bits.set
+  io.status_vec(2).bits.mshrTask := task_s5.bits.mshrTask
 
   // make sure we don't send two reqs continuously with the same set
   assert(!(task_s2.bits.set === task_s3.bits.set &&
@@ -1052,7 +1032,6 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   val c = Seq(c_s5, 0.U.asTypeOf(c_s4), c_s3)
   val d = Seq(d_s5, 0.U.asTypeOf(d_s4), d_s3)
   // DO NOT use TLArbiter because TLArbiter will send continuous beats for the same source
-  val fifoArbEntries =  5
   // val c_arb = Module(new FIFOArbiter(io.toSourceC.bits.cloneType, c.size, fifoArbEntries)) // TODO: optimize
   // val d_arb = Module(new FIFOArbiter(io.toSourceD.bits.cloneType, d.size, fifoArbEntries))
   val c_arb = Module(new Arbiter(io.toSourceC.bits.cloneType, c.size))

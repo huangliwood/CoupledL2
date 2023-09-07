@@ -38,7 +38,7 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   })
 
   val reqArb = Module(new RequestArb())
-  val a_reqBuf = Module(new RequestBuffer)
+  // val a_reqBuf = Module(new RequestBuffer)
   val mainPipe = Module(new MainPipe())
   val mshrCtl = Module(new MSHRCtl())
   val directory = Module(new Directory())
@@ -51,22 +51,36 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   val putDataBuf = Module(new LookupBuffer(entries = lookupBufEntries))
 
   val mshrBuf = Module(new MSHRBuffer())
+  // val fillBuf = Module(new MSHRBuffer_1(readAlwaysReady = true)) // save refill data including ProbeAckData / GrantData
+  
   val mshrBufWrArb = Module(new Arbiter(mshrBuf.io.w.bits.cloneType, 3))
+  // val fillBufWrArb = Module(new Arbiter(fillBuf.io.w.bits.cloneType, 2))
+
+  val inputBuffer = Module(new InputBuffer(entries = 16))
+  inputBuffer.io.in <> sinkA.io.toReqArb
+  inputBuffer.io.mshrStatus := mshrCtl.io.toReqBuf
+  inputBuffer.io.sinkEntrance := reqArb.io.sinkEntrance
+  reqArb.io.sinkA <> inputBuffer.io.out
 
   mshrBuf.io.r.req <> reqArb.io.mshrBufRead_s2
-
   mshrBufWrArb.io.in(0) <> mainPipe.io.mshrBufWrite
   mshrBufWrArb.io.in(1) <> sinkC.io.releaseBufWrite
   mshrBufWrArb.io.in(1).bits.id := mshrCtl.io.releaseBufWriteId
   mshrBufWrArb.io.in(2) <> refillUnit.io.refillBufWrite
-
   mshrBuf.io.w <> mshrBufWrArb.io.out
 
+  // fillBufWrArb.io <> DontCare
+  // fillBuf.io <> DontCare
+  // fillBuf.io.r.req <> reqArb.io.fillBufRead_s2
+  // fillBufWrArb.io.in(0) <> sinkC.io.releaseBufWrite
+  // fillBufWrArb.io.in(0).bits.id := mshrCtl.io.releaseBufWriteId // TODO: Optimize using reg that store the mapping of addr and id, which is placed in sinkC, then we can reduce extac comb logic propagate from sinkC to MSHRCtl
+  // fillBufWrArb.io.in(1) <> refillUnit.io.refillBufWrite
+  
 
-  val probeHelper = Module(new ProbeHelper(entries = 5, enqDelay = 1))
+  val probeHelper = Module(new ProbeHelper(entries = 8, enqDelay = 2))
   val clientDirectory = Module(new noninclusive.ClientDirectory())
 
-  reqArb.io.fromProbeHelper.blockSinkA := false.B
+  reqArb.io.fromProbeHelper.blockSinkA := probeHelper.io.full
 
   // We will get client directory result after 2 cyels of delay
   probeHelper.io.clientDirResult.valid := RegNextN(reqArb.io.dirRead_s1.valid, 2, Some(false.B)) // TODO: Optimize for clock gate
@@ -77,19 +91,22 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   clientDirectory.io.tagWReq <> mainPipe.io.clientTagWReq
   clientDirectory.io.metaWReq <> mainPipe.io.clientMetaWReq
 
+  // a_reqBuf.io <> DontCare
+  // a_reqBuf.io.in <> sinkA.io.toReqArb
+  // a_reqBuf.io.mshrStatus := mshrCtl.io.toReqBuf
+  // a_reqBuf.io.mainPipeBlock := mainPipe.io.toReqBuf
+  // a_reqBuf.io.sinkEntrance := reqArb.io.sinkEntrance
+  // a_reqBuf.io.pipeFlow_s1 := reqArb.io.pipeFlow_s1
+  // a_reqBuf.io.pipeFlow_s2 := mainPipe.io.pipeFlow_s2
+  // a_reqBuf.io.pipeFlow_s3 := mainPipe.io.pipeFlow_s3
 
-  a_reqBuf.io.in <> sinkA.io.toReqArb
-  a_reqBuf.io.mshrStatus := mshrCtl.io.toReqBuf
-  a_reqBuf.io.mainPipeBlock := mainPipe.io.toReqBuf
-  a_reqBuf.io.sinkEntrance := reqArb.io.sinkEntrance
-  a_reqBuf.io.pipeFlow_s1 := reqArb.io.pipeFlow_s1
-  a_reqBuf.io.pipeFlow_s2 := mainPipe.io.pipeFlow_s2
-  a_reqBuf.io.pipeFlow_s3 := mainPipe.io.pipeFlow_s3
+  // reqArb.io.sinkA <> a_reqBuf.io.out
 
-  reqArb.io.sinkA <> a_reqBuf.io.out
-  reqArb.io.ATag := a_reqBuf.io.ATag
-  reqArb.io.ASet := a_reqBuf.io.ASet
+  // reqArb.io.ATag := a_reqBuf.io.ATag
+  // reqArb.io.ASet := a_reqBuf.io.ASet
 
+  reqArb.io.ATag := DontCare
+  reqArb.io.ASet := DontCare
 
   reqArb.io.sinkC <> sinkC.io.toReqArb
   reqArb.io.dirRead_s1 <> directory.io.read
@@ -101,6 +118,7 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   reqArb.io.fromGrantBuffer := grantBuf.io.toReqArb
   reqArb.io.fromProbeHelper.blockSinkA := probeHelper.io.full
   reqArb.io.probeHelperTask <> probeHelper.io.task
+  reqArb.io.resetFinish := mainPipe.io.resetFinish
 
 
   mshrCtl.io.fromReqArb.status_s1 := reqArb.io.status_s1
@@ -135,8 +153,6 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   mainPipe.io.putBufResp <> sinkA.io.pbResp
   mainPipe.io.clientDirConflict := probeHelper.io.dirConflict
   mainPipe.io.clientDirResp_s3 <> clientDirectory.io.resp
-  mainPipe.io.fromReqBufSinkA.valid := a_reqBuf.io.out.valid
-  mainPipe.io.fromReqBufSinkA.set := a_reqBuf.io.out.bits.set
   mainPipe.io.clientBusyWakeup <> clientDirectory.io.busyWakeup
 
   sinkA.io.fromMainPipe.putReqGood_s3 := mainPipe.io.toSinkA.putReqGood_s3
@@ -154,17 +170,17 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   mshrCtl.io.grantStatus := grantBuf.io.grantStatus
 
   grantBuf.io.d_task <> mainPipe.io.toSourceD
-  // grantBuf.io.fromReqArb.status_s1 := reqArb.io.status_s1
-  // grantBuf.io.pipeStatusVec := reqArb.io.status_vec ++ mainPipe.io.status_vec
+  grantBuf.io.fromReqArb.status_s1 := reqArb.io.status_s1
+  grantBuf.io.pipeStatusVec := reqArb.io.status_vec ++ mainPipe.io.status_vec
   mshrCtl.io.pipeStatusVec(0) := reqArb.io.status_vec(0) // s1 status
   mshrCtl.io.pipeStatusVec(1) := reqArb.io.status_vec(1) // s2 status
   mshrCtl.io.pipeStatusVec(2) := mainPipe.io.status_vec(0) // s3 status
-  mshrCtl.io.fromReqArb.mshrTaskInfo <> reqArb.io.mshrTaskInfo
-  mshrCtl.io.fromReqBufSinkA.valid := a_reqBuf.io.out.valid
-  mshrCtl.io.fromReqBufSinkA.set := a_reqBuf.io.out.bits.set
+  mshrCtl.io.fromReqArb.mshrTaskInfo <> mainPipe.io.mshrTaskInfo
+  mshrCtl.io.fromReqBufSinkA.valid := inputBuffer.io.out.valid
+  mshrCtl.io.fromReqBufSinkA.set := inputBuffer.io.out.bits.set
 
   sinkC.io.mshrStatus <> mshrCtl.io.toReqBuf
-  a_reqBuf.io.taskStatusSinkC <> sinkC.io.taskStatus
+  // a_reqBuf.io.taskStatusSinkC <> sinkC.io.taskStatus
 
   /* input & output signals */
   val inBuf = cacheParams.innerBuf
@@ -194,6 +210,9 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
       io.dirResult.get.bits  := directory.io.resp
     }
   )
+
+  val cycles = GTimer() // TODO: configurable
+  dontTouch(cycles)
 
   if (cacheParams.enablePerf) {
     val a_begin_times = RegInit(VecInit(Seq.fill(sourceIdAll)(0.U(64.W))))
@@ -227,5 +246,10 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
   mainPipe.io.dirResp_s3 := Mux(dirRespValid, directory.io.resp, dirRespBuffer.io.out.dirResp)
   mainPipe.io.clientDirResp_s3 := Mux(dirRespValid, clientDirectory.io.resp, dirRespBuffer.io.out.clientDirResp)
   mainPipe.io.clientDirConflict := Mux(dirRespValid, probeHelper.io.dirConflict, dirRespBuffer.io.out.clientDirConflict)
+
+  // mainPipe.io.dirResp_s3 := directory.io.resp 
+  // mainPipe.io.clientDirResp_s3 := clientDirectory.io.resp 
+  // mainPipe.io.clientDirConflict := probeHelper.io.dirConflict 
+
 
 }

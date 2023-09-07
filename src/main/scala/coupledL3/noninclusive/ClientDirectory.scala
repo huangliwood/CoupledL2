@@ -133,8 +133,8 @@ class ClientDirectory(implicit p: Parameters) extends L3Module with DontCareInne
   val tagRead = Wire(Vec(ways, UInt(clientTagBits.W)))
   val metaRead = Wire(Vec(ways, Vec(clientBits, new ClientMetaEntry)))
 
-  val tagWen  = io.tagWReq.valid
-  val metaWen = io.metaWReq.valid
+  val tagWen  = io.tagWReq.fire
+  val metaWen = io.metaWReq.fire
   val replacerWen = RegInit(false.B)
 
   tagArray.io.r <> DontCare
@@ -232,10 +232,6 @@ class ClientDirectory(implicit p: Parameters) extends L3Module with DontCareInne
   }
 
   when(io.busyWakeup.fire && !wakeupConflict) {
-    // assert(!(valid_s2 && set_s2 === wakeupSet && way_s2 === wakeupWay && busyTable(wakeupSet)(wakeupWay) && !hit_s2), "set:%d way:%d hit:%d", set_s2, way_s2, hit_s2)
-    // assert(!(io.busyWakeup.fire && !busyTable(wakeupSet)(wakeupWay)), "trying to write a not busy entry of busyTable set:%d way:%d", wakeupSet, wakeupWay)
-
-    // busyTable(wakeupSet)(wakeupWay) := false.B
     when(busyTableCnts(wakeupSet)(wakeupWay) =/= 0.U) {
       busyTableCnts(wakeupSet)(wakeupWay) := busyTableCnts(wakeupSet)(wakeupWay) - 1.U
     }
