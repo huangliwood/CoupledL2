@@ -280,14 +280,15 @@ class BestOffsetPrefetch(implicit p: Parameters) extends BOPModule {
 
   val rrTable = Module(new RecentRequestTable)
   val scoreTable = Module(new OffsetScoreTable)
-
+  val respQueue = Module(new Queue(new PrefetchResp, 4, flow=true))
   val prefetchOffset = scoreTable.io.prefetchOffset
   val oldAddr = io.train.bits.addr
   val newAddr = oldAddr + signedExtend((prefetchOffset << offsetBits), fullAddressBits)
 
   rrTable.io.r <> scoreTable.io.test
-  rrTable.io.w.valid := io.resp.valid
-  rrTable.io.w.bits := Cat(Cat(io.resp.bits.tag, io.resp.bits.set) - signedExtend(prefetchOffset, setBits + fullTagBits), 0.U(offsetBits.W))
+  respQueue.io.enq <> io.resp
+  rrTable.io.w.valid := respQueue.io.deq.valid
+  rrTable.io.w.bits := Cat(Cat(respQueue.io.deq.bits.tag, respQueue.io.deq.bits.set) - signedExtend(prefetchOffset, setBits + fullTagBits), 0.U(offsetBits.W))
   scoreTable.io.req.valid := io.train.valid
   scoreTable.io.req.bits := oldAddr
 
@@ -309,7 +310,8 @@ class BestOffsetPrefetch(implicit p: Parameters) extends BOPModule {
   io.req.bits := req
   io.req.bits.isBOP := true.B
   io.train.ready := scoreTable.io.req.ready && (!req_valid || io.req.ready)
-  io.resp.ready := rrTable.io.w.ready
+  io.resp.ready := true.B
+  respQueue.io.deq.ready := rrTable.io.w.ready
 
   for (off <- offsetList) {
     if (off < 0) {
