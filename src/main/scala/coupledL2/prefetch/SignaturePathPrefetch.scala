@@ -221,7 +221,7 @@ class SignatureTable(implicit p: Parameters) extends SPPModule {
   io.req.ready := sTable.io.r.req.ready
 
   XSPerfAccumulate(cacheParams,"spp_st_bp_req", bp_hit)
-  XSPerfAccumulate(cacheParams,"spp_st_update",io.bp_update.valid)
+  XSPerfAccumulate(cacheParams,"spp_st_bp_update",io.bp_update.valid)
 }
 
 class PatternTable(implicit p: Parameters) extends SPPModule {
@@ -542,8 +542,8 @@ class SignaturePathPrefetch(implicit p: Parameters) extends SPPModule {
   pTable.io.resp <> unpack.io.req
 
   val newAddr = Cat(unpack.io.resp.bits.prefetchBlock, 0.U(offsetBits.W))
-  val db_degree = 1.U //RegEnable(io.db_degree.bits, 1.U, io.db_degree.valid)
-  val queue_used_degree = 1.U//Mux(io.queue_used >= 24.U, 1.U, 0.U)
+  val db_degree = RegEnable(io.db_degree.bits, 1.U, io.db_degree.valid)
+  val queue_used_degree = Mux(io.queue_used >= 24.U, 1.U, 0.U)
   val pf_degree = unpack.io.resp.bits.degree
   val send2Llc = pf_degree > 2.U && (queue_used_degree >= 1.U || db_degree > 1.U)
 
