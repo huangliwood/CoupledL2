@@ -162,7 +162,6 @@ class MainPipe(implicit p: Parameters) extends L2Module {
 
   val meta_has_clients_s3   = meta_s3.clients.orR
   val req_needT_s3          = needT(req_s3.opcode, req_s3.param) // require T status to handle req
-  val a_need_replacement    = sinkA_req_s3 && !dirResult_s3.hit && meta_s3.state =/= INVALID // b and c do not need replacement
 
   //[Alias] TODO: consider 1 client for now
   val cache_alias           = req_acquire_s3 && dirResult_s3.hit && meta_s3.clients(0) &&
@@ -171,6 +170,8 @@ class MainPipe(implicit p: Parameters) extends L2Module {
   val mshr_refill_s3 = (mshr_accessackdata_s3 || mshr_hintack_s3 || mshr_grant_s3) // needs refill to L2 DS
   val retry = io.replResp.valid && io.replResp.bits.retry
   val need_repl = io.replResp.valid && io.replResp.bits.meta.state =/= INVALID && req_s3.replTask // Grant needs replacement
+
+  val a_need_replacement = mshr_refill_s3 && need_repl && !retry // b and c do not need replacement
 
   /* ======== Interact with MSHR ======== */
   val acquire_on_miss_s3  = req_acquire_s3 || req_prefetch_s3 || req_get_s3 // TODO: remove this cause always acquire on miss?
@@ -668,6 +669,14 @@ class MainPipe(implicit p: Parameters) extends L2Module {
   XSPerfAccumulate(cacheParams, cacheParams.name+"_acquire_miss", miss_s3 && req_s3.fromA &&
     (req_s3.opcode === AcquireBlock || req_s3.opcode === AcquirePerm))
   XSPerfAccumulate(cacheParams, cacheParams.name+"_get_miss", miss_s3 && req_s3.fromA && req_s3.opcode === Get)
+
+  XSPerfAccumulate(cacheParams, cacheParams.name + "_c_req_miss", miss_s3 && req_s3.fromC)
+  XSPerfAccumulate(cacheParams, cacheParams.name + "_c_req_hit", hit_s3 && req_s3.fromC)
+
+  XSPerfAccumulate(cacheParams, cacheParams.name + "_a_req_need_replacement",
+    task_s3.valid && req_s3.mshrTask && a_need_replacement)
+  XSPerfAccumulate(cacheParams, cacheParams.name + "_c_req_need_replacement",
+    false.B)
 
   XSPerfAccumulate(cacheParams, cacheParams.name+"_b_req_hit", hit_s3 && req_s3.fromB)
   XSPerfAccumulate(cacheParams, cacheParams.name+"_b_req_miss", miss_s3 && req_s3.fromB)
