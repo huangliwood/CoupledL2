@@ -559,13 +559,11 @@ class SignaturePathPrefetch(implicit p: Parameters) extends SPPModule {
   io.req.valid := unpack.io.resp.valid
   io.req.valid := unpack.io.resp.valid && !send2Llc
   io.hint2llc := unpack.io.resp.valid && send2Llc
-  io.hint2llc := false.B
 
   io.resp.ready := true.B
   //perf
-    XSPerfAccumulate(cacheParams, "recv_train", io.train.fire())
-    XSPerfAccumulate(cacheParams, "recv_st", sTable.io.resp.fire())
-    XSPerfAccumulate(cacheParams, "recv_pt", Mux(pTable.io.resp.fire(),
-        pTable.io.resp.bits.deltas.map(a => Mux(a =/= 0.S, 1.U, 0.U)).reduce(_ +& _), 0.U))
-    XSPerfAccumulate(cacheParams, "recv_up", unpack.io.resp.fire())
+  XSPerfAccumulate(cacheParams, "spp_recv_train", io.train.fire())
+  XSPerfAccumulate(cacheParams, "spp_recv_st", sTable.io.resp.fire())
+  XSPerfAccumulate(cacheParams, "spp_recv_pt", Mux(pTable.io.resp.fire(), pTable.io.resp.bits.deltas.map(a => Mux(a =/= 0.S, 1.U, 0.U)).reduce(_ +& _), 0.U))
+  XSPerfAccumulate(cacheParams, "spp_hint", io.hint2llc)
 }
