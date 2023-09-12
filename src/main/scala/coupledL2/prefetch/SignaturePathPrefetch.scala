@@ -545,7 +545,7 @@ class SignaturePathPrefetch(implicit p: Parameters) extends SPPModule {
   val db_degree = RegEnable(io.db_degree.bits, 1.U, io.db_degree.valid)
   val queue_used_degree = Mux(io.queue_used >= 24.U, 1.U, 0.U)
   val pf_degree = unpack.io.resp.bits.degree
-  val send2Llc = pf_degree > 2.U && (queue_used_degree >= 1.U || db_degree > 1.U)
+  val send2Llc = pf_degree > 1.U && (queue_used_degree >= 1.U || db_degree > 1.U)
 
   pTable.io.db_degree := db_degree
   pTable.io.queue_used_degree := queue_used_degree
