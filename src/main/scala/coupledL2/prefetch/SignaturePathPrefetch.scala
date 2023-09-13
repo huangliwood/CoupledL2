@@ -545,7 +545,7 @@ class SignaturePathPrefetch(implicit p: Parameters) extends SPPModule {
   val db_degree = RegEnable(io.db_degree.bits, 1.U, io.db_degree.valid)
   val queue_used_degree = Mux(io.queue_used >= 24.U, 1.U, 0.U)
   val pf_degree = unpack.io.resp.bits.degree
-  val send2Llc = pf_degree > 2.U && (queue_used_degree >= 1.U || db_degree > 1.U)
+  val send2Llc = pf_degree > 1.U && (queue_used_degree >= 1.U || db_degree > 1.U)
 
   pTable.io.db_degree := db_degree
   pTable.io.queue_used_degree := queue_used_degree
@@ -559,13 +559,11 @@ class SignaturePathPrefetch(implicit p: Parameters) extends SPPModule {
   io.req.valid := unpack.io.resp.valid
   io.req.valid := unpack.io.resp.valid && !send2Llc
   io.hint2llc := unpack.io.resp.valid && send2Llc
-  io.hint2llc := false.B
 
   io.resp.ready := true.B
   //perf
-    XSPerfAccumulate(cacheParams, "recv_train", io.train.fire())
-    XSPerfAccumulate(cacheParams, "recv_st", sTable.io.resp.fire())
-    XSPerfAccumulate(cacheParams, "recv_pt", Mux(pTable.io.resp.fire(),
-        pTable.io.resp.bits.deltas.map(a => Mux(a =/= 0.S, 1.U, 0.U)).reduce(_ +& _), 0.U))
-    XSPerfAccumulate(cacheParams, "recv_up", unpack.io.resp.fire())
+  XSPerfAccumulate(cacheParams, "spp_recv_train", io.train.fire())
+  XSPerfAccumulate(cacheParams, "spp_recv_st", sTable.io.resp.fire())
+  XSPerfAccumulate(cacheParams, "spp_recv_pt", Mux(pTable.io.resp.fire(), pTable.io.resp.bits.deltas.map(a => Mux(a =/= 0.S, 1.U, 0.U)).reduce(_ +& _), 0.U))
+  XSPerfAccumulate(cacheParams, "spp_hint", io.hint2llc)
 }
