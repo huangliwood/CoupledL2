@@ -1,6 +1,6 @@
 init:
 	git submodule update --init
-	cd rocket-chip && git submodule update --init hardfloat api-config-chipsalliance
+	cd rocket-chip && git submodule update --init hardfloat cde
 
 compile:
 	mill -i CoupledL2.compile
@@ -48,7 +48,7 @@ bsp:
 	mill -i mill.bsp.BSP/install
 
 idea:
-	mill -i mill.scalalib.GenIdea/idea
+	mill -i mill.idea.GenIdea/idea
 
 reformat:
 	mill -i __.reformat

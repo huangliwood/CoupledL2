@@ -22,11 +22,11 @@ import chisel3.util._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.util.leftOR
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import coupledL3.utils._
 import coupledL3.debug._
 import coupledL3.noninclusive.ProbeHelper
-import utility.RegNextN
+import xs.utils.RegNextN
 import chisel3.util.experimental.BoringUtils
 
 class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
@@ -220,7 +220,7 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
     timer := timer + 1.U
     a_begin_times.zipWithIndex.foreach {
       case (r, i) =>
-        when (sinkA.io.a.fire() && sinkA.io.a.bits.source === i.U) {
+        when (sinkA.io.a.fire && sinkA.io.a.bits.source === i.U) {
           r := timer
         }
     }

@@ -22,8 +22,8 @@ import chisel3._
 import chisel3.util._
 import coupledL3.utils._
 import freechips.rocketchip.tilelink._
-import chipsalliance.rocketchip.config.Parameters
-import utility._
+import org.chipsalliance.cde.config.Parameters
+import xs.utils._
 
 class GrantStatus(implicit p: Parameters) extends L3Bundle {
   val valid  = Bool()

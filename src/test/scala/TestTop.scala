@@ -1,19 +1,18 @@
 package coupledL2
-
+import circt.stage.{ChiselStage, FirtoolOption}
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config._
-import chisel3.stage.{ChiselGeneratorAnnotation, ChiselStage}
+import org.chipsalliance.cde.config._
+import chisel3.stage.ChiselGeneratorAnnotation
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
-import huancun._
 import coupledL2.prefetch._
-import utility.{ChiselDB, FileRegisters}
+import xs.utils.{ChiselDB, FileRegisters}
 import coupledL3._
 import chisel3.util.experimental.BoringUtils
-
 import scala.collection.mutable.ArrayBuffer
 import coupledL3.utils.GTimer
+import huancun.{HuanCun, HCCacheParameters, HCCacheParamsKey, CacheParameters}
 
 class TestTop_L2()(implicit p: Parameters) extends LazyModule {
 
@@ -520,7 +519,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
           PrefetchReceiverParams => sms+bop
           HyperPrefetchParams    => spp+bop+sms
         */
-        sppMultiLevelRefill = Some(coupledL2.prefetch.PrefetchReceiverParams()),
+        // sppMultiLevelRefill = Some(coupledL2.prefetch.PrefetchReceiverParams()),
         /*must has spp, otherwise Assert Fail
         sppMultiLevelRefill options:
         PrefetchReceiverParams() => spp has cross level refill
@@ -552,8 +551,8 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       sramDepthDiv = 4,
       simulation = true,
       hasMbist = false,
-      prefetch = None,
-      prefetchRecv = Some(huancun.prefetch.PrefetchReceiverParams())
+      // prefetch = None,
+      // prefetchRecv = Some(huancun.prefetch.PrefetchReceiverParams())
     )
   })))
 
@@ -604,7 +603,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
         }
       }
       println(f"pf_l3recv_node connecting to l3pf_RecvXbar out")
-      l3.pf_l3recv_node.map(l3_recv =>  l3_recv:= l3pf_RecvXbar.outNode.head)
+      // l3.pf_l3recv_node.map(l3_recv =>  l3_recv:= l3pf_RecvXbar.outNode.head)
     case None =>
   }
 
@@ -782,8 +781,9 @@ object TestTop_L2 extends App {
   })
   val top = DisableMonitors(p => LazyModule(new TestTop_L2()(p)) )(config)
 
-  (new ChiselStage).execute(args, Seq(
-    ChiselGeneratorAnnotation(() => top.module)
+  (new ChiselStage).execute(Array("--target", "verilog") ++ args, Seq(
+    ChiselGeneratorAnnotation(() => top.module),
+    FirtoolOption("--disable-annotation-unknown")
   ))
 
   ChiselDB.init(false)
@@ -795,13 +795,15 @@ object TestTop_L2_Standalone extends App {
   val config = new Config((_, _, _) => {
     case L2ParamKey => L2Param(
       clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
-      echoField = Seq(DirtyField())
+      echoField = Seq(DirtyField()),
+      enablePerf = false
     )
   })
   val top = DisableMonitors(p => LazyModule(new TestTop_L2_Standalone()(p)) )(config)
 
-  (new ChiselStage).execute(args, Seq(
-    ChiselGeneratorAnnotation(() => top.module)
+  (new ChiselStage).execute(Array("--target", "verilog") ++ args, Seq(
+    ChiselGeneratorAnnotation(() => top.module),
+    FirtoolOption("--disable-annotation-unknown")
   ))
 
   ChiselDB.init(false)
@@ -821,8 +823,9 @@ object TestTop_L2L3 extends App {
   })
   val top = DisableMonitors(p => LazyModule(new TestTop_L2L3()(p)) )(config)
 
-  (new ChiselStage).execute(args, Seq(
-    ChiselGeneratorAnnotation(() => top.module)
+  (new ChiselStage).execute(Array("--target", "verilog") ++ args, Seq(
+    ChiselGeneratorAnnotation(() => top.module),
+    FirtoolOption("--disable-annotation-unknown")
   ))
 
   ChiselDB.init(false)
@@ -842,8 +845,9 @@ object TestTop_L2L3L2 extends App {
   })
   val top = DisableMonitors(p => LazyModule(new TestTop_L2L3L2()(p)))(config)
 
-  (new ChiselStage).execute(args, Seq(
-    ChiselGeneratorAnnotation(() => top.module)
+  (new ChiselStage).execute(Array("--target", "verilog") ++ args, Seq(
+    ChiselGeneratorAnnotation(() => top.module),
+    FirtoolOption("--disable-annotation-unknown")
   ))
 
   ChiselDB.init(false)
@@ -878,8 +882,9 @@ object TestTop_fullSys extends App {
   })
   val top = DisableMonitors(p => LazyModule(new TestTop_fullSys()(p)))(config)
 
-  (new ChiselStage).execute(args, Seq(
-    ChiselGeneratorAnnotation(() => top.module)
+  (new ChiselStage).execute(Array("--target", "verilog") ++ args, Seq(
+    ChiselGeneratorAnnotation(() => top.module),
+    FirtoolOption("--disable-annotation-unknown")
   ))
 
   ChiselDB.init(false)
@@ -899,8 +904,9 @@ object TestTop_fullSys_1 extends App {
   })
   val top = DisableMonitors(p => LazyModule(new TestTop_fullSys_1()(p)))(config)
 
-  (new ChiselStage).execute(args, Seq(
-    ChiselGeneratorAnnotation(() => top.module)
+  (new ChiselStage).execute(Array("--target", "verilog") ++ args, Seq(
+    ChiselGeneratorAnnotation(() => top.module),
+    FirtoolOption("--disable-annotation-unknown")
   ))
 
   ChiselDB.init(false)
@@ -1001,8 +1007,9 @@ object TestTop_l2_for_sysn extends App {
   })
   val top = DisableMonitors(p => LazyModule(new TestTop_l2_for_sysn()(p)))(config)
 
-  (new ChiselStage).execute(args, Seq(
-    ChiselGeneratorAnnotation(() => top.module)
+  (new ChiselStage).execute(Array("--target", "verilog") ++ args, Seq(
+    ChiselGeneratorAnnotation(() => top.module),
+    FirtoolOption("--disable-annotation-unknown")
   ))
 
   ChiselDB.init(false)

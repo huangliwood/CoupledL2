@@ -19,11 +19,11 @@ package coupledL2
 
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import coupledL2.utils.XSPerfAccumulate
-import utility.MemReqSource
+import xs.utils.tl.MemReqSource
 
 class BMergeTask(implicit p: Parameters) extends L2Bundle {
   val id = UInt(mshrBits.W)

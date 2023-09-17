@@ -22,11 +22,11 @@ import chisel3.util.log2Ceil
 import freechips.rocketchip.diplomacy.BufferParams
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
-import chipsalliance.rocketchip.config.Field
+import org.chipsalliance.cde.config.Field
 import huancun.CacheParameters
 import coupledL3.prefetch._
-import MemReqSource._
-import utility.ReqSourceKey
+import xs.utils.tl.MemReqSource._
+import xs.utils.tl.ReqSourceKey
 
 // General parameter key of CoupledL3
 case object L3ParamKey extends Field[L3Param](L3Param())
@@ -48,12 +48,7 @@ case class L2ClientParam
 
 // Indicate alias bit of upper level cache
 case object AliasKey extends ControlKey[UInt]("alias")
-case class AliasField(width: Int) extends BundleField(AliasKey) {
-  override def data: UInt = Output(UInt(width.W))
-  override def default(x: UInt): Unit = {
-    x := 0.U(width.W)
-  }
-}
+case class AliasField(width: Int) extends BundleField[UInt](AliasKey, Output(UInt(width.W)), x => x := 0.U(width.W))
 
 // Indicate whether Hint is needed by upper level cache
 // case object PrefetchKey extends ControlKey[Bool](name = "needHint")
@@ -67,13 +62,7 @@ case class AliasField(width: Int) extends BundleField(AliasKey) {
 // Indicate whether this block is dirty or not (only used in handle Release/ReleaseData)
 // Now it only works for non-inclusive cache (ignored in inclusive cache)
 case object DirtyKey extends ControlKey[Bool](name = "blockisdirty")
-
-case class DirtyField() extends BundleField(DirtyKey) {
-  override def data: Bool = Output(Bool())
-  override def default(x: Bool): Unit = {
-    x := true.B
-  }
-}
+case class DirtyField() extends BundleField[Bool](DirtyKey, Output(Bool()), x => x := true.B)
 
 case class L3Param
 (

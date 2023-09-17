@@ -2,7 +2,7 @@ package coupledL2.utils
 
 import chisel3._
 import chisel3.util._
-import xs.utils.sram.SRAMTemplate
+import xs.utils.sram._
 
 
 // divide SRAM into n banks

@@ -24,7 +24,7 @@ import chisel3.util._
 import chisel3.util.random.LFSR
 import freechips.rocketchip.util.{Random, UIntToAugmentedUInt}
 import freechips.rocketchip.util.property.cover
-import Chisel.BlackBox
+import chisel3.BlackBox
 
 abstract class ReplacementPolicy {
   def nBits: Int

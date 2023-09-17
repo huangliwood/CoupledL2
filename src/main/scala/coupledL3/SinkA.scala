@@ -19,7 +19,7 @@ package coupledL3
 
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink.TLHints._
@@ -45,7 +45,7 @@ class SinkA(implicit p: Parameters) extends L3Module {
 
   val putBuffer = RegInit(VecInit(Seq.fill(mshrsAll)(0.U.asTypeOf(Vec(beatSize, new PutBufferEntry)))))
   val beatValids = RegInit(VecInit(Seq.fill(mshrsAll)(VecInit(Seq.fill(beatSize)(false.B)))))
-  val valids = VecInit(beatValids.map(_.asUInt.orR())).asUInt
+  val valids = VecInit(beatValids.map(_.asUInt.orR)).asUInt
   
   val (first, last, done, count) = edgeIn.count(io.a)
   val hasData = edgeIn.hasData(io.a.bits)
@@ -53,19 +53,19 @@ class SinkA(implicit p: Parameters) extends L3Module {
 
   val count_1 = RegInit(0.U(beatSize.W))
   val first_1 = count_1 === 0.U
-  when(io.a.fire() && count_1 === (beatSize - 1).U) {
+  when(io.a.fire && count_1 === (beatSize - 1).U) {
     count_1 := 0.U
-  }.elsewhen(io.a.fire() && hasData){
+  }.elsewhen(io.a.fire && hasData){
       count_1 := count_1 + 1.U
   }
 
 
-  val full = valids.andR()
+  val full = valids.andR
   val noSpace = full && hasData
   val insertIdx = PriorityEncoder(~valids)
-  val insertIdxReg = RegEnable(insertIdx, 0.U.asTypeOf(insertIdx), io.a.fire() && first_1)
+  val insertIdxReg = RegEnable(insertIdx, 0.U.asTypeOf(insertIdx), io.a.fire && first_1)
 
-  when (io.a.fire() && hasData) {
+  when (io.a.fire && hasData) {
     when (first_1) {
       putBuffer(insertIdx)(count_1).data.data := io.a.bits.data
       putBuffer(insertIdx)(count_1).mask := io.a.bits.mask
@@ -78,13 +78,13 @@ class SinkA(implicit p: Parameters) extends L3Module {
   }
 
   //  Store put data / mask
-  when (RegNext(io.pbRead.fire() && !io.pbRead.bits.isMSHRTask)) {
+  when (RegNext(io.pbRead.fire && !io.pbRead.bits.isMSHRTask)) {
     when(io.fromMainPipe.putReqGood_s3) {
       beatValids(RegNext(io.pbRead.bits.idx)).foreach(_ := false.B)
     }
   }
   // Release buffer
-  when (io.pbRead.fire() && io.pbRead.bits.isMSHRTask) {
+  when (io.pbRead.fire && io.pbRead.bits.isMSHRTask) {
     beatValids(io.pbRead.bits.idx).foreach(_ := false.B)
   }
 
@@ -102,7 +102,7 @@ class SinkA(implicit p: Parameters) extends L3Module {
     task.sourceId := a.source
     task.mshrTask := false.B
     task.pbIdx := insertIdx
-    task.reqSource := a.user.lift(utility.ReqSourceKey).getOrElse(MemReqSource.NoWhere.id.U)
+    task.reqSource := a.user.lift(xs.utils.tl.ReqSourceKey).getOrElse(MemReqSource.NoWhere.id.U)
     task
   }
 
@@ -149,14 +149,14 @@ class SinkA(implicit p: Parameters) extends L3Module {
 
   // Performance counters
   // num of reqs
-  XSPerfAccumulate(cacheParams, "sinkA_req", io.toReqArb.fire())
-  XSPerfAccumulate(cacheParams, "sinkA_acquire_req", io.a.fire() && io.a.bits.opcode(2, 1) === AcquireBlock(2, 1))
-  XSPerfAccumulate(cacheParams, "sinkA_acquireblock_req", io.a.fire() && io.a.bits.opcode === AcquireBlock)
-  XSPerfAccumulate(cacheParams, "sinkA_acquireperm_req", io.a.fire() && io.a.bits.opcode === AcquirePerm)
-  XSPerfAccumulate(cacheParams, "sinkA_get_req", io.a.fire() && io.a.bits.opcode === Get)
-  XSPerfAccumulate(cacheParams, "sinkA_put_req", io.toReqArb.fire() &&
+  XSPerfAccumulate(cacheParams, "sinkA_req", io.toReqArb.fire)
+  XSPerfAccumulate(cacheParams, "sinkA_acquire_req", io.a.fire && io.a.bits.opcode(2, 1) === AcquireBlock(2, 1))
+  XSPerfAccumulate(cacheParams, "sinkA_acquireblock_req", io.a.fire && io.a.bits.opcode === AcquireBlock)
+  XSPerfAccumulate(cacheParams, "sinkA_acquireperm_req", io.a.fire && io.a.bits.opcode === AcquirePerm)
+  XSPerfAccumulate(cacheParams, "sinkA_get_req", io.a.fire && io.a.bits.opcode === Get)
+  XSPerfAccumulate(cacheParams, "sinkA_put_req", io.toReqArb.fire &&
     (io.toReqArb.bits.opcode === PutFullData || io.toReqArb.bits.opcode === PutPartialData))
-  XSPerfAccumulate(cacheParams, "sinkA_put_beat", io.a.fire() &&
+  XSPerfAccumulate(cacheParams, "sinkA_put_beat", io.a.fire &&
     (io.a.bits.opcode === PutFullData || io.a.bits.opcode === PutPartialData))
 
   // cycels stalled by mainpipe

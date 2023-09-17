@@ -20,11 +20,12 @@ package coupledL2
 import chisel3._
 import chisel3.util._
 import coupledL2.MetaData._
-import utility.{MemReqSource, ParallelLookUp, ParallelPriorityMux}
+import xs.utils.{ParallelLookUp, ParallelPriorityMux}
+import xs.utils.tl.MemReqSource
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink.TLPermissions._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import coupledL2.prefetch.PrefetchTrain
 import coupledL2.utils.XSPerfAccumulate
 
@@ -448,7 +449,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
   }
   // prefetchOpt.foreach {
   //   _ =>
-  //     when (io.tasks.prefetchTrain.get.fire()) {
+  //     when (io.tasks.prefetchTrain.get.fire) {
   //       state.s_triggerprefetch.get := true.B
   //     }
   // }

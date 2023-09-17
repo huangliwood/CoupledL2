@@ -20,8 +20,8 @@ package coupledL2
 import chisel3._
 import chisel3.util._
 import xs.utils.sram.SRAMTemplate
-import utility.RegNextN
-import chipsalliance.rocketchip.config.Parameters
+import xs.utils.RegNextN
+import org.chipsalliance.cde.config.Parameters
 import coupledL2.utils.BankedSRAM
 import xs.utils.Code
 

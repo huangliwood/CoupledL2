@@ -2,9 +2,9 @@ package coupledL3.debug
 
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import coupledL3._
-import utility._
+import xs.utils._
 
 class MainpipeMoni(implicit p: Parameters) extends L3Bundle {
   val task_s2 = ValidIO(new TaskBundle())

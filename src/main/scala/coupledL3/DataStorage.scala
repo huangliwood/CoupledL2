@@ -22,8 +22,8 @@ import chisel3.util._
 // import coupledL3.utils.SRAMTemplate
 import xs.utils.sram.SRAMTemplate
 import xs.utils.Code
-import utility.RegNextN
-import chipsalliance.rocketchip.config.Parameters
+import xs.utils.RegNextN
+import org.chipsalliance.cde.config.Parameters
 import firrtl.Utils
 import xs.utils.Decoding
 import coupledL3.utils.BankedSRAM

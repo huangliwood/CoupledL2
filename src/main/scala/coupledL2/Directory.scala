@@ -21,8 +21,8 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.util.SetAssocLRU
 import coupledL2.utils._
-import utility.{ParallelPriorityMux, RegNextN}
-import chipsalliance.rocketchip.config.Parameters
+import xs.utils.{ParallelPriorityMux, RegNextN}
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink.TLMessages._
 import xs.utils.sram.SRAMTemplate
 

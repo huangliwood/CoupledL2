@@ -19,8 +19,8 @@ package coupledL2
 
 import chisel3._
 import chisel3.util._
-import utility._
-import chipsalliance.rocketchip.config.Parameters
+import xs.utils._
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import coupledL2.prefetch.PrefetchResp
@@ -246,7 +246,7 @@ class GrantBuffer(implicit p: Parameters) extends L2Module {
   // [This is better]
   // val globalCounter = (grantQueue.io.count << 1.U).asUInt + grantBufValid.asUInt // entries * 2 + grantBufValid
   val globalCounter = RegInit(0.U((log2Ceil(grantBufSize) + 1).W))
-  when(io.d_task.fire()) {
+  when(io.d_task.fire) {
     val hasData = io.d_task.bits.task.opcode(0)
     when(hasData) {
       globalCounter := globalCounter + 1.U // counter = counter + 2 - 1

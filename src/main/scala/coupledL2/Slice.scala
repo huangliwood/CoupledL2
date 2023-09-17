@@ -22,11 +22,11 @@ import chisel3.util._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.util.leftOR
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import coupledL2.utils._
 import coupledL2.debug._
 import coupledL2.prefetch.PrefetchIO
-import utility.RegNextN
+import xs.utils.RegNextN
 
 class Slice()(implicit p: Parameters) extends L2Module {
   val io = IO(new Bundle {
@@ -138,16 +138,14 @@ class Slice()(implicit p: Parameters) extends L2Module {
   mshrCtl.io.pipeStatusVec(0) := reqArb.io.status_vec(1) // s2 status
   mshrCtl.io.pipeStatusVec(1) := mainPipe.io.status_vec(0) // s3 status
 
-  io.prefetch.foreach {
-    p =>
-      p.train <> mainPipe.io.prefetchTrain.get
-      sinkA.io.prefetchReq.get <> p.req
-      p.resp <> grantBuf.io.prefetchResp.get
-      p.recv_addr := 0.U.asTypeOf(ValidIO(UInt(64.W)))
-      p.evict match {
-      case Some(evict) => 
-        evict <> mainPipe.io.prefetchEvict.get
-      case None =>
+  if(io.prefetch.isDefined){
+    val pfio = io.prefetch.get
+    pfio.train <> mainPipe.io.prefetchTrain.get
+    sinkA.io.prefetchReq.get <> pfio.req
+    pfio.resp <> grantBuf.io.prefetchResp.get
+    pfio.recv_addr := 0.U.asTypeOf(ValidIO(UInt(64.W)))
+    if(pfio.evict.isDefined){
+      pfio.evict.get <> mainPipe.io.prefetchEvict.get
     }
   }
 
@@ -187,7 +185,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     timer := timer + 1.U
     a_begin_times.zipWithIndex.foreach {
       case (r, i) =>
-        when (sinkA.io.a.fire() && sinkA.io.a.bits.source === i.U) {
+        when (sinkA.io.a.fire && sinkA.io.a.bits.source === i.U) {
           r := timer
         }
     }

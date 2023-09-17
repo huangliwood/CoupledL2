@@ -19,10 +19,10 @@ package coupledL3
 
 import chisel3._
 import chisel3.util._
-import utility._
+import xs.utils._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import coupledL3.utils.XSPerfAccumulate
 import coupledL3.noninclusive.ClientDirRead
 import chisel3.util.experimental.BoringUtils
@@ -93,7 +93,7 @@ class RequestArb(implicit p: Parameters) extends L3Module {
   // --------------------------------------------------------------------------
   io.mshrTask.ready  := s0_ready
   val mshr_task_s0    = Wire(Valid(new TaskBundle()))
-  mshr_task_s0.valid := io.mshrTask.fire()
+  mshr_task_s0.valid := io.mshrTask.fire
   mshr_task_s0.bits  := io.mshrTask.bits
 
   s0_valid := io.mshrTask.valid
@@ -302,9 +302,9 @@ class RequestArb(implicit p: Parameters) extends L3Module {
   XSPerfAccumulate(cacheParams, "mshr_req", mshr_task_s0.valid)
   XSPerfAccumulate(cacheParams, "mshr_req_stall", io.mshrTask.valid && !io.mshrTask.ready)
 
-  XSPerfAccumulate(cacheParams, "sinkA_req", io.sinkA.fire())
-  XSPerfAccumulate(cacheParams, "sinkB_req", io.sinkB.fire())
-  XSPerfAccumulate(cacheParams, "sinkC_req", io.sinkC.fire())
+  XSPerfAccumulate(cacheParams, "sinkA_req", io.sinkA.fire)
+  XSPerfAccumulate(cacheParams, "sinkB_req", io.sinkB.fire)
+  XSPerfAccumulate(cacheParams, "sinkC_req", io.sinkC.fire)
   
   XSPerfAccumulate(cacheParams, "sinkA_stall", io.sinkA.valid && !io.sinkA.ready)
   XSPerfAccumulate(cacheParams, "sinkB_stall", io.sinkB.valid && !io.sinkB.ready)

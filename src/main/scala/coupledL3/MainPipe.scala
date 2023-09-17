@@ -19,10 +19,10 @@ package coupledL3
 
 import chisel3._
 import chisel3.util._
-import utility._
-import utility.ParallelMax
+import xs.utils._
+import xs.utils.ParallelMax
 import coupledL3.MetaData._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink.TLPermissions._
@@ -921,7 +921,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   assert(!RegNext(!ren_s5 && task_s5.valid), "ren_s5:%d task_s5_valid:%d isC_s5:%d isD_s5:%d channel:%d opcode:%d mshrTask:%d", RegNext(ren_s5), RegNext(task_s5.valid), RegNext(isC_s5), RegNext(isD_s5), RegNext(task_s5.bits.channel), RegNext(task_s5.bits.opcode), RegNext(task_s5.bits.mshrTask))
   val rdata_s5 = Mux(gotData_s5, dataReg_s5.data, io.toDS.rdata_s5.data)
   task_s5.bits.corrupt := Mux(ren_s5, io.toDS.error_s5, false.B)
-  val chnl_fire_s5 = c_s5.fire() || d_s5.fire()
+  val chnl_fire_s5 = c_s5.fire || d_s5.fire
 
   willWriteMSHRBuf := s5_full && needWriteMSHRBuf_s5
   io.mshrBufWrite.valid           := willWriteMSHRBuf
@@ -1102,17 +1102,17 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
 
   // pipeline stages for sourceC and sourceD reqs
   val sourceC_pipe_len = ParallelMux(Seq(
-    c_s5.fire() -> 5.U,
-    c_s4.fire() -> 4.U,
-    c_s3.fire() -> 3.U
+    c_s5.fire -> 5.U,
+    c_s4.fire -> 4.U,
+    c_s3.fire -> 3.U
   ))
   val sourceD_pipe_len = ParallelMux(Seq(
-    d_s5.fire() -> 5.U,
-    d_s4.fire() -> 4.U,
-    d_s3.fire() -> 3.U
+    d_s5.fire -> 5.U,
+    d_s4.fire -> 4.U,
+    d_s3.fire -> 3.U
   ))
   XSPerfHistogram(cacheParams, "sourceC_pipeline_stages", sourceC_pipe_len,
-    enable = io.toSourceC.fire(), start = 3, stop = 5+1, step = 1)
+    enable = io.toSourceC.fire, start = 3, stop = 5+1, step = 1)
   XSPerfHistogram(cacheParams, "sourceD_pipeline_stages", sourceD_pipe_len,
-    enable = io.toSourceD.fire(), start = 3, stop = 5+1, step = 1)
+    enable = io.toSourceD.fire, start = 3, stop = 5+1, step = 1)
 }

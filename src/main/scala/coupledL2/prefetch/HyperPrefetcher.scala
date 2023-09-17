@@ -1,6 +1,6 @@
 package coupledL2.prefetch
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
@@ -66,7 +66,7 @@ class FilterV2(implicit p: Parameters) extends PrefetchBranchV2Module {
   readResult := fTable(idx(pageAddr))
   hit := readResult.valid && tag(pageAddr) === readResult.tag
   val hitForMap = hit && readResult.bitMap(blkOffset)
-  io.resp.valid := io.req.fire() && (!hitForMap || io.from_bop)
+  io.resp.valid := io.req.fire && (!hitForMap || io.from_bop)
   io.resp.bits := io.req.bits
 
   io.hint2llc.valid := io.req.fire && !hitForMap && io.spp2llc
@@ -172,7 +172,7 @@ class HyperPrefetcher()(implicit p: Parameters) extends PrefetchBranchV2Module {
   }
   bop.io.train.valid := io.train.valid || train_for_bop_valid
   bop.io.train.bits := Mux(io.train.valid, io.train.bits, train_for_bop)
-  when(bop.io.train.fire() && !io.train.valid) {
+  when(bop.io.train.fire && !io.train.valid) {
     train_for_bop_valid := false.B
   }
 
@@ -212,5 +212,5 @@ class HyperPrefetcher()(implicit p: Parameters) extends PrefetchBranchV2Module {
   XSPerfAccumulate(cacheParams, "bop_send2_queue", fTable.io.resp.fire && bop.io.req.valid)
   XSPerfAccumulate(cacheParams, "sms_send2_queue", fTable.io.resp.fire && q_sms.io.deq.fire)
   XSPerfAccumulate(cacheParams, "spp_send2_queue", fTable.io.resp.fire && q_spp.io.deq.fire)
-  XSPerfAccumulate(cacheParams, "prefetcher_has_evict", io.evict.fire())
+  XSPerfAccumulate(cacheParams, "prefetcher_has_evict", io.evict.fire)
 }

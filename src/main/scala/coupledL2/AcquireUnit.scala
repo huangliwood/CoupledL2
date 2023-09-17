@@ -19,10 +19,10 @@ package coupledL2
 
 import chisel3._
 import chisel3.util._
-import utility._
+import xs.utils._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 
 class AcquireUnit(implicit p: Parameters) extends L2Module {
   val io = IO(new Bundle() {
@@ -42,7 +42,7 @@ class AcquireUnit(implicit p: Parameters) extends L2Module {
   a.bits.data := DontCare
   a.bits.echo.lift(huancun.DirtyKey).foreach(_ := true.B)
   a.bits.user.lift(huancun.PreferCacheKey).foreach(_ := false.B)
-  a.bits.user.lift(utility.ReqSourceKey).foreach(_ := task.reqSource)
+  a.bits.user.lift(xs.utils.tl.ReqSourceKey).foreach(_ := task.reqSource)
   a.bits.corrupt := false.B
 
   a.valid := io.task.valid

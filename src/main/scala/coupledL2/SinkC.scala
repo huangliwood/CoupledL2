@@ -21,9 +21,9 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import coupledL2.utils.XSPerfAccumulate
-import utility.MemReqSource
+import xs.utils.tl.MemReqSource
 
 class PipeBufferRead(implicit p: Parameters) extends L2Bundle {
   val bufIdx = UInt(bufIdxBits.W)
@@ -66,7 +66,7 @@ class SinkC(implicit p: Parameters) extends L2Module {
   val full = bufValids.andR
   val noSpace = full && hasData
   val nextPtr = PriorityEncoder(~bufValids)
-  val nextPtrReg = RegEnable(nextPtr, 0.U.asTypeOf(nextPtr), io.c.fire() && isRelease && first && hasData)
+  val nextPtrReg = RegEnable(nextPtr, 0.U.asTypeOf(nextPtr), io.c.fire && isRelease && first && hasData)
 
   def toTaskBundle(c: TLBundleC): TaskBundle = {
     val task = Wire(new TaskBundle)
@@ -101,7 +101,7 @@ class SinkC(implicit p: Parameters) extends L2Module {
     task
   }
 
-  when (io.c.fire() && isRelease) {
+  when (io.c.fire && isRelease) {
     when (hasData) {
       when (first) {
         dataBuf(nextPtr)(beat) := io.c.bits.data
@@ -114,7 +114,7 @@ class SinkC(implicit p: Parameters) extends L2Module {
     }
   }
 
-  when (io.c.fire() && isRelease && last && (!io.task.ready || taskArb.io.out.valid)) {
+  when (io.c.fire && isRelease && last && (!io.task.ready || taskArb.io.out.valid)) {
     when (hasData) {
       taskValids(nextPtrReg) := true.B
       taskBuf(nextPtrReg) := toTaskBundle(io.c.bits)
@@ -131,7 +131,7 @@ class SinkC(implicit p: Parameters) extends L2Module {
     case (in, i) =>
       in.valid := taskValids(i)
       in.bits := taskBuf(i)
-      when (in.fire()) {
+      when (in.fire) {
         taskValids(i) := false.B
       }
   }

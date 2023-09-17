@@ -22,8 +22,8 @@ import chisel3.util._
 import coupledL3._
 import coupledL3.utils._
 import coupledL3.MetaData._
-import chipsalliance.rocketchip.config.Parameters
-import utility.ParallelPriorityMux
+import org.chipsalliance.cde.config.Parameters
+import xs.utils.ParallelPriorityMux
 import xs.utils.sram.SRAMTemplate
 
 trait HasClientInfo { this: HasCoupledL3Parameters =>
@@ -186,9 +186,9 @@ class ClientDirectory(implicit p: Parameters) extends L3Module with DontCareInne
   // ---------------------------------------------------------------------------
   //  Stage2: get Tag/Meta, calculate hit/way
   // --------------------------------------------------------------------------
-  val req_s2 = RegEnable(io.read.bits, 0.U.asTypeOf(io.read.bits), enable = io.read.fire)
-  val set_s2 = RegEnable(rdSet, 0.U(clientSetBits.W), enable = io.read.fire)
-  val tag_s2 = RegEnable(rdTag, 0.U(clientTagBits.W), enable = io.read.fire)
+  val req_s2 = RegEnable(io.read.bits, 0.U.asTypeOf(io.read.bits), io.read.fire)
+  val set_s2 = RegEnable(rdSet, 0.U(clientSetBits.W), io.read.fire)
+  val tag_s2 = RegEnable(rdTag, 0.U(clientTagBits.W), io.read.fire)
   val hit_s2 = Wire(Bool())
   val way_s2 = Wire(UInt(clientWayBits.W))
   val valid_s2 = RegNext(io.read.fire, false.B)

@@ -1,11 +1,11 @@
 package coupledL2
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink.TLMessages._
 import chisel3._
 import chisel3.util._
 import coupledL2.utils._
-import utility._
+import xs.utils._
 
 class ReqEntry(entries: Int = 4)(implicit p: Parameters) extends L2Bundle() {
   val valid    = Bool()

@@ -19,11 +19,11 @@ package coupledL3
 
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 
 import freechips.rocketchip.tilelink.TLPermissions._
 
-abstract class L3Module(implicit val p: Parameters) extends MultiIOModule with HasCoupledL3Parameters
+abstract class L3Module(implicit val p: Parameters) extends Module with HasCoupledL3Parameters
 abstract class L3Bundle(implicit val p: Parameters) extends Bundle with HasCoupledL3Parameters
 
 class ReplacerInfo(implicit p: Parameters) extends L3Bundle {

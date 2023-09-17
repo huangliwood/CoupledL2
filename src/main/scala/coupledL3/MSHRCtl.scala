@@ -19,8 +19,8 @@ package coupledL3
 
 import chisel3._
 import chisel3.util._
-import utility._
-import chipsalliance.rocketchip.config.Parameters
+import xs.utils._
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import coupledL3.prefetch.PrefetchTrain

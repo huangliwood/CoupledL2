@@ -19,7 +19,7 @@ package coupledL3
 
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import coupledL3.utils._
 import xs.utils.sram._
 
@@ -52,7 +52,7 @@ class LookupBuffer(entries: Int = 16)(implicit p: Parameters) extends L3Module {
   val valids = RegInit(VecInit.tabulate(mshrsAll, beatSize)((_, _) => false.B))
   val corrupts = RegInit(VecInit.tabulate(mshrsAll, beatSize)((_, _) => false.B))
 
-  io.full := Cat(valids.map( e => Cat(e).andR )).andR()
+  io.full := Cat(valids.map( e => Cat(e).andR )).andR
 
 
   when(io.w.valid) {
