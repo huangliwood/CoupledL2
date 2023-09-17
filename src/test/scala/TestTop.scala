@@ -520,7 +520,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
           PrefetchReceiverParams => sms+bop
           HyperPrefetchParams    => spp+bop+sms
         */
-        sppMultiLevelRefill = None,//Some(coupledL2.prefetch.PrefetchReceiverParams()),
+        sppMultiLevelRefill = Some(coupledL2.prefetch.PrefetchReceiverParams()),
         /*must has spp, otherwise Assert Fail
         sppMultiLevelRefill options:
         PrefetchReceiverParams() => spp has cross level refill
@@ -558,7 +558,8 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
         blockGranularity = 64
       )), // TODO: For L3 this should be L2Param
       echoField = Seq(DirtyField()),
-      prefetch = None
+      prefetch = None,
+      prefetchRecv = Some(huancun.prefetch.PrefetchReceiverParams()),
     )
   })))
   // l2List.zipWithIndex.foreach { 
