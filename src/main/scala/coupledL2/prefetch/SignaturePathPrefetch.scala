@@ -2,7 +2,6 @@
 package coupledL2.prefetch
 
 import xs.utils.sram.SRAMTemplate
-import coupledL2.utils.ReplaceableQueueV2
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
@@ -103,6 +102,10 @@ class DeltaEntry(implicit p: Parameters) extends SPPBundle {
     entry.cDelta := cDelta
     entry
   }
+}
+
+class sppPrefetchReq(implicit p:Parameters) extends PrefetchReq{
+  val hint2llc = Bool()
 }
 
 class SignatureTable(implicit p: Parameters) extends SPPModule {
@@ -249,9 +252,9 @@ class PatternTable(implicit p: Parameters) extends SPPModule {
     new SRAMTemplate(pTableEntry(), set = pTableEntries, way = 1, bypassWrite = true, shouldReset = true)
   )
 
-  val q = Module(new ReplaceableQueueV2(chiselTypeOf(io.req.bits), pTableQueueEntries))
+  val q = Module(new Queue(chiselTypeOf(io.req.bits), pTableQueueEntries, flow = false, pipe = true))
   q.io.enq <> io.req
-  val req = q.io.deq.bits
+  val req = Mux(q.io.deq.valid,q.io.deq.bits,0.U.asTypeOf(q.io.deq.bits.cloneType))
 
   val s_idle :: s_lookahead0 :: s_lookahead :: Nil = Enum(3)
   val state = RegInit(s_idle)
@@ -347,7 +350,6 @@ class PatternTable(implicit p: Parameters) extends SPPModule {
     }
     //to consider saturate here
   } .otherwise {
-    deltaEntries := VecInit(Seq.fill(pTableDeltaEntries)((new DeltaEntry).apply(0.S, 0.U)))
     deltaEntries(0).delta := lastDelta
     deltaEntries(0).cDelta := 1.U
     count := 1.U
@@ -446,7 +448,7 @@ class Unpack(implicit p: Parameters) extends SPPModule {
   val inProcess = RegInit(false.B)
   val endeq = WireInit(false.B)
 
-  val q = Module(new ReplaceableQueueV2(chiselTypeOf(io.req.bits), unpackQueueEntries))
+  val q = Module(new Queue(chiselTypeOf(io.req.bits), unpackQueueEntries))
   q.io.enq <> io.req //change logic to replace the tail entry
 
   val req = RegEnable(q.io.deq.bits, q.io.deq.fire())
@@ -515,9 +517,8 @@ class Unpack(implicit p: Parameters) extends SPPModule {
 class SignaturePathPrefetch(implicit p: Parameters) extends SPPModule {
   val io = IO(new Bundle() {
     val train = Flipped(DecoupledIO(new PrefetchTrain)) //from higher level cache
-    val req = DecoupledIO(new PrefetchReq) //issue to next-level cache
+    val req = DecoupledIO(new sppPrefetchReq) //issue to next-level cache
     val resp = Flipped(DecoupledIO(new PrefetchResp)) //fill request from the next-level cache, using this to update filter
-    val hint2llc = Output(Bool())
     val db_degree = Flipped(ValidIO(UInt(2.W)))
     val queue_used = Input(UInt(6.W))
   })
@@ -543,27 +544,25 @@ class SignaturePathPrefetch(implicit p: Parameters) extends SPPModule {
 
   val newAddr = Cat(unpack.io.resp.bits.prefetchBlock, 0.U(offsetBits.W))
   val db_degree = RegEnable(io.db_degree.bits, 1.U, io.db_degree.valid)
-  val queue_used_degree = Mux(io.queue_used >= 24.U, 1.U, 0.U)
   val pf_degree = unpack.io.resp.bits.degree
-  val send2Llc = pf_degree > 1.U && (queue_used_degree >= 1.U || db_degree > 1.U)
+  val send2Llc = pf_degree > 1.U && (io.queue_used >= 24.U || db_degree > 1.U)
 
   pTable.io.db_degree := db_degree
-  pTable.io.queue_used_degree := queue_used_degree
+  pTable.io.queue_used_degree := io.queue_used >= 24.U
 
+  io.req.valid := unpack.io.resp.valid
   io.req.bits.tag := parseFullAddress(newAddr)._1
   io.req.bits.set := parseFullAddress(newAddr)._2
   io.req.bits.needT := unpack.io.resp.bits.needT
   io.req.bits.source := unpack.io.resp.bits.source
   io.req.bits.isBOP := false.B
+  io.req.bits.hint2llc := unpack.io.resp.valid //&& send2Llc
 
-  io.req.valid := unpack.io.resp.valid
-  io.req.valid := unpack.io.resp.valid && !send2Llc
-  io.hint2llc := unpack.io.resp.valid && send2Llc
 
   io.resp.ready := true.B
   //perf
   XSPerfAccumulate(cacheParams, "spp_recv_train", io.train.fire())
   XSPerfAccumulate(cacheParams, "spp_recv_st", sTable.io.resp.fire())
   XSPerfAccumulate(cacheParams, "spp_recv_pt", Mux(pTable.io.resp.fire(), pTable.io.resp.bits.deltas.map(a => Mux(a =/= 0.S, 1.U, 0.U)).reduce(_ +& _), 0.U))
-  XSPerfAccumulate(cacheParams, "spp_hint", io.hint2llc)
+  XSPerfAccumulate(cacheParams, "spp_hintReq", io.req.bits.hint2llc)
 }
