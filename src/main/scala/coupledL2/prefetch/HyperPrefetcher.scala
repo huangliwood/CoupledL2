@@ -69,7 +69,7 @@ class FilterV2(implicit p: Parameters) extends PrefetchBranchV2Module {
   val req_dup_c = WireInit(0.U.asTypeOf(io.req.bits.cloneType))
 
   for(i <- 0 until(dupNums)) {
-    when(req_dups(i).set(dupOffsetBits-1+dupBits,dupOffsetBits-1) === i.U(dupBits.W)) {
+    when(req_dups(i).set(dupOffsetBits+dupBits-1,dupOffsetBits) === i.U(dupBits.W)) {
       req_dup_c := req_dups(i)
       val oldAddr = req_dups(i).addr
       val pageAddr = oldAddr(fullAddressBits - 1, pageOffsetBits)
@@ -114,7 +114,7 @@ class FilterV2(implicit p: Parameters) extends PrefetchBranchV2Module {
   val readEvict = WireInit(VecInit.fill(dupNums)(0.U.asTypeOf(fTableEntry())))
   val hitEvict =  WireInit(VecInit.fill(dupNums)(false.B))
   for(i <- 0 until(dupNums)) {
-    when(req_dups(i).set(dupOffsetBits-1+dupBits,dupOffsetBits-1) === i.U(dupBits.W)) {
+    when(req_dups(i).set(dupOffsetBits+dupBits-1,dupOffsetBits) === i.U(dupBits.W)) {
       val oldAddr = req_dups(i).addr
       val blkAddr = oldAddr(fullAddressBits - 1, offsetBits)
       val conflict = req_dups_valid.reduce(_ || _) && blkAddr === evictBlkAddr

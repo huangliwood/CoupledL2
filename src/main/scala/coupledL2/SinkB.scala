@@ -92,7 +92,7 @@ class SinkB(implicit p: Parameters) extends L2Module {
   assert(PopCount(replaceConflictMask) <= 1.U)
   assert(PopCount(mergeBMask) <= 1.U)
 
-  val mergeB = mergeBMask.orR
+  val mergeB = mergeBMask.orR // TODO: && task.param === toN // only toN can merge with MSHR-Release
   val mergeBId = OHToUInt(mergeBMask)
 
   // when conflict, we block B req from entering SinkB

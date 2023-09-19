@@ -578,7 +578,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
   //     prefetch = None
   //   )
   // })))
-  // l2List.zipWithIndex.foreach { 
+  // l2List.zipWithIndex.foreach {
   //   case (l2, i) =>
   //     l2.spp_send_node match{
   //       case Some(sppSend) =>
@@ -594,7 +594,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
   sppHasCrossLevelRefillOpt match{
     case Some(x) =>
       val l3pf_RecvXbar = LazyModule(new PrefetchReceiverXbar(NumCores))
-      l2List.zipWithIndex.foreach { 
+      l2List.zipWithIndex.foreach {
         case (l2, i) =>
           l2.spp_send_node match {
             case Some(l2Send) =>
