@@ -272,7 +272,7 @@ class PatternTable(implicit p: Parameters) extends SPPModule {
   val enwrite = RegNext(q.io.deq.fire() && pTable.io.r.req.fire(),0.U) //we only modify-write on demand requests
   val current = RegInit(0.U.asTypeOf(new SignatureTableResp))
   val lookCount = RegInit(0.U(lookCountBits.W))
-  val miniCount = lookCount
+  val miniCount = lookCount >> 2.U
 
   when(enread_reg) {
     enread := enread_reg
