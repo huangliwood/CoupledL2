@@ -91,19 +91,19 @@ object utility extends SbtModule with ScalafmtModule with CommonModule {
    override def moduleDeps = super.moduleDeps ++ Seq(rocketchip)
  }
 
-object huancun extends SbtModule with ScalafmtModule with CommonModule {
-  override def millSourcePath = os.pwd / "HuanCun"
-  override def moduleDeps = super.moduleDeps ++ Seq(
-    rocketchip, utility
-  )
-}
-
 object xsutils extends SbtModule with ScalafmtModule with CommonModule {
 
   override def millSourcePath = os.pwd / "xs-utils"
 
   override def moduleDeps = super.moduleDeps ++ Seq(
     rocketchip
+  )
+}
+
+object huancun extends SbtModule with ScalafmtModule with CommonModule {
+  override def millSourcePath = os.pwd / "HuanCun"
+  override def moduleDeps = super.moduleDeps ++ Seq(
+    rocketchip, utility, xsutils
   )
 }
 

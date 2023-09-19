@@ -556,7 +556,7 @@ class SignaturePathPrefetch(implicit p: Parameters) extends SPPModule {
   io.req.bits.needT := unpack.io.resp.bits.needT
   io.req.bits.source := unpack.io.resp.bits.source
   io.req.bits.isBOP := false.B
-  io.req.bits.hint2llc := unpack.io.resp.valid //&& send2Llc
+  io.req.bits.hint2llc := unpack.io.resp.valid && send2Llc
 
 
   io.resp.ready := true.B
