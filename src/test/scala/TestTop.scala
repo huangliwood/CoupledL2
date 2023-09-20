@@ -8,6 +8,8 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import huancun._
 import coupledL2.prefetch._
+import axi2tl._
+import freechips.rocketchip.amba.axi4._
 import utility.{ChiselDB, FileRegisters}
 import coupledL3._
 import chisel3.util.experimental.BoringUtils
@@ -455,8 +457,8 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
 
   /* L1D L1I L1D L1I (L1I sends Get)
    *  \  /    \  /
-   *   L2      L2
-   *    \     /
+   *   L2      L2      DMA
+   *    \     /       /
    *       L3(HuanCun)
    */
 
@@ -608,17 +610,39 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
     case None =>
   }
 
-  val dma_node = TLClientNode(Seq(TLMasterPortParameters.v2(
-      Seq(TLMasterParameters.v1(
-        name = "dma",
-        sourceId = IdRange(0, 16),
-        supportsProbe = TransferSizes.none
-      )),
-      channelBytes = TLChannelBeatBytes(cacheParams.blockBytes),
-      minLatency = 1,
-      echoFields = Nil,
-    )))
-  l2xbar := TLBuffer() := dma_node
+  val idBits = 14
+  val l3FrontendAXI4Node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
+    Seq(AXI4MasterParameters(
+      name = "dma",
+      id = IdRange(0, 1 << idBits)
+    ))
+  )))
+  val axi2tlParams = p(AXI2TLParamKey)
+  val AXItoTL = LazyModule(new AXItoTL)
+  l2xbar :=
+    TLFIFOFixer() :=
+    TLWidthWidget(32) :=
+    TLBuffer() :=
+    AXItoTL.node :=
+    AXI4Buffer() :=
+    AXI4UserYanker(Some(16)) :=
+    AXI4Fragmenter() :=
+    AXI4Buffer() :=
+    AXI4Buffer() :=
+    AXI4IdIndexer(4) :=
+    l3FrontendAXI4Node
+
+//  val dma_node = TLClientNode(Seq(TLMasterPortParameters.v2(
+//      Seq(TLMasterParameters.v1(
+//        name = "dma",
+//        sourceId = IdRange(0, 16),
+//        supportsProbe = TransferSizes.none
+//      )),
+//      channelBytes = TLChannelBeatBytes(cacheParams.blockBytes),
+//      minLatency = 1,
+//      echoFields = Nil,
+//    )))
+//  l2xbar := TLBuffer() := dma_node
 
   ram.node :=
     TLXbar() :=*
@@ -632,7 +656,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       case (node, i) =>
         node.makeIOs()(ValName(s"master_port_$i"))
     }
-    dma_node.makeIOs()(ValName("dma_port"))
+    l3FrontendAXI4Node.makeIOs()(ValName("dma_port"))
 
     val io = IO(new Bundle{
       val perfClean = Input(Bool())
