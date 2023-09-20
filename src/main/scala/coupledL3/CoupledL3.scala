@@ -245,9 +245,6 @@ class CoupledL3(implicit p: Parameters) extends LazyModule with HasCoupledL3Para
   lazy val module = new LazyModuleImp(this) {
     val banks = node.in.size
     val bankBits = if (banks == 1) 0 else log2Up(banks)
-    val io = IO(new Bundle {
-      val l2_hint = Valid(UInt(32.W))
-    })
 
     // Display info
     val sizeBytes = cacheParams.toCacheParams.capacity.toDouble
