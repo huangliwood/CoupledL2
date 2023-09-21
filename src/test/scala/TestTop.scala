@@ -8,6 +8,8 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import coupledL2.prefetch._
 import xs.utils.{ChiselDB, FileRegisters}
+import axi2tl._
+import freechips.rocketchip.amba.axi4._
 import coupledL3._
 import chisel3.util.experimental.BoringUtils
 import scala.collection.mutable.ArrayBuffer
@@ -454,8 +456,8 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
 
   /* L1D L1I L1D L1I (L1I sends Get)
    *  \  /    \  /
-   *   L2      L2
-   *    \     /
+   *   L2      L2      DMA
+   *    \     /       /
    *       L3(HuanCun)
    */
 
@@ -519,7 +521,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
           PrefetchReceiverParams => sms+bop
           HyperPrefetchParams    => spp+bop+sms
         */
-        // sppMultiLevelRefill = Some(coupledL2.prefetch.PrefetchReceiverParams()),
+        sppMultiLevelRefill = Some(coupledL2.prefetch.PrefetchReceiverParams()),
         /*must has spp, otherwise Assert Fail
         sppMultiLevelRefill options:
         PrefetchReceiverParams() => spp has cross level refill
@@ -551,8 +553,8 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       sramDepthDiv = 4,
       simulation = true,
       hasMbist = false,
-      // prefetch = None,
-      // prefetchRecv = Some(huancun.prefetch.PrefetchReceiverParams())
+      prefetch = None,
+      prefetchRecv = Some(huancun.prefetch.PrefetchReceiverParams())
     )
   })))
 
@@ -577,7 +579,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
   //     prefetch = None
   //   )
   // })))
-  // l2List.zipWithIndex.foreach { 
+  // l2List.zipWithIndex.foreach {
   //   case (l2, i) =>
   //     l2.spp_send_node match{
   //       case Some(sppSend) =>
@@ -593,7 +595,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
   sppHasCrossLevelRefillOpt match{
     case Some(x) =>
       val l3pf_RecvXbar = LazyModule(new PrefetchReceiverXbar(NumCores))
-      l2List.zipWithIndex.foreach { 
+      l2List.zipWithIndex.foreach {
         case (l2, i) =>
           l2.spp_send_node match {
             case Some(l2Send) =>
@@ -603,21 +605,43 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
         }
       }
       println(f"pf_l3recv_node connecting to l3pf_RecvXbar out")
-      // l3.pf_l3recv_node.map(l3_recv =>  l3_recv:= l3pf_RecvXbar.outNode.head)
+      l3.pf_l3recv_node.map(l3_recv =>  l3_recv:= l3pf_RecvXbar.outNode.head)
     case None =>
   }
 
-  val dma_node = TLClientNode(Seq(TLMasterPortParameters.v2(
-      Seq(TLMasterParameters.v1(
-        name = "dma",
-        sourceId = IdRange(0, 16),
-        supportsProbe = TransferSizes.none
-      )),
-      channelBytes = TLChannelBeatBytes(cacheParams.blockBytes),
-      minLatency = 1,
-      echoFields = Nil,
-    )))
-  l2xbar := TLBuffer() := dma_node
+  val idBits = 14
+  val l3FrontendAXI4Node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
+    Seq(AXI4MasterParameters(
+      name = "dma",
+      id = IdRange(0, 1 << idBits)
+    ))
+  )))
+  val axi2tlParams = p(AXI2TLParamKey)
+  val AXItoTL = LazyModule(new AXItoTL)
+  l2xbar :=
+    TLFIFOFixer() :=
+    TLWidthWidget(32) :=
+    TLBuffer() :=
+    AXItoTL.node :=
+    AXI4Buffer() :=
+    AXI4UserYanker(Some(16)) :=
+    AXI4Fragmenter() :=
+    AXI4Buffer() :=
+    AXI4Buffer() :=
+    AXI4IdIndexer(4) :=
+    l3FrontendAXI4Node
+
+//  val dma_node = TLClientNode(Seq(TLMasterPortParameters.v2(
+//      Seq(TLMasterParameters.v1(
+//        name = "dma",
+//        sourceId = IdRange(0, 16),
+//        supportsProbe = TransferSizes.none
+//      )),
+//      channelBytes = TLChannelBeatBytes(cacheParams.blockBytes),
+//      minLatency = 1,
+//      echoFields = Nil,
+//    )))
+//  l2xbar := TLBuffer() := dma_node
 
   ram.node :=
     TLXbar() :=*
@@ -631,7 +655,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       case (node, i) =>
         node.makeIOs()(ValName(s"master_port_$i"))
     }
-    dma_node.makeIOs()(ValName("dma_port"))
+    l3FrontendAXI4Node.makeIOs()(ValName("dma_port"))
 
     val io = IO(new Bundle{
       val perfClean = Input(Bool())

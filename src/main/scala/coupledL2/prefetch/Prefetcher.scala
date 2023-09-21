@@ -183,11 +183,11 @@ class Prefetcher(implicit p: Parameters) extends PrefetchModule {
       io.hint2llc match{
       case Some(sender) =>
         println(s"${cacheParams.name} Prefetch Config: SPP + SPP cross-level refill")
-        pftQueue.io.enq.valid := pft.io.req.valid && (!pft.io.hint2llc)
+        pftQueue.io.enq.valid := pft.io.req.valid && (!pft.io.req.bits.hint2llc)
         pftQueue.io.enq.bits <> pft.io.req.bits
         pipe.io.in <> pftQueue.io.deq
         io.req <> pipe.io.out
-        sender.valid := pft.io.hint2llc
+        sender.valid := pft.io.req.bits.hint2llc
         sender.bits := pft.io.req.bits
       case _ =>
         println(s"${cacheParams.name} Prefetch Config: SPP")

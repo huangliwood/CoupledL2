@@ -7,7 +7,6 @@ import freechips.rocketchip.tilelink._
 import coupledL2._
 import coupledL2.HasCoupledL2Parameters
 import coupledL2.utils.XSPerfAccumulate
-import coupledL2.utils.ReplaceableQueueV2
 
 case class HyperPrefetchParams(
   fTableEntries: Int = 32,
@@ -52,54 +51,79 @@ class FilterV2(implicit p: Parameters) extends PrefetchBranchV2Module {
     val tag = UInt(fTagBits.W)
     val bitMap = Vec(64, Bool())
   }
+  val dupNums = 2
 
+  val req_dups = RegInit(VecInit(Seq.fill(dupNums)(0.U.asTypeOf(new PrefetchReq))))
+  val req_dups_valid =RegInit(VecInit(Seq.fill(dupNums)(false.B)))//WireInit(req_dups.map(_.valid).reduce(_ || _))
+  req_dups.foreach(_ := io.req.bits)
+  req_dups_valid.foreach( _ := io.req.valid)
+  val dupOffsetBits = log2Up(fTableEntries/dupNums)
+  val dupBits = log2Up(dupNums)
   val fTable = RegInit(VecInit(Seq.fill(fTableEntries)(0.U.asTypeOf(fTableEntry()))))
-  val q = Module(new ReplaceableQueueV2(UInt(fullAddressBits.W), fTableQueueEntries))
-  val oldAddr = io.req.bits.addr
-  val blkAddr = oldAddr(fullAddressBits - 1, offsetBits)
-  val pageAddr = oldAddr(fullAddressBits - 1, pageOffsetBits)
-  val blkOffset = oldAddr(pageOffsetBits - 1, offsetBits)
+  val q = Module(new Queue(UInt(fullAddressBits.W), fTableQueueEntries, flow = false, pipe = true))
 
-  //read fTable
-  val hit = Wire(Bool())
-  val readResult = Wire(fTableEntry())
-  readResult := fTable(idx(pageAddr))
-  hit := readResult.valid && tag(pageAddr) === readResult.tag
-  val hitForMap = hit && readResult.bitMap(blkOffset)
-  io.resp.valid := io.req.fire && (!hitForMap || io.from_bop)
-  io.resp.bits := io.req.bits
+  val hit = WireInit(VecInit.fill(dupNums)(false.B))
+  val readResult = WireInit(VecInit.fill(dupNums)(0.U.asTypeOf(fTableEntry())))
+  val hitForMap = WireInit(VecInit.fill(dupNums)(false.B))
 
-  io.hint2llc.valid := io.req.fire && !hitForMap && io.spp2llc
-  io.hint2llc.bits := io.req.bits
-  val wData = Wire(fTableEntry())
-  val newBitMap = readResult.bitMap.zipWithIndex.map{ case (b, i) => Mux(i.asUInt === blkOffset, true.B, false.B) }
-  
-  wData.valid := true.B
-  wData.tag := tag(pageAddr)
-  wData.bitMap := newBitMap
-  when(io.req.fire) {
-    when(hit) {
-      fTable(idx(pageAddr)).bitMap(blkOffset) := true.B
-    } .otherwise {
-      fTable(idx(pageAddr)) := wData
+  val req_dup_c = WireInit(0.U.asTypeOf(io.req.bits.cloneType))
+
+  for(i <- 0 until(dupNums)) {
+    when(req_dups(i).set(dupOffsetBits+dupBits-1,dupOffsetBits) === i.U(dupBits.W)) {
+      req_dup_c := req_dups(i)
+      val oldAddr = req_dups(i).addr
+      val pageAddr = oldAddr(fullAddressBits - 1, pageOffsetBits)
+      val blkOffset = oldAddr(pageOffsetBits - 1, offsetBits)
+
+      //read fTable
+      readResult(i) := fTable(idx(pageAddr))
+      hit(i) := readResult(i).valid && tag(pageAddr) === readResult(i).tag
+      hitForMap(i) := hit(i) && readResult(i).bitMap(blkOffset)
+
+      val wData = WireInit(0.U.asTypeOf(fTableEntry()))
+      val newBitMap = readResult(i).bitMap.zipWithIndex.map { case (b, i) => Mux(i.asUInt === blkOffset, true.B, false.B) }
+
+      wData.valid := true.B
+      wData.tag := tag(pageAddr)
+      wData.bitMap := newBitMap
+      when(req_dups_valid(i)) {
+        when(hit(i)) {
+          fTable(idx(pageAddr)).bitMap(blkOffset) := true.B
+        }.otherwise {
+          fTable(idx(pageAddr)) := wData
+        }
+      }
     }
   }
+  io.resp.valid := req_dups_valid.reduce(_||_) && (!hitForMap.asUInt.orR || io.from_bop)
+  io.resp.bits := req_dup_c
 
-  q.io.enq.valid := io.req.fire && !hitForMap && !io.spp2llc // if spp2llc , don't enq
-  q.io.enq.bits := io.req.bits.addr
-  q.io.deq.ready := q.io.full && q.io.enq.fire
+  io.hint2llc.valid := req_dups_valid.reduce(_||_) && io.spp2llc
+  io.hint2llc.bits := req_dup_c
+
+  q.io.enq.valid := req_dups_valid.reduce(_||_) && !hitForMap.asUInt.orR && !io.spp2llc // if spp2llc , don't enq
+  q.io.enq.bits := req_dup_c.addr
+
+  val isqFull = q.io.count === fTableQueueEntries.U
+  q.io.deq.ready := isqFull;dontTouch(q.io.deq.ready)
 
   val evictAddr = q.io.deq.bits
   val evictPageAddr = evictAddr(fullAddressBits - 1, pageOffsetBits)
   val evictBlkOffset = evictAddr(pageOffsetBits - 1, offsetBits)
   val evictBlkAddr = evictAddr(fullAddressBits - 1, offsetBits)
-  val readEvict = Wire(fTableEntry())
-  val hitEvict = Wire(Bool())
-  val conflict = io.req.fire && blkAddr === evictBlkAddr
-  readEvict := fTable(idx(evictPageAddr))
-  hitEvict := q.io.deq.fire && readEvict.valid && tag(evictPageAddr) === readEvict.tag && readEvict.bitMap(evictBlkOffset) && !conflict
-  when(hitEvict) {
-    fTable(idx(evictPageAddr)).bitMap(evictBlkOffset) := false.B
+  val readEvict = WireInit(VecInit.fill(dupNums)(0.U.asTypeOf(fTableEntry())))
+  val hitEvict =  WireInit(VecInit.fill(dupNums)(false.B))
+  for(i <- 0 until(dupNums)) {
+    when(req_dups(i).set(dupOffsetBits+dupBits-1,dupOffsetBits) === i.U(dupBits.W)) {
+      val oldAddr = req_dups(i).addr
+      val blkAddr = oldAddr(fullAddressBits - 1, offsetBits)
+      val conflict = req_dups_valid.reduce(_ || _) && blkAddr === evictBlkAddr
+      readEvict(i) := fTable(idx(evictPageAddr))
+      hitEvict(i) := q.io.deq.fire && readEvict(i).valid && tag(evictPageAddr) === readEvict(i).tag && readEvict(i).bitMap(evictBlkOffset) && !conflict
+      when(hitEvict(i)) {
+        fTable(idx(evictPageAddr)).bitMap(evictBlkOffset) := false.B
+      }
+    }
   }
 
   /*
@@ -145,25 +169,19 @@ class HyperPrefetcher()(implicit p: Parameters) extends PrefetchBranchV2Module {
         case L2ParamKey => p(L2ParamKey).copy(prefetch = Some(PrefetchReceiverParams()))
   })))
 
-  val q_sms = Module(new ReplaceableQueueV2(chiselTypeOf(sms.io.req.bits), pTableQueueEntries))
+  val q_sms = Module(new Queue(chiselTypeOf(sms.io.req.bits), pTableQueueEntries, flow = false, pipe = false))
   q_sms.io.enq <> sms.io.req
   q_sms.io.deq.ready := !bop.io.req.valid
-  val sms_req = q_sms.io.deq.bits
 
-  val q_spp = Module(new ReplaceableQueueV2(chiselTypeOf(spp.io.req.bits), pTableQueueEntries))
-  val q_spp_hint2llc = Module(new ReplaceableQueueV2(Bool(), pTableQueueEntries))
+  val q_spp = Module(new Queue(chiselTypeOf(spp.io.req.bits), pTableQueueEntries, flow = false, pipe = false))
+
   q_spp.io.enq <> spp.io.req
   q_spp.io.deq.ready := !q_sms.io.deq.fire && !bop.io.req.valid
-  q_spp_hint2llc.io.enq.valid := spp.io.req.valid
-  q_spp_hint2llc.io.enq.bits := spp.io.hint2llc
-  q_spp_hint2llc.io.deq.ready := !q_sms.io.deq.fire && !bop.io.req.valid
-  val spp_req = q_spp.io.deq.bits
-  val spp_hint2llc = q_spp_hint2llc.io.deq.bits
 
   spp.io.train.valid := io.train.valid
   spp.io.train.bits := io.train.bits
 
-  val train_for_bop = Reg(new PrefetchTrain)
+  val train_for_bop = RegInit(0.U.asTypeOf(new PrefetchTrain))
   val train_for_bop_valid = RegInit(false.B)
   
   when(io.train.valid && !bop.io.train.ready) {
@@ -190,14 +208,25 @@ class HyperPrefetcher()(implicit p: Parameters) extends PrefetchBranchV2Module {
   sms.io.resp := DontCare
   sms.io.train := DontCare
 
-  fTable.io.req.valid := q_spp.io.deq.fire || q_sms.io.deq.fire || bop.io.req.valid
-  fTable.io.req.bits := Mux(bop.io.req.valid, bop.io.req.bits, 
-                          Mux(q_sms.io.deq.fire, sms_req, spp_req))
-  fTable.io.spp2llc := Mux(bop.io.req.valid, false.B, 
-                          Mux(q_sms.io.deq.fire, false.B, spp_hint2llc)) 
+  when(bop.io.req.valid) {
+    fTable.io.req <> bop.io.req
+    fTable.io.spp2llc := false.B
+  }.elsewhen(q_sms.io.deq.valid) {
+    fTable.io.req <> q_sms.io.deq
+    fTable.io.spp2llc := false.B
+  }.otherwise {
+    q_spp.io.deq.ready := fTable.io.req.ready
+    fTable.io.req.valid := q_spp.io.deq.valid
+    fTable.io.req.bits.tag := q_spp.io.deq.bits.tag
+    fTable.io.req.bits.set := q_spp.io.deq.bits.set
+    fTable.io.req.bits.isBOP := q_spp.io.deq.bits.isBOP
+    fTable.io.req.bits.source := q_spp.io.deq.bits.source
+    fTable.io.req.bits.needT := q_spp.io.deq.bits.needT
+    fTable.io.spp2llc := q_spp.io.deq.bits.hint2llc
+  }
+
   io.req <> fTable.io.resp
-  io.hint2llc := fTable.io.hint2llc
-  dontTouch(io.hint2llc)
+  io.hint2llc := fTable.io.hint2llc;dontTouch(io.hint2llc)
   fTable.io.evict.valid := io.evict.valid
   fTable.io.evict.bits := io.evict.bits
   io.evict.ready := fTable.io.evict.ready
