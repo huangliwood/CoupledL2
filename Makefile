@@ -4,6 +4,7 @@ init:
 
 compile:
 	mill -i CoupledL2.compile
+	mill -i CoupledL2.test.compile
 
 test-top-l2:
 	mill -i CoupledL2.test.runMain coupledL2.TestTop_L2 -td build

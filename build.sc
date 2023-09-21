@@ -119,7 +119,7 @@ object huancun extends SbtModule with ScalafmtModule with CommonModule {
 object axi2tl extends SbtModule with ScalafmtModule with CommonModule {
   override def millSourcePath = os.pwd / "AXItoTL"
   override def moduleDeps = super.moduleDeps ++ Seq(
-    rocketchip, utility, xsutils
+    rocketchip, xsutils
   )
 }
 
