@@ -13,7 +13,8 @@ import freechips.rocketchip.amba.axi4._
 import coupledL3._
 import chisel3.util.experimental.BoringUtils
 import scala.collection.mutable.ArrayBuffer
-import coupledL3.utils.GTimer
+import xs.utils.GTimer
+import xs.utils.perf.{DebugOptions,DebugOptionsKey}
 import huancun.{HuanCun, HCCacheParameters, HCCacheParamsKey, CacheParameters}
 
 class TestTop_L2()(implicit p: Parameters) extends LazyModule {
@@ -803,6 +804,7 @@ object TestTop_L2 extends App {
       clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
       echoField = Seq(DirtyField())
     )
+    case DebugOptionsKey => DebugOptions()
   })
   val top = DisableMonitors(p => LazyModule(new TestTop_L2()(p)) )(config)
 
@@ -823,6 +825,7 @@ object TestTop_L2_Standalone extends App {
       echoField = Seq(DirtyField()),
       enablePerf = false
     )
+    case DebugOptionsKey => DebugOptions()
   })
   val top = DisableMonitors(p => LazyModule(new TestTop_L2_Standalone()(p)) )(config)
 
@@ -845,6 +848,7 @@ object TestTop_L2L3 extends App {
     case HCCacheParamsKey => HCCacheParameters(
       echoField = Seq(DirtyField())
     )
+    case DebugOptionsKey => DebugOptions()
   })
   val top = DisableMonitors(p => LazyModule(new TestTop_L2L3()(p)) )(config)
 
@@ -904,6 +908,7 @@ object TestTop_fullSys extends App {
     case HCCacheParamsKey => HCCacheParameters(
       echoField = Seq(DirtyField())
     )
+    case DebugOptionsKey => DebugOptions()
   })
   val top = DisableMonitors(p => LazyModule(new TestTop_fullSys()(p)))(config)
 
@@ -926,6 +931,7 @@ object TestTop_fullSys_1 extends App {
     case HCCacheParamsKey => HCCacheParameters(
       echoField = Seq(DirtyField())
     )
+    case DebugOptionsKey => DebugOptions()
   })
   val top = DisableMonitors(p => LazyModule(new TestTop_fullSys_1()(p)))(config)
 
@@ -1029,6 +1035,7 @@ object TestTop_l2_for_sysn extends App {
     case HCCacheParamsKey => HCCacheParameters(
       echoField = Seq(DirtyField())
     )
+    case DebugOptionsKey => DebugOptions()
   })
   val top = DisableMonitors(p => LazyModule(new TestTop_l2_for_sysn()(p)))(config)
 

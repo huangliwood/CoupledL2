@@ -24,7 +24,7 @@ import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import coupledL2.prefetch.PrefetchResp
-import coupledL2.utils.{XSPerfAccumulate, XSPerfHistogram, XSPerfMax}
+import xs.utils.perf.HasPerfLogging
 
 // record info of those with Grant sent, yet GrantAck not received
 // used to block Probe upwards
@@ -45,7 +45,7 @@ class TaskWithData(implicit p: Parameters) extends L2Bundle {
 // 2. Send response to Prefetcher
 // 3. Block MainPipe enterance when there is not enough space
 // 4. Generate Hint signal for L1 early wake-up
-class GrantBuffer(implicit p: Parameters) extends L2Module {
+class GrantBuffer(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val io = IO(new Bundle() {
     // receive task from MainPipe
     val d_task = Flipped(DecoupledIO(new TaskWithData()))
@@ -283,8 +283,8 @@ class GrantBuffer(implicit p: Parameters) extends L2Module {
         assert(t < 10000.U, "Inflight Grant Leak")
 
         val enable = RegNext(e.valid) && !e.valid
-        XSPerfHistogram(cacheParams, "grant_grantack_period", t, enable, 0, 12, 1)
-        XSPerfMax(cacheParams, "max_grant_grantack_period", t, enable)
+        XSPerfHistogram("grant_grantack_period", t, enable, 0, 12, 1)
+        XSPerfMax("max_grant_grantack_period", t, enable)
     }
   }
 }

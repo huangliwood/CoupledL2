@@ -27,8 +27,9 @@ import coupledL2.utils._
 import coupledL2.debug._
 import coupledL2.prefetch.PrefetchIO
 import xs.utils.RegNextN
+import xs.utils.perf.HasPerfLogging
 
-class Slice()(implicit p: Parameters) extends L2Module {
+class Slice()(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val io = IO(new Bundle {
     val in = Flipped(TLBundle(edgeIn.bundle))
     val out = TLBundle(edgeOut.bundle)
@@ -193,10 +194,10 @@ class Slice()(implicit p: Parameters) extends L2Module {
     val delay = timer - a_begin_times(d_source)
     val (first, _, _, _) = edgeIn.count(grantBuf.io.d)
     val delay_sample = grantBuf.io.d.fire && grantBuf.io.d.bits.opcode =/= ReleaseAck && first
-    XSPerfHistogram(cacheParams, "a_to_d_delay", delay, delay_sample, 0, 20, 1, true, true)
-    XSPerfHistogram(cacheParams, "a_to_d_delay", delay, delay_sample, 20, 300, 10, true, true)
-    XSPerfHistogram(cacheParams, "a_to_d_delay", delay, delay_sample, 300, 500, 20, true, true)
-    XSPerfHistogram(cacheParams, "a_to_d_delay", delay, delay_sample, 500, 1000, 100, true, false)
+    XSPerfHistogram("a_to_d_delay", delay, delay_sample, 0, 20, 1, true, true)
+    XSPerfHistogram("a_to_d_delay", delay, delay_sample, 20, 300, 10, true, true)
+    XSPerfHistogram("a_to_d_delay", delay, delay_sample, 300, 500, 20, true, true)
+    XSPerfHistogram("a_to_d_delay", delay, delay_sample, 500, 1000, 100, true, false)
   }
 
   if (cacheParams.enableMonitor) {

@@ -23,6 +23,7 @@ import xs.utils._
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink.TLMessages._
 import coupledL2.utils._
+import xs.utils.perf.HasPerfLogging
 
 class CustomL1HintIOBundle(implicit p: Parameters) extends L2Bundle {
   // input information
@@ -53,7 +54,7 @@ class CustomL1HintIOBundle(implicit p: Parameters) extends L2Bundle {
 
 // grantData hint interface
 // use this interface to give a hint to l1 before actually sending a GrantData
-class CustomL1Hint(implicit p: Parameters) extends L2Module {
+class CustomL1Hint(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val io = IO(new CustomL1HintIOBundle)
 
   val task_s1 = io.s1
@@ -211,12 +212,12 @@ class CustomL1Hint(implicit p: Parameters) extends L2Module {
   // TODO: open this assert when hint is really correct for all situations
   // assert(PopCount(VecInit(hint_valid)) <= 1.U)
 
-  XSPerfAccumulate(cacheParams, "hint_grantBufferHint_valid", grantBufferHint.valid)
-  XSPerfAccumulate(cacheParams, "hint_s1_valid", hint_s1.valid)
-  XSPerfAccumulate(cacheParams, "hint_s2_valid", hint_s2.valid)
-  XSPerfAccumulate(cacheParams, "hint_s3_valid", hint_s3.valid)
-  XSPerfAccumulate(cacheParams, "hint_s4_valid", hint_s4.valid)
-  XSPerfAccumulate(cacheParams, "hint_s5_valid", hint_s5.valid)
-  XSPerfAccumulate(cacheParams, "incorrect_hint", PopCount(VecInit(hint_valid)) > 1.U)
+  XSPerfAccumulate("hint_grantBufferHint_valid", grantBufferHint.valid)
+  XSPerfAccumulate("hint_s1_valid", hint_s1.valid)
+  XSPerfAccumulate("hint_s2_valid", hint_s2.valid)
+  XSPerfAccumulate("hint_s3_valid", hint_s3.valid)
+  XSPerfAccumulate("hint_s4_valid", hint_s4.valid)
+  XSPerfAccumulate("hint_s5_valid", hint_s5.valid)
+  XSPerfAccumulate("incorrect_hint", PopCount(VecInit(hint_valid)) > 1.U)
 
 }

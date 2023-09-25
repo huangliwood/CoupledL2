@@ -22,7 +22,7 @@ import chisel3.util._
 import xs.utils._
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink._
-import coupledL3.utils.XSPerfAccumulate
+import xs.utils.perf.HasPerfLogging
 
 // // wbq receive reqs from MainPipe unconditionally, and send them out through channel C
 // // NOTICE: channel C may be unable to receive
@@ -102,7 +102,7 @@ import coupledL3.utils.XSPerfAccumulate
 //   io.c.bits  := wb_bits_s0_reg
 // }
 
-class SourceC(implicit p: Parameters) extends L3Module {
+class SourceC(implicit p: Parameters) extends L3Module with HasPerfLogging{
   val io = IO(new Bundle() {
     val in = Flipped(DecoupledIO(new Bundle() {
       val task = new TaskBundle()
@@ -194,5 +194,5 @@ class SourceC(implicit p: Parameters) extends L3Module {
   io.resp.tag := parseFullAddress(io.out.bits.address)._1
   io.resp.respInfo := DontCare
 
-  XSPerfAccumulate(cacheParams, "sourceC_full", full)
+  XSPerfAccumulate( "sourceC_full", full)
 }

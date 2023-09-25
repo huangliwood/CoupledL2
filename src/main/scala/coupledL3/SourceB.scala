@@ -24,6 +24,7 @@ import coupledL3.utils._
 import freechips.rocketchip.tilelink._
 import org.chipsalliance.cde.config.Parameters
 import xs.utils._
+import xs.utils.perf.HasPerfLogging
 
 class GrantStatus(implicit p: Parameters) extends L3Bundle {
   val valid  = Bool()
@@ -40,7 +41,7 @@ class ProbeEntry(implicit p: Parameters) extends L3Bundle {
 
 // send B reqs to upper level cache
 // Attention! We stall Probes if there is same-addr Grant not received GrantAck
-class SourceB(implicit p: Parameters) extends L3Module {
+class SourceB(implicit p: Parameters) extends L3Module with HasPerfLogging{
   val io = IO(new Bundle() {
     val sourceB = DecoupledIO(new TLBundleB(edgeIn.bundle))
     val task = Flipped(DecoupledIO(new SourceBReq))
@@ -163,6 +164,6 @@ class SourceB(implicit p: Parameters) extends L3Module {
   // --------------------------------------------------------------------------
   for(i <- 0 until entries){
     val update = PopCount(probes.map(_.valid)) === i.U
-    XSPerfAccumulate(cacheParams, s"probe_buffer_util_$i", update)
+    XSPerfAccumulate( s"probe_buffer_util_$i", update)
   }
 }

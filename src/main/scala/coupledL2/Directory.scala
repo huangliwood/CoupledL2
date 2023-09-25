@@ -24,6 +24,7 @@ import coupledL2.utils._
 import xs.utils.{ParallelPriorityMux, RegNextN}
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink.TLMessages._
+import xs.utils.perf.HasPerfLogging
 import xs.utils.sram.SRAMTemplate
 
 class MetaEntry(implicit p: Parameters) extends L2Bundle {
@@ -100,7 +101,7 @@ class TagWrite(implicit p: Parameters) extends L2Bundle {
   val wtag = UInt(tagBits.W)
 }
 
-class Directory(implicit p: Parameters) extends L2Module {
+class Directory(implicit p: Parameters) extends L2Module with HasPerfLogging{
 
   val io = IO(new Bundle() {
     val read = Flipped(DecoupledIO(new DirRead))
@@ -325,6 +326,6 @@ class Directory(implicit p: Parameters) extends L2Module {
     resetIdx := resetIdx - 1.U
   }
 
-  XSPerfAccumulate(cacheParams, "dirRead_cnt", io.read.fire)
-  XSPerfAccumulate(cacheParams, "choose_busy_way", reqValid_s3 && !req_s3.wayMask(chosenWay))
+  XSPerfAccumulate("dirRead_cnt", io.read.fire)
+  XSPerfAccumulate("choose_busy_way", reqValid_s3 && !req_s3.wayMask(chosenWay))
 }

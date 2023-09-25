@@ -31,8 +31,9 @@ import coupledL3.debug._
 import coupledL3.prefetch.PrefetchTrain
 import chisel3.util.experimental.BoringUtils
 import coupledL3.noninclusive.ClientDirResult
+import xs.utils.perf.HasPerfLogging
 
-class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasClientInfo {
+class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasClientInfo with HasPerfLogging{
   val io = IO(new Bundle() {
     /* receive task from arbiter at stage 2 */
     val taskFromArb_s2 = Flipped(DecoupledIO(new TaskBundle()))
@@ -1056,47 +1057,47 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   //  Performance counters
   // --------------------------------------------------------------------------
   // num of mshr req
-  XSPerfAccumulate(cacheParams, "mshr_grant_req", task_s3.valid && mshr_grant_s3)
-  XSPerfAccumulate(cacheParams, "mshr_grantdata_req", task_s3.valid && mshr_grantdata_s3)
-  XSPerfAccumulate(cacheParams, "mshr_accessackdata_req", task_s3.valid && mshr_accessackdata_s3)
-  XSPerfAccumulate(cacheParams, "mshr_accessack_req", task_s3.valid && mshr_accessack_s3)
-  XSPerfAccumulate(cacheParams, "mshr_probeack_req", task_s3.valid && mshr_probeack_s3)
-  XSPerfAccumulate(cacheParams, "mshr_probeackdata_req", task_s3.valid && mshr_probeackdata_s3)
-  XSPerfAccumulate(cacheParams, "mshr_release_req", task_s3.valid && mshr_release_s3)
+  XSPerfAccumulate( "mshr_grant_req", task_s3.valid && mshr_grant_s3)
+  XSPerfAccumulate( "mshr_grantdata_req", task_s3.valid && mshr_grantdata_s3)
+  XSPerfAccumulate( "mshr_accessackdata_req", task_s3.valid && mshr_accessackdata_s3)
+  XSPerfAccumulate( "mshr_accessack_req", task_s3.valid && mshr_accessack_s3)
+  XSPerfAccumulate( "mshr_probeack_req", task_s3.valid && mshr_probeack_s3)
+  XSPerfAccumulate( "mshr_probeackdata_req", task_s3.valid && mshr_probeackdata_s3)
+  XSPerfAccumulate( "mshr_release_req", task_s3.valid && mshr_release_s3)
 
   // directory access result
   val hit_s3 = task_s3.valid && !mshr_req_s3 && dirResult_s3.hit && s3_fire
   val miss_s3 = task_s3.valid && !mshr_req_s3 && !dirResult_s3.hit && s3_fire
-  XSPerfAccumulate(cacheParams, cacheParams.name+"_a_req_hit", hit_s3 && req_s3.fromA)
-  XSPerfAccumulate(cacheParams, cacheParams.name+"_acquire_hit", hit_s3 && req_s3.fromA &&
+  XSPerfAccumulate( cacheParams.name+"_a_req_hit", hit_s3 && req_s3.fromA)
+  XSPerfAccumulate( cacheParams.name+"_acquire_hit", hit_s3 && req_s3.fromA &&
     (req_s3.opcode === AcquireBlock || req_s3.opcode === AcquirePerm))
-  XSPerfAccumulate(cacheParams, cacheParams.name+"_get_hit", hit_s3 && req_s3.fromA && req_s3.opcode === Get)
+  XSPerfAccumulate( cacheParams.name+"_get_hit", hit_s3 && req_s3.fromA && req_s3.opcode === Get)
 
-  XSPerfAccumulate(cacheParams, cacheParams.name+"_a_req_miss", miss_s3 && req_s3.fromA)
-  XSPerfAccumulate(cacheParams, cacheParams.name+"_acquire_miss", miss_s3 && req_s3.fromA &&
+  XSPerfAccumulate( cacheParams.name+"_a_req_miss", miss_s3 && req_s3.fromA)
+  XSPerfAccumulate( cacheParams.name+"_acquire_miss", miss_s3 && req_s3.fromA &&
     (req_s3.opcode === AcquireBlock || req_s3.opcode === AcquirePerm))
-  XSPerfAccumulate(cacheParams, cacheParams.name+"_get_miss", miss_s3 && req_s3.fromA && req_s3.opcode === Get)
+  XSPerfAccumulate( cacheParams.name+"_get_miss", miss_s3 && req_s3.fromA && req_s3.opcode === Get)
 
-  XSPerfAccumulate(cacheParams, cacheParams.name+"_c_req_miss", miss_s3 && req_s3.fromC)
-  XSPerfAccumulate(cacheParams, cacheParams.name+"_c_req_hit", hit_s3 && req_s3.fromC)
+  XSPerfAccumulate( cacheParams.name+"_c_req_miss", miss_s3 && req_s3.fromC)
+  XSPerfAccumulate( cacheParams.name+"_c_req_hit", hit_s3 && req_s3.fromC)
 
-  XSPerfAccumulate(cacheParams, cacheParams.name+"_a_req_need_replacement",
+  XSPerfAccumulate( cacheParams.name+"_a_req_need_replacement",
     io.toMSHRCtl.mshr_alloc_s3.valid && a_need_replacement && req_s3.fromA)
-  XSPerfAccumulate(cacheParams, cacheParams.name+"_c_req_need_replacement",
+  XSPerfAccumulate( cacheParams.name+"_c_req_need_replacement",
     io.toMSHRCtl.mshr_alloc_s3.valid && c_need_replacement && req_s3.fromC)
 
-  XSPerfAccumulate(cacheParams, cacheParams.name+"_b_req_hit", hit_s3 && req_s3.fromB)
-  XSPerfAccumulate(cacheParams, cacheParams.name+"_b_req_miss", miss_s3 && req_s3.fromB)
+  XSPerfAccumulate( cacheParams.name+"_b_req_hit", hit_s3 && req_s3.fromB)
+  XSPerfAccumulate( cacheParams.name+"_b_req_miss", miss_s3 && req_s3.fromB)
 
-  XSPerfHistogram(cacheParams, cacheParams.name+"_a_req_access_way", perfCnt = dirResult_s3.way,
+  XSPerfHistogram( cacheParams.name+"_a_req_access_way", perfCnt = dirResult_s3.way,
     enable = task_s3.valid && !mshr_req_s3 && req_s3.fromA && !req_put_s3, start = 0, stop = cacheParams.ways, step = 1)
-  XSPerfHistogram(cacheParams, cacheParams.name+"_a_req_hit_way", perfCnt = dirResult_s3.way,
+  XSPerfHistogram( cacheParams.name+"_a_req_hit_way", perfCnt = dirResult_s3.way,
     enable = hit_s3 && req_s3.fromA && !req_put_s3, start = 0, stop = cacheParams.ways, step = 1)
-  XSPerfHistogram(cacheParams, cacheParams.name+"_a_req_miss_way_choice", perfCnt = dirResult_s3.way,
+  XSPerfHistogram( cacheParams.name+"_a_req_miss_way_choice", perfCnt = dirResult_s3.way,
     enable = miss_s3 && req_s3.fromA && !req_put_s3, start = 0, stop = cacheParams.ways, step = 1)
 
   for(i <- 0 until cacheParams.sets) {
-    XSPerfHistogram(cacheParams, cacheParams.name + "_a_req_miss_way_choice_set_" + i, perfCnt = dirResult_s3.way,
+    XSPerfHistogram( cacheParams.name + "_a_req_miss_way_choice_set_" + i, perfCnt = dirResult_s3.way,
       enable = miss_s3 && req_s3.fromA && !req_put_s3 && dirResult_s3.set === i.asUInt, start = 0, stop = cacheParams.ways, step = 1)
   }
 
@@ -1111,8 +1112,8 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
     d_s4.fire -> 4.U,
     d_s3.fire -> 3.U
   ))
-  XSPerfHistogram(cacheParams, "sourceC_pipeline_stages", sourceC_pipe_len,
+  XSPerfHistogram( "sourceC_pipeline_stages", sourceC_pipe_len,
     enable = io.toSourceC.fire, start = 3, stop = 5+1, step = 1)
-  XSPerfHistogram(cacheParams, "sourceD_pipeline_stages", sourceD_pipe_len,
+  XSPerfHistogram( "sourceD_pipeline_stages", sourceD_pipe_len,
     enable = io.toSourceD.fire, start = 3, stop = 5+1, step = 1)
 }

@@ -27,9 +27,10 @@ import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink.TLPermissions._
 import coupledL2.utils._
 import coupledL2.debug._
-import coupledL2.prefetch.{PrefetchTrain, HyperPrefetchParams, PrefetchEvict, AccessState}
+import coupledL2.prefetch.{AccessState, HyperPrefetchParams, PrefetchEvict, PrefetchTrain}
+import xs.utils.perf.HasPerfLogging
 
-class MainPipe(implicit p: Parameters) extends L2Module {
+class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val io = IO(new Bundle() {
     /* receive task from arbiter at stage 2 */
     val taskFromArb_s2 = Flipped(ValidIO(new TaskBundle()))
@@ -662,44 +663,44 @@ class MainPipe(implicit p: Parameters) extends L2Module {
 
   /* ===== Performance counters ===== */
   // num of mshr req
-  XSPerfAccumulate(cacheParams, "mshr_grant_req", task_s3.valid && mshr_grant_s3 && !retry)
-  XSPerfAccumulate(cacheParams, "mshr_grantdata_req", task_s3.valid && mshr_grantdata_s3 && !retry)
-  XSPerfAccumulate(cacheParams, "mshr_accessackdata_req", task_s3.valid && mshr_accessackdata_s3 && !retry)
-  XSPerfAccumulate(cacheParams, "mshr_hintack_req", task_s3.valid && mshr_hintack_s3 && !retry)
-  XSPerfAccumulate(cacheParams, "mshr_probeack_req", task_s3.valid && mshr_probeack_s3)
-  XSPerfAccumulate(cacheParams, "mshr_probeackdata_req", task_s3.valid && mshr_probeackdata_s3)
-  XSPerfAccumulate(cacheParams, "mshr_release_req", task_s3.valid && mshr_release_s3)
+  XSPerfAccumulate("mshr_grant_req", task_s3.valid && mshr_grant_s3 && !retry)
+  XSPerfAccumulate("mshr_grantdata_req", task_s3.valid && mshr_grantdata_s3 && !retry)
+  XSPerfAccumulate("mshr_accessackdata_req", task_s3.valid && mshr_accessackdata_s3 && !retry)
+  XSPerfAccumulate("mshr_hintack_req", task_s3.valid && mshr_hintack_s3 && !retry)
+  XSPerfAccumulate("mshr_probeack_req", task_s3.valid && mshr_probeack_s3)
+  XSPerfAccumulate("mshr_probeackdata_req", task_s3.valid && mshr_probeackdata_s3)
+  XSPerfAccumulate("mshr_release_req", task_s3.valid && mshr_release_s3)
 
   // directory access result
   val hit_s3 = task_s3.valid && !mshr_req_s3 && dirResult_s3.hit
   val miss_s3 = task_s3.valid && !mshr_req_s3 && !dirResult_s3.hit
-  XSPerfAccumulate(cacheParams, cacheParams.name+"_a_req_hit", hit_s3 && req_s3.fromA)
-  XSPerfAccumulate(cacheParams, cacheParams.name+"_acquire_hit", hit_s3 && req_s3.fromA &&
+  XSPerfAccumulate(cacheParams.name+"_a_req_hit", hit_s3 && req_s3.fromA)
+  XSPerfAccumulate(cacheParams.name+"_acquire_hit", hit_s3 && req_s3.fromA &&
     (req_s3.opcode === AcquireBlock || req_s3.opcode === AcquirePerm))
-  XSPerfAccumulate(cacheParams, cacheParams.name+"_get_hit", hit_s3 && req_s3.fromA && req_s3.opcode === Get)
-  XSPerfAccumulate(cacheParams, cacheParams.name+"_retry", mshr_refill_s3 && retry)
+  XSPerfAccumulate(cacheParams.name+"_get_hit", hit_s3 && req_s3.fromA && req_s3.opcode === Get)
+  XSPerfAccumulate(cacheParams.name+"_retry", mshr_refill_s3 && retry)
 
-  XSPerfAccumulate(cacheParams, cacheParams.name+"_a_req_miss", miss_s3 && req_s3.fromA)
-  XSPerfAccumulate(cacheParams, cacheParams.name+"_acquire_miss", miss_s3 && req_s3.fromA &&
+  XSPerfAccumulate(cacheParams.name+"_a_req_miss", miss_s3 && req_s3.fromA)
+  XSPerfAccumulate(cacheParams.name+"_acquire_miss", miss_s3 && req_s3.fromA &&
     (req_s3.opcode === AcquireBlock || req_s3.opcode === AcquirePerm))
-  XSPerfAccumulate(cacheParams, cacheParams.name+"_get_miss", miss_s3 && req_s3.fromA && req_s3.opcode === Get)
+  XSPerfAccumulate(cacheParams.name+"_get_miss", miss_s3 && req_s3.fromA && req_s3.opcode === Get)
 
-  XSPerfAccumulate(cacheParams, cacheParams.name + "_c_req_miss", miss_s3 && req_s3.fromC)
-  XSPerfAccumulate(cacheParams, cacheParams.name + "_c_req_hit", hit_s3 && req_s3.fromC)
+  XSPerfAccumulate(cacheParams.name + "_c_req_miss", miss_s3 && req_s3.fromC)
+  XSPerfAccumulate(cacheParams.name + "_c_req_hit", hit_s3 && req_s3.fromC)
 
-  XSPerfAccumulate(cacheParams, cacheParams.name + "_a_req_need_replacement",
+  XSPerfAccumulate(cacheParams.name + "_a_req_need_replacement",
     task_s3.valid && req_s3.mshrTask && a_need_replacement)
-  XSPerfAccumulate(cacheParams, cacheParams.name + "_c_req_need_replacement",
+  XSPerfAccumulate(cacheParams.name + "_c_req_need_replacement",
     false.B)
 
-  XSPerfAccumulate(cacheParams, cacheParams.name+"_b_req_hit", hit_s3 && req_s3.fromB)
-  XSPerfAccumulate(cacheParams, cacheParams.name+"_b_req_miss", miss_s3 && req_s3.fromB)
+  XSPerfAccumulate(cacheParams.name+"_b_req_hit", hit_s3 && req_s3.fromB)
+  XSPerfAccumulate(cacheParams.name+"_b_req_miss", miss_s3 && req_s3.fromB)
 
-  XSPerfHistogram(cacheParams, cacheParams.name+"_a_req_access_way", perfCnt = dirResult_s3.way,
+  XSPerfHistogram(cacheParams.name+"_a_req_access_way", perfCnt = dirResult_s3.way,
     enable = task_s3.valid && !mshr_req_s3 && req_s3.fromA, start = 0, stop = cacheParams.ways, step = 1)
-  XSPerfHistogram(cacheParams, cacheParams.name+"_a_req_hit_way", perfCnt = dirResult_s3.way,
+  XSPerfHistogram(cacheParams.name+"_a_req_hit_way", perfCnt = dirResult_s3.way,
     enable = hit_s3 && req_s3.fromA, start = 0, stop = cacheParams.ways, step = 1)
-  XSPerfHistogram(cacheParams, cacheParams.name+"_a_req_miss_way_choice", perfCnt = dirResult_s3.way,
+  XSPerfHistogram(cacheParams.name+"_a_req_miss_way_choice", perfCnt = dirResult_s3.way,
     enable = miss_s3 && req_s3.fromA, start = 0, stop = cacheParams.ways, step = 1)
 
   // pipeline stages for sourceC and sourceD reqs
@@ -713,26 +714,26 @@ class MainPipe(implicit p: Parameters) extends L2Module {
     d_s4.fire -> 4.U,
     d_s3.fire -> 3.U
   ))
-  XSPerfHistogram(cacheParams, "sourceC_pipeline_stages", sourceC_pipe_len,
+  XSPerfHistogram("sourceC_pipeline_stages", sourceC_pipe_len,
     enable = io.toSourceC.fire, start = 3, stop = 5+1, step = 1)
-  XSPerfHistogram(cacheParams, "sourceD_pipeline_stages", sourceD_pipe_len,
+  XSPerfHistogram("sourceD_pipeline_stages", sourceD_pipe_len,
     enable = io.toSourceD.fire, start = 3, stop = 5+1, step = 1)
 
-  // XSPerfAccumulate(cacheParams, "a_req_tigger_prefetch", io.prefetchTrain.)
+  // XSPerfAccumulate("a_req_tigger_prefetch", io.prefetchTrain.)
   prefetchOpt.foreach {
     _ =>
-      XSPerfAccumulate(cacheParams, "a_req_trigger_prefetch", io.prefetchTrain.get.fire)
-      XSPerfAccumulate(cacheParams, "a_req_trigger_prefetch_not_ready", io.prefetchTrain.get.valid && !io.prefetchTrain.get.ready)
-      XSPerfAccumulate(cacheParams, "acquire_trigger_prefetch_on_miss", io.prefetchTrain.get.fire && req_acquire_s3 && !dirResult_s3.hit)
-      XSPerfAccumulate(cacheParams, "acquire_trigger_prefetch_on_hit_pft", io.prefetchTrain.get.fire && req_acquire_s3 && dirResult_s3.hit && meta_s3.prefetch.get)
-      XSPerfAccumulate(cacheParams, "release_all", mshr_release_s3)
-      XSPerfAccumulate(cacheParams, "release_prefetch_accessed", mshr_release_s3 && meta_s3.prefetch.get && meta_s3.accessed)
-      XSPerfAccumulate(cacheParams, "release_prefetch_not_accessed", mshr_release_s3 && meta_s3.prefetch.get && !meta_s3.accessed)
-      XSPerfAccumulate(cacheParams, "get_trigger_prefetch_on_miss", io.prefetchTrain.get.fire && req_get_s3 && !dirResult_s3.hit)
-      XSPerfAccumulate(cacheParams, "get_trigger_prefetch_on_hit_pft", io.prefetchTrain.get.fire && req_get_s3 && dirResult_s3.hit && meta_s3.prefetch.get)
+      XSPerfAccumulate("a_req_trigger_prefetch", io.prefetchTrain.get.fire)
+      XSPerfAccumulate("a_req_trigger_prefetch_not_ready", io.prefetchTrain.get.valid && !io.prefetchTrain.get.ready)
+      XSPerfAccumulate("acquire_trigger_prefetch_on_miss", io.prefetchTrain.get.fire && req_acquire_s3 && !dirResult_s3.hit)
+      XSPerfAccumulate("acquire_trigger_prefetch_on_hit_pft", io.prefetchTrain.get.fire && req_acquire_s3 && dirResult_s3.hit && meta_s3.prefetch.get)
+      XSPerfAccumulate("release_all", mshr_release_s3)
+      XSPerfAccumulate("release_prefetch_accessed", mshr_release_s3 && meta_s3.prefetch.get && meta_s3.accessed)
+      XSPerfAccumulate("release_prefetch_not_accessed", mshr_release_s3 && meta_s3.prefetch.get && !meta_s3.accessed)
+      XSPerfAccumulate("get_trigger_prefetch_on_miss", io.prefetchTrain.get.fire && req_get_s3 && !dirResult_s3.hit)
+      XSPerfAccumulate("get_trigger_prefetch_on_hit_pft", io.prefetchTrain.get.fire && req_get_s3 && dirResult_s3.hit && meta_s3.prefetch.get)
   }
 
-  XSPerfAccumulate(cacheParams, "early_prefetch", meta_s3.prefetch.getOrElse(false.B) && !meta_s3.accessed && !dirResult_s3.hit && task_s3.valid)
+  XSPerfAccumulate("early_prefetch", meta_s3.prefetch.getOrElse(false.B) && !meta_s3.accessed && !dirResult_s3.hit && task_s3.valid)
 
   /* ===== Monitor ===== */
   io.toMonitor.task_s2 := task_s2

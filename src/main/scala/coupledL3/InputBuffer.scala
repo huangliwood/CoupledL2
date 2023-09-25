@@ -6,8 +6,9 @@ import chisel3._
 import chisel3.util._
 import coupledL3.utils._
 import xs.utils._
+import xs.utils.perf.HasPerfLogging
 
-class InputBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Parameters) extends L3Module with noninclusive.HasClientInfo {
+class InputBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Parameters) extends L3Module with noninclusive.HasClientInfo with HasPerfLogging{
 
     val io = IO(new Bundle() {
       val in          = Flipped(DecoupledIO(new TaskBundle))
@@ -48,9 +49,9 @@ class InputBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Parameters
         assert(t < 10000.U, "ReqBuf Leak set:0x%x tag:0x%x addr:0x%x source:%d opcode:%d param:%d", e.bits.set, e.bits.set, Cat(e.bits.tag, e.bits.set, Fill(6, 0.U)), e.bits.sourceId, e.bits.opcode, e.bits.param)
 
         val enable = RegNext(e.valid) && !e.valid
-        XSPerfHistogram(cacheParams, "reqBuf_timer", t, enable, 0, 20, 1, right_strict = true)
-        XSPerfHistogram(cacheParams, "reqBuf_timer", t, enable, 20, 400, 20, left_strict = true)
-        XSPerfMax(cacheParams, "max_reqBuf_timer", t, enable)
+        XSPerfHistogram( "reqBuf_timer", t, enable, 0, 20, 1, right_strict = true)
+        XSPerfHistogram( "reqBuf_timer", t, enable, 20, 400, 20, left_strict = true)
+        XSPerfMax( "max_reqBuf_timer", t, enable)
     }
 
     

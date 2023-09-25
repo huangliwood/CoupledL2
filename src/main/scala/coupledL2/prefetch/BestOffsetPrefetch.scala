@@ -22,7 +22,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import coupledL2.HasCoupledL2Parameters
-import coupledL2.utils.XSPerfAccumulate
+import xs.utils.perf.HasPerfLogging
 
 case class BOPParameters(
   rrTableEntries: Int = 256,
@@ -176,7 +176,7 @@ class RecentRequestTable(implicit p: Parameters) extends BOPModule {
 
 }
 
-class OffsetScoreTable(implicit p: Parameters) extends BOPModule {
+class OffsetScoreTable(implicit p: Parameters) extends BOPModule with HasPerfLogging{
   val io = IO(new Bundle {
     val req = Flipped(DecoupledIO(UInt(fullAddressBits.W)))
     val prefetchOffset = Output(UInt(offsetWidth.W))
@@ -261,17 +261,17 @@ class OffsetScoreTable(implicit p: Parameters) extends BOPModule {
 
   for (off <- offsetList) {
     if (off < 0) {
-      XSPerfAccumulate(cacheParams, "best_offset_neg_" + (-off).toString + "_learning_phases",
+      XSPerfAccumulate("best_offset_neg_" + (-off).toString + "_learning_phases",
         Mux(state === s_idle, (bestOffset === off.S(offsetWidth.W).asUInt).asUInt, 0.U))
     } else {
-      XSPerfAccumulate(cacheParams, "best_offset_pos_" + off.toString + "_learning_phases",
+      XSPerfAccumulate("best_offset_pos_" + off.toString + "_learning_phases",
         Mux(state === s_idle, (bestOffset === off.U).asUInt, 0.U))
     }
   }
 
 }
 
-class BestOffsetPrefetch(implicit p: Parameters) extends BOPModule {
+class BestOffsetPrefetch(implicit p: Parameters) extends BOPModule with HasPerfLogging{
   val io = IO(new Bundle() {
     val train = Flipped(DecoupledIO(new PrefetchTrain))
     val req = DecoupledIO(new PrefetchReq)
@@ -315,13 +315,13 @@ class BestOffsetPrefetch(implicit p: Parameters) extends BOPModule {
 
   for (off <- offsetList) {
     if (off < 0) {
-      XSPerfAccumulate(cacheParams, "best_offset_neg_" + (-off).toString, prefetchOffset === off.S(offsetWidth.W).asUInt)
+      XSPerfAccumulate("best_offset_neg_" + (-off).toString, prefetchOffset === off.S(offsetWidth.W).asUInt)
     } else {
-      XSPerfAccumulate(cacheParams, "best_offset_pos_" + off.toString, prefetchOffset === off.U)
+      XSPerfAccumulate("best_offset_pos_" + off.toString, prefetchOffset === off.U)
     }
   }
-  XSPerfAccumulate(cacheParams, "bop_req", io.req.fire)
-  XSPerfAccumulate(cacheParams, "bop_train", io.train.fire)
-  XSPerfAccumulate(cacheParams, "bop_train_stall_for_st_not_ready", io.train.valid && !scoreTable.io.req.ready)
-  XSPerfAccumulate(cacheParams, "bop_cross_page", scoreTable.io.req.fire && crossPage)
+  XSPerfAccumulate("bop_req", io.req.fire)
+  XSPerfAccumulate("bop_train", io.train.fire)
+  XSPerfAccumulate("bop_train_stall_for_st_not_ready", io.train.valid && !scoreTable.io.req.ready)
+  XSPerfAccumulate("bop_cross_page", scoreTable.io.req.fire && crossPage)
 }

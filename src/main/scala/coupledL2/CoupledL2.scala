@@ -27,9 +27,8 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.util._
 import org.chipsalliance.cde.config.Parameters
-import scala.math.max
 import coupledL2.prefetch._
-import coupledL2.utils.XSPerfAccumulate
+import xs.utils.perf.HasPerfLogging
 
 trait HasCoupledL2Parameters {
   val p: Parameters
@@ -245,7 +244,7 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
     case _ => None //Spp not exist, can not use multl-level refill
   }
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) with HasPerfLogging{
     val banks = node.in.size
     val bankBits = if (banks == 1) 0 else log2Up(banks)
     val io = IO(new Bundle {
@@ -473,12 +472,12 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
       }
     }
 
-    XSPerfAccumulate(cacheParams, "hint_fire", io.l2_hint.valid)
+    XSPerfAccumulate("hint_fire", io.l2_hint.valid)
     val grant_fire = slices.map{ slice => {
                         val (_, _, grant_fire_last, _) = node.in.head._2.count(slice.io.in.d)
                         slice.io.in.d.fire && grant_fire_last && slice.io.in.d.bits.opcode === GrantData
                       }}
-    XSPerfAccumulate(cacheParams, "grant_data_fire", PopCount(VecInit(grant_fire)))
+    XSPerfAccumulate("grant_data_fire", PopCount(VecInit(grant_fire)))
   }
 
 }

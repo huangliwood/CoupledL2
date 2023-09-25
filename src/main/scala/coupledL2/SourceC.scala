@@ -22,7 +22,7 @@ import chisel3.util._
 import xs.utils._
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink._
-import coupledL2.utils.XSPerfAccumulate
+import xs.utils.perf.HasPerfLogging
 
 //class SourceC(implicit p: Parameters) extends L2Module {
 //  val io = IO(new Bundle() {
@@ -112,10 +112,10 @@ import coupledL2.utils.XSPerfAccumulate
 //  io.resp.tag := parseFullAddress(io.out.bits.address)._1
 //  io.resp.respInfo := 0.U.asTypeOf(new RespInfoBundle)
 //
-//  XSPerfAccumulate(cacheParams, "sourceC_full", full)
+//  XSPerfAccumulate("sourceC_full", full)
 //}
 
-class SourceC(implicit p: Parameters) extends L2Module {
+class SourceC(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val io = IO(new Bundle() {
     val in = Flipped(DecoupledIO(new Bundle() {
       val task = new TaskBundle()

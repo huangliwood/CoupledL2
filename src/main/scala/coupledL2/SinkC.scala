@@ -22,7 +22,7 @@ import chisel3.util._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import org.chipsalliance.cde.config.Parameters
-import coupledL2.utils.XSPerfAccumulate
+import xs.utils.perf.HasPerfLogging
 import xs.utils.tl.MemReqSource
 
 class PipeBufferRead(implicit p: Parameters) extends L2Bundle {
@@ -37,7 +37,7 @@ class PipeBufferResp(implicit p: Parameters) extends L2Bundle {
 // (1) For Release/ReleaseData, send it to RequestArb directly
 // (2) For ProbeAck/ProbeAckData, wakeup w_probeack in MSHR
 //     For ProbeAckData, save data into ReleaseBuffer
-class SinkC(implicit p: Parameters) extends L2Module {
+class SinkC(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val io = IO(new Bundle() {
     val c = Flipped(DecoupledIO(new TLBundleC(edgeIn.bundle)))
     val task = DecoupledIO(new TaskBundle) // Release/ReleaseData
@@ -183,8 +183,8 @@ class SinkC(implicit p: Parameters) extends L2Module {
 
   // Performance counters
   val stall = io.c.valid && isRelease && !io.c.ready
-  XSPerfAccumulate(cacheParams, "sinkC_c_stall", stall)
-  XSPerfAccumulate(cacheParams, "sinkC_c_stall_for_noSpace", stall && hasData && first && full)
-  XSPerfAccumulate(cacheParams, "sinkC_toReqArb_stall", io.task.valid && !io.task.ready)
-  XSPerfAccumulate(cacheParams, "sinkC_buf_full", full)
+  XSPerfAccumulate("sinkC_c_stall", stall)
+  XSPerfAccumulate("sinkC_c_stall_for_noSpace", stall && hasData && first && full)
+  XSPerfAccumulate("sinkC_toReqArb_stall", io.task.valid && !io.task.ready)
+  XSPerfAccumulate("sinkC_buf_full", full)
 }

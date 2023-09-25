@@ -22,11 +22,9 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
-import freechips.rocketchip.tilelink.TLHints._
-import coupledL3.prefetch.PrefetchReq
-import coupledL3.utils.XSPerfAccumulate
+import xs.utils.perf.HasPerfLogging
 
-class SinkA(implicit p: Parameters) extends L3Module {
+class SinkA(implicit p: Parameters) extends L3Module with HasPerfLogging{
   val io = IO(new Bundle() {
     val a = Flipped(DecoupledIO(new TLBundleA(edgeIn.bundle)))
     val toReqArb = DecoupledIO(new TaskBundle)
@@ -149,26 +147,26 @@ class SinkA(implicit p: Parameters) extends L3Module {
 
   // Performance counters
   // num of reqs
-  XSPerfAccumulate(cacheParams, "sinkA_req", io.toReqArb.fire)
-  XSPerfAccumulate(cacheParams, "sinkA_acquire_req", io.a.fire && io.a.bits.opcode(2, 1) === AcquireBlock(2, 1))
-  XSPerfAccumulate(cacheParams, "sinkA_acquireblock_req", io.a.fire && io.a.bits.opcode === AcquireBlock)
-  XSPerfAccumulate(cacheParams, "sinkA_acquireperm_req", io.a.fire && io.a.bits.opcode === AcquirePerm)
-  XSPerfAccumulate(cacheParams, "sinkA_get_req", io.a.fire && io.a.bits.opcode === Get)
-  XSPerfAccumulate(cacheParams, "sinkA_put_req", io.toReqArb.fire &&
+  XSPerfAccumulate( "sinkA_req", io.toReqArb.fire)
+  XSPerfAccumulate( "sinkA_acquire_req", io.a.fire && io.a.bits.opcode(2, 1) === AcquireBlock(2, 1))
+  XSPerfAccumulate( "sinkA_acquireblock_req", io.a.fire && io.a.bits.opcode === AcquireBlock)
+  XSPerfAccumulate( "sinkA_acquireperm_req", io.a.fire && io.a.bits.opcode === AcquirePerm)
+  XSPerfAccumulate( "sinkA_get_req", io.a.fire && io.a.bits.opcode === Get)
+  XSPerfAccumulate( "sinkA_put_req", io.toReqArb.fire &&
     (io.toReqArb.bits.opcode === PutFullData || io.toReqArb.bits.opcode === PutPartialData))
-  XSPerfAccumulate(cacheParams, "sinkA_put_beat", io.a.fire &&
+  XSPerfAccumulate( "sinkA_put_beat", io.a.fire &&
     (io.a.bits.opcode === PutFullData || io.a.bits.opcode === PutPartialData))
 
   // cycels stalled by mainpipe
   val stall = io.toReqArb.valid && !io.toReqArb.ready
-  XSPerfAccumulate(cacheParams, "sinkA_stall_by_mainpipe", stall)
-  XSPerfAccumulate(cacheParams, "sinkA_acquire_stall_by_mainpipe", stall &&
+  XSPerfAccumulate( "sinkA_stall_by_mainpipe", stall)
+  XSPerfAccumulate( "sinkA_acquire_stall_by_mainpipe", stall &&
     (io.toReqArb.bits.opcode === AcquireBlock || io.toReqArb.bits.opcode === AcquirePerm))
-  XSPerfAccumulate(cacheParams, "sinkA_get_stall_by_mainpipe", stall && io.toReqArb.bits.opcode === Get)
-  XSPerfAccumulate(cacheParams, "sinkA_put_stall_by_mainpipe", stall &&
+  XSPerfAccumulate( "sinkA_get_stall_by_mainpipe", stall && io.toReqArb.bits.opcode === Get)
+  XSPerfAccumulate( "sinkA_put_stall_by_mainpipe", stall &&
     (io.toReqArb.bits.opcode === PutFullData || io.toReqArb.bits.opcode === PutPartialData))
 
   // cycles stalled for no space
-  XSPerfAccumulate(cacheParams, "sinkA_put_stall_for_noSpace", io.a.valid && first_1 && noSpace)
-  XSPerfAccumulate(cacheParams, "putbuffer_full", full)
+  XSPerfAccumulate( "sinkA_put_stall_for_noSpace", io.a.valid && first_1 && noSpace)
+  XSPerfAccumulate( "putbuffer_full", full)
 }

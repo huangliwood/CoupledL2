@@ -6,8 +6,8 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import coupledL2.HasCoupledL2Parameters
-import coupledL2.utils.XSPerfAccumulate
-import xs.utils.{CircularShift}
+import xs.utils.CircularShift
+import xs.utils.perf.HasPerfLogging
 
 case class SPPParameters(
   sTableEntries: Int = 256,
@@ -108,7 +108,7 @@ class sppPrefetchReq(implicit p:Parameters) extends PrefetchReq{
   val hint2llc = Bool()
 }
 
-class SignatureTable(implicit p: Parameters) extends SPPModule {
+class SignatureTable(implicit p: Parameters) extends SPPModule with HasPerfLogging{
   val io = IO(new Bundle {
     val req = Flipped(DecoupledIO(new SignatureTableReq))
     val resp = DecoupledIO(new SignatureTableResp) //output old signature and delta to write PT
@@ -223,11 +223,11 @@ class SignatureTable(implicit p: Parameters) extends SPPModule {
 
   io.req.ready := sTable.io.r.req.ready
 
-  XSPerfAccumulate(cacheParams,"spp_st_bp_req", bp_hit)
-  XSPerfAccumulate(cacheParams,"spp_st_bp_update",io.bp_update.valid)
+  XSPerfAccumulate("spp_st_bp_req", bp_hit)
+  XSPerfAccumulate("spp_st_bp_update",io.bp_update.valid)
 }
 
-class PatternTable(implicit p: Parameters) extends SPPModule {
+class PatternTable(implicit p: Parameters) extends SPPModule with HasPerfLogging{
   val io = IO(new Bundle {
     val req = Flipped(DecoupledIO(new SignatureTableResp))
     val resp = DecoupledIO(new PatternTableResp)
@@ -422,15 +422,15 @@ class PatternTable(implicit p: Parameters) extends SPPModule {
   q.io.deq.ready := state === s_idle
 
   //perf
-  XSPerfAccumulate(cacheParams,s"spp_pt_do_nextline", enprefetchnl)
+  XSPerfAccumulate(s"spp_pt_do_nextline", enprefetchnl)
   for (i <- 0 until pTableEntries) {
-    XSPerfAccumulate(cacheParams,s"spp_pt_touched_entry_onlyset_${i.toString}", pTable.io.r.req.bits.setIdx === i.U(log2Up(pTableEntries).W)
+    XSPerfAccumulate(s"spp_pt_touched_entry_onlyset_${i.toString}", pTable.io.r.req.bits.setIdx === i.U(log2Up(pTableEntries).W)
     )
   }
 }
 
 //Can add eviction notify or cycle counter for each entry
-class Unpack(implicit p: Parameters) extends SPPModule {
+class Unpack(implicit p: Parameters) extends SPPModule with HasPerfLogging{
   val io = IO(new Bundle {
     val req = Flipped(DecoupledIO(new PatternTableResp))
     val resp = ValidIO(new UnpackResp)
@@ -502,19 +502,19 @@ class Unpack(implicit p: Parameters) extends SPPModule {
       inProcess := true.B
     }
   }
-  XSPerfAccumulate(cacheParams,"spp_filter_recv_req", io.req.valid)
-  XSPerfAccumulate(cacheParams,"spp_filter_hit", q.io.deq.fire && hit)
-  XSPerfAccumulate(cacheParams,"spp_filter_l2_req", io.req.valid)
+  XSPerfAccumulate("spp_filter_recv_req", io.req.valid)
+  XSPerfAccumulate("spp_filter_hit", q.io.deq.fire && hit)
+  XSPerfAccumulate("spp_filter_l2_req", io.req.valid)
   for (off <- (-63 until 64 by 1).toList) {
     if (off < 0) {
-      XSPerfAccumulate(cacheParams,"spp_pt_pfDelta_neg_" + (-off).toString, hit && extract_delta === off.S((blkOffsetBits + 1).W))
+      XSPerfAccumulate("spp_pt_pfDelta_neg_" + (-off).toString, hit && extract_delta === off.S((blkOffsetBits + 1).W))
     } else {
-      XSPerfAccumulate(cacheParams,"spp_pt_pfDelta_pos_" + off.toString, hit && extract_delta === off.S((blkOffsetBits + 1).W))
+      XSPerfAccumulate("spp_pt_pfDelta_pos_" + off.toString, hit && extract_delta === off.S((blkOffsetBits + 1).W))
     }
   }
 }
 
-class SignaturePathPrefetch(implicit p: Parameters) extends SPPModule {
+class SignaturePathPrefetch(implicit p: Parameters) extends SPPModule with HasPerfLogging{
   val io = IO(new Bundle() {
     val train = Flipped(DecoupledIO(new PrefetchTrain)) //from higher level cache
     val req = DecoupledIO(new sppPrefetchReq) //issue to next-level cache
@@ -561,8 +561,8 @@ class SignaturePathPrefetch(implicit p: Parameters) extends SPPModule {
 
   io.resp.ready := true.B
   //perf
-  XSPerfAccumulate(cacheParams, "spp_recv_train", io.train.fire)
-  XSPerfAccumulate(cacheParams, "spp_recv_st", sTable.io.resp.fire)
-  XSPerfAccumulate(cacheParams, "spp_recv_pt", Mux(pTable.io.resp.fire, pTable.io.resp.bits.deltas.map(a => Mux(a =/= 0.S, 1.U, 0.U)).reduce(_ +& _), 0.U))
-  XSPerfAccumulate(cacheParams, "spp_hint", io.req.bits.hint2llc)
+  XSPerfAccumulate("spp_recv_train", io.train.fire)
+  XSPerfAccumulate("spp_recv_st", sTable.io.resp.fire)
+  XSPerfAccumulate("spp_recv_pt", Mux(pTable.io.resp.fire, pTable.io.resp.bits.deltas.map(a => Mux(a =/= 0.S, 1.U, 0.U)).reduce(_ +& _), 0.U))
+  XSPerfAccumulate("spp_hint", io.req.bits.hint2llc)
 }

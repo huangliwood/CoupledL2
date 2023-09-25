@@ -27,7 +27,6 @@ import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink.TLPermissions._
 import org.chipsalliance.cde.config.Parameters
 import coupledL3.prefetch.PrefetchTrain
-import coupledL3.utils.XSPerfAccumulate
 
 class MSHRTasks(implicit p: Parameters) extends L3Bundle {
   // outer
