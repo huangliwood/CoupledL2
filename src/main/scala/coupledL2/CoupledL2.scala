@@ -316,8 +316,11 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
         prefetcher.get.io.recv_addr.bits := x.in.head._1.addr
         prefetcher.get.io_l2_pf_en := x.in.head._1.l2_pf_en
       case None =>
-        prefetcher.foreach(_.io.recv_addr := 0.U.asTypeOf(ValidIO(UInt(64.W))))
-        prefetcher.foreach(_.io_l2_pf_en := false.B)
+        prefetcher.foreach{
+          p =>
+            p.io.recv_addr := 0.U.asTypeOf(p.io.recv_addr)
+            p.io_l2_pf_en := false.B
+        }
     }
 
 

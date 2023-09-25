@@ -68,6 +68,8 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
     task.reqSource := MemReqSource.NoWhere.id.U // Ignore
     task.replTask := false.B
     task.mergeTask := false.B
+    task.mergeA := false.B
+    task.aMergeTask := 0.U.asTypeOf(new MergeTaskBundle)
     task
   }
   val task = WireInit(0.U.asTypeOf(new TaskBundle))

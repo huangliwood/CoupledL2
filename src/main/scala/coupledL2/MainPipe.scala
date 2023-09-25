@@ -237,6 +237,8 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging{
   ms_task.replTask         := false.B
   ms_task.mergeTask        := false.B
   ms_task.reqSource        := req_s3.reqSource
+  ms_task.mergeA           := req_s3.mergeA
+  ms_task.aMergeTask       := req_s3.aMergeTask
 
   /* ======== Resps to SinkA/B/C Reqs ======== */
   val sink_resp_s3 = WireInit(0.U.asTypeOf(Valid(new TaskBundle))) // resp for sinkA/B/C request that does not need to alloc mshr
@@ -371,7 +373,8 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging{
     alias = meta_s3.alias,
     accessed = meta_s3.accessed
   )
-  val metaW_s3_mshr = req_s3.meta
+  // use merge_meta if mergeA
+  val metaW_s3_mshr = Mux(req_s3.mergeA, req_s3.aMergeTask.meta, req_s3.meta)
 
   val metaW_way = Mux(mshr_refill_s3 && req_s3.replTask, io.replResp.bits.way, // grant always use replResp way
     Mux(mshr_req_s3, req_s3.way, dirResult_s3.way))
@@ -431,11 +434,14 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging{
 
   if(io.prefetchTrain.isDefined){
     val train = io.prefetchTrain.get
-    train.valid := task_s3.valid && (req_acquire_s3 || req_get_s3) && req_s3.needHint.getOrElse(false.B)
+    // train on request(with needHint flag) miss or hit on prefetched block
+    // trigger train also in a_merge here
+    train.valid := task_s3.valid && (((req_acquire_s3 || req_get_s3) && req_s3.needHint.getOrElse(false.B) &&
+      (!dirResult_s3.hit || meta_s3.prefetch.get)) || req_s3.mergeA)
     train.bits.tag := req_s3.tag
     train.bits.set := req_s3.set
-    train.bits.needT := req_needT_s3
-    train.bits.source := req_s3.sourceId
+    train.bits.needT := Mux(req_s3.mergeA, needT(req_s3.aMergeTask.opcode, req_s3.aMergeTask.param),req_needT_s3)
+    train.bits.source := Mux(req_s3.mergeA, req_s3.aMergeTask.sourceId, req_s3.sourceId)
     train.bits.vaddr.foreach(_ := req_s3.vaddr.getOrElse(0.U))
     train.bits.state:= Mux(!dirResult_s3.hit, AccessState.MISS,
       Mux(!meta_s3.prefetch.get, AccessState.HIT, AccessState.PREFETCH_HIT))
@@ -618,7 +624,6 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging{
   // ! Caution: s_ and w_ are false-as-valid
   when(req_s3.fromA) {
     alloc_state.s_refill := false.B
-    alloc_state.w_grantack := req_prefetch_s3 || req_get_s3
     alloc_state.w_replResp := dirResult_s3.hit // need replRead when NOT dirHit
     // need Acquire downwards
     when(need_acquire_s3_a) {
