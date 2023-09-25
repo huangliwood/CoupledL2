@@ -3,16 +3,15 @@ package coupledL3.utils
 import chisel3._
 import chisel3.util.experimental.BoringUtils
 import coupledL3.L3Param
+import xs.utils.BroadCastingUtils
 
 object XSPerfAccumulate {
   def apply(params: L3Param, perfName: String, perfCnt: UInt) = {
     if (params.enablePerf) {
-      val logTimestamp = WireInit(0.U(64.W))
       val perfClean = WireInit(false.B)
       val perfDump = WireInit(false.B)
-      BoringUtils.addSink(logTimestamp, "logTimestamp")
-      BoringUtils.addSink(perfClean, "XSPERF_CLEAN")
-      BoringUtils.addSink(perfDump, "XSPERF_DUMP")
+      BroadCastingUtils.AddBroadCastSink("XSPERF_CLEAN", perfClean)
+      BroadCastingUtils.AddBroadCastSink("XSPERF_DUMP", perfDump)
 
       val counter = RegInit(0.U(64.W))
       val next_counter = counter + perfCnt
@@ -40,12 +39,10 @@ object XSPerfHistogram {
     right_strict: Boolean = false
   ) = {
     if (params.enablePerf) {
-      val logTimestamp = WireInit(0.U(64.W))
       val perfClean = WireInit(false.B)
       val perfDump = WireInit(false.B)
-      BoringUtils.addSink(logTimestamp, "logTimestamp")
-      BoringUtils.addSink(perfClean, "XSPERF_CLEAN")
-      BoringUtils.addSink(perfDump, "XSPERF_DUMP")
+      BroadCastingUtils.AddBroadCastSink("XSPERF_CLEAN", perfClean)
+      BroadCastingUtils.AddBroadCastSink("XSPERF_DUMP", perfDump)
 
       // drop each perfCnt value into a bin
       val nBins = (stop - start) / step
@@ -88,12 +85,10 @@ object XSPerfHistogram {
 object XSPerfMax {
   def apply(params: L3Param, perfName: String, perfCnt: UInt, enable: Bool) = {
     if (params.enablePerf) {
-      val logTimestamp = WireInit(0.U(64.W))
       val perfClean = WireInit(false.B)
       val perfDump = WireInit(false.B)
-      BoringUtils.addSink(logTimestamp, "logTimestamp")
-      BoringUtils.addSink(perfClean, "XSPERF_CLEAN")
-      BoringUtils.addSink(perfDump, "XSPERF_DUMP")
+      BroadCastingUtils.AddBroadCastSink("XSPERF_CLEAN", perfClean)
+      BroadCastingUtils.AddBroadCastSink("XSPERF_DUMP", perfDump)
 
       val max = RegInit(0.U(64.W))
       val next_max = Mux(enable && (perfCnt > max), perfCnt, max)
@@ -123,7 +118,7 @@ object XSPerfPrint {
     apply(Printable.pack(fmt, data: _*))
 
   def apply(pable: Printable): Any = {
-    val commonInfo = p"[PERF ][time=${GTimer()}] 9527: "
+    val commonInfo = p"[PERF ][time=${GTimer()}] _LOG_MODULE_PATH_: "
     printf(commonInfo + pable)
   }
 }
