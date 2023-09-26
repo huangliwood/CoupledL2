@@ -561,17 +561,27 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
     case DebugOptionsKey => DebugOptions()
   })))
 
- val dma_node = TLClientNode(Seq(TLMasterPortParameters.v2(
-     Seq(TLMasterParameters.v1(
-       name = "dma",
-       sourceId = IdRange(0, 16),
-       supportsProbe = TransferSizes.none
-     )),
-     channelBytes = TLChannelBeatBytes(cacheParams.blockBytes),
-     minLatency = 1,
-     echoFields = Nil,
-   )))
- l2xbar := TLBuffer() := dma_node
+//  val dma_node = TLClientNode(Seq(TLMasterPortParameters.v2(
+//      Seq(TLMasterParameters.v1(
+//        name = "dma",
+//        sourceId = IdRange(0, 16),
+//        supportsProbe = TransferSizes.none
+//      )),
+//      channelBytes = TLChannelBeatBytes(cacheParams.blockBytes),
+//      minLatency = 1,
+//      echoFields = Nil,
+//    )))
+
+  val idBits = 14
+  val l3FrontendAXI4Node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
+    Seq(AXI4MasterParameters(
+      name = "dma",
+      id = IdRange(0, 1 << idBits),
+      maxFlight = Some(16)
+    ))
+  )))
+
+ l2xbar := TLBuffer() := AXI2TL(16, 16) := l3FrontendAXI4Node
 
   ram.node :=
     TLXbar() :=*
@@ -585,7 +595,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       case (node, i) =>
         node.makeIOs()(ValName(s"master_port_$i"))
     }
-    dma_node.makeIOs()(ValName("dma_port"))
+    l3FrontendAXI4Node.makeIOs()(ValName("dma_port"))
 
     val io = IO(new Bundle{
       val perfClean = Input(Bool())
