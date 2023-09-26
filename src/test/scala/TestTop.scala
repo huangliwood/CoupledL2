@@ -529,6 +529,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
         None                     => spp only refill L2 
         */
       )
+      case DebugOptionsKey => DebugOptions()
     })))
     l1xbar := TLBuffer() := l1i
     l1xbar := TLBuffer() := l1d
@@ -557,81 +558,8 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       prefetch = None,
       prefetchRecv = None
     )
+    case DebugOptionsKey => DebugOptions()
   })))
-
-  // val l3 = LazyModule(new CoupledL3()(new Config((_, _, _) => {
-  //   case L3ParamKey => L3Param(
-  //     name = s"l3",
-  //     ways = 4,
-  //     // sets = 128,
-  //     // sets = 32,
-  //     sets = 64,
-  //     clientCaches = Seq(CacheParameters(
-  //       // sets = 64,
-  //       // ways = 2 * nrL2,
-  //       sets = 32,
-  //       // ways = 2 * nrL2,
-  //       ways = 4 * nrL2 + nrL2, // extra ways is needed for solving duble request conflict from the same sourceId(Acquire + Release)
-  //       aliasBitsOpt = None,
-  //       name = "l2",
-  //       blockGranularity = 64
-  //     )), // TODO: For L3 this should be L2Param
-  //     echoField = Seq(DirtyField()),
-  //     prefetch = None
-  //   )
-  // })))
-  // l2List.zipWithIndex.foreach {
-  //   case (l2, i) =>
-  //     l2.spp_send_node match{
-  //       case Some(sppSend) =>
-  //         val l3pf_RecvXbar =  LazyModule(new PrefetchReceiverXbar(NumCores))
-  //         l3pf_RecvXbar.inNode(i) := l2.spp_send_node.get
-  //         println(f"spp_send_node${i} connecting to l3pf_RecvXbar")
-  //       case None => 
-  //     }
-  // }
-
-  // println(f"pf_l3recv_node connecting to l3pf_RecvXbar out")
-  // val sppHasCrossLevelRefillOpt = p(L2ParamKey).sppMultiLevelRefill
-  // println(f"SPP cross level refill: ${sppHasCrossLevelRefillOpt} ")
-  // sppHasCrossLevelRefillOpt match{
-  //   case Some(x) =>
-  //     val l3pf_RecvXbar = LazyModule(new PrefetchReceiverXbar(NumCores))
-  //     l2List.zipWithIndex.foreach {
-  //       case (l2, i) =>
-  //         l2.spp_send_node match {
-  //           case Some(l2Send) =>
-  //             l3pf_RecvXbar.inNode(i) := l2Send
-  //             println(f"spp_send_node${i} connecting to l3pf_RecvXbar")
-  //           case None =>
-  //       }
-  //     }
-  //     println(f"pf_l3recv_node connecting to l3pf_RecvXbar out")
-  //     l3.pf_l3recv_node.map(l3_recv =>  l3_recv:= l3pf_RecvXbar.outNode.head)
-  //   case None =>
-  // }
-
-  // val idBits = 14
-  // val l3FrontendAXI4Node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
-  //   Seq(AXI4MasterParameters(
-  //     name = "dma",
-  //     id = IdRange(0, 1 << idBits)
-  //   ))
-  // )))
-  // val axi2tlParams = p(AXI2TLParamKey)
-  // val AXItoTL = LazyModule(new AXItoTL)
-  // l2xbar :=
-  //   TLFIFOFixer() :=
-  //   TLWidthWidget(32) :=
-  //   TLBuffer() :=
-  //   AXItoTL.node :=
-  //   AXI4Buffer() :=
-  //   AXI4UserYanker(Some(16)) :=
-  //   AXI4Fragmenter() :=
-  //   AXI4Buffer() :=
-  //   AXI4Buffer() :=
-  //   AXI4IdIndexer(4) :=
-  //   l3FrontendAXI4Node
 
  val dma_node = TLClientNode(Seq(TLMasterPortParameters.v2(
      Seq(TLMasterParameters.v1(
@@ -667,10 +595,6 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
     val logTimestamp = WireInit(0.U(64.W))
     val perfClean = WireInit(false.B)
     val perfDump = WireInit(false.B)
-
-    BoringUtils.addSource(logTimestamp, "logTimestamp")
-    BoringUtils.addSource(perfClean, "XSPERF_CLEAN")
-    BoringUtils.addSource(perfDump, "XSPERF_DUMP")
   
     perfClean := io.perfClean
     perfDump := io.perfDump
