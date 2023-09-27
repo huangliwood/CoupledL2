@@ -422,11 +422,11 @@ class PatternTable(implicit p: Parameters) extends SPPModule {
   q.io.deq.ready := state === s_idle
 
   //perf
-  XSPerfAccumulate(cacheParams,s"spp_pt_do_nextline", enprefetchnl)
-  for (i <- 0 until pTableEntries) {
-    XSPerfAccumulate(cacheParams,s"spp_pt_touched_entry_onlyset_${i.toString}", pTable.io.r.req.bits.setIdx === i.U(log2Up(pTableEntries).W)
-    )
-  }
+  //XSPerfAccumulate(cacheParams,s"spp_pt_do_nextline", enprefetchnl)
+  //for (i <- 0 until pTableEntries) {
+  //  XSPerfAccumulate(cacheParams,s"spp_pt_touched_entry_onlyset_${i.toString}", pTable.io.r.req.bits.setIdx === i.U(log2Up(pTableEntries).W)
+  //  )
+  //}
 }
 
 //Can add eviction notify or cycle counter for each entry
@@ -544,8 +544,8 @@ class SignaturePathPrefetch(implicit p: Parameters) extends SPPModule {
 
   val newAddr = Cat(unpack.io.resp.bits.prefetchBlock, 0.U(offsetBits.W))
   val db_degree = RegEnable(io.db_degree.bits, 1.U, io.db_degree.valid)
-  val pf_degree = unpack.io.resp.bits.degree
-  val send2Llc = pf_degree > 1.U && (io.queue_used >= 24.U || db_degree > 1.U)
+  val send2Llc = WireInit(false.B)
+  send2Llc := unpack.io.resp.bits.degree > 1.U && (io.queue_used >= 24.U || db_degree > 1.U)
 
   pTable.io.db_degree := db_degree
   pTable.io.queue_used_degree := io.queue_used >= 24.U
