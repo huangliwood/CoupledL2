@@ -60,7 +60,7 @@ class FilterV2(implicit p: Parameters) extends PrefetchBranchV2Module {
   val dupOffsetBits = log2Up(fTableEntries/dupNums)
   val dupBits = log2Up(dupNums)
   val fTable = RegInit(VecInit(Seq.fill(fTableEntries)(0.U.asTypeOf(fTableEntry()))))
-  val q = Module(new Queue(UInt(fullAddressBits.W), fTableQueueEntries, flow = false, pipe = true))
+  val q = Module(new Queue(UInt(fullAddressBits.W), fTableQueueEntries, flow = true, pipe = true))
 
   val hit = WireInit(VecInit.fill(dupNums)(false.B))
   val readResult = WireInit(VecInit.fill(dupNums)(0.U.asTypeOf(fTableEntry())))
@@ -169,11 +169,11 @@ class HyperPrefetcher()(implicit p: Parameters) extends PrefetchBranchV2Module w
         case L2ParamKey => p(L2ParamKey).copy(prefetch = Some(PrefetchReceiverParams()))
   })))
 
-  val q_sms = Module(new Queue(chiselTypeOf(sms.io.req.bits), pTableQueueEntries, flow = false, pipe = false))
+  val q_sms = Module(new Queue(chiselTypeOf(sms.io.req.bits), pTableQueueEntries, flow = true, pipe = false))
   q_sms.io.enq <> sms.io.req
   q_sms.io.deq.ready := !bop.io.req.valid
 
-  val q_spp = Module(new Queue(chiselTypeOf(spp.io.req.bits), pTableQueueEntries, flow = false, pipe = false))
+  val q_spp = Module(new Queue(chiselTypeOf(spp.io.req.bits), pTableQueueEntries, flow = true, pipe = false))
 
   q_spp.io.enq <> spp.io.req
   q_spp.io.deq.ready := !q_sms.io.deq.fire && !bop.io.req.valid

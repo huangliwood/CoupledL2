@@ -150,7 +150,7 @@ class SignatureTable(implicit p: Parameters) extends SPPModule with HasPerfLoggi
   // --------------------------------------------------------------------------------
   // get sTable read data, because SRAM read delay, should send to S2 to handle rdata
   // request bp to PT if needed
-  val rValid_s1 = RegNext(rValid_s0)
+  val rValid_s1 = RegNext(rValid_s0,false.B)
   val rData_s2  = RegEnable(sTable.io.r.resp.data(0), 0.U.asTypeOf(sTableEntry()),  rValid_s1)
   val accessedPage_s2  = RegEnable(accessedPage_s1,  0.U(pageAddrBits.W),                 rValid_s1)
   val accessedBlock_s2 = RegEnable(accessedBlock_s1, 0.U((blkOffsetBits.W)),              rValid_s1)
@@ -183,7 +183,7 @@ class SignatureTable(implicit p: Parameters) extends SPPModule with HasPerfLoggi
   }
 
 
-  val rValid_s2 = RegNext(rValid_s1)
+  val rValid_s2 = RegNext(rValid_s1,false.B)
   val hit_s2 = rData_s2.tag === tag(accessedPage_s2) && rData_s2.valid
   val oldSignature_s2 = Mux(hit_s2, rData_s2.signature, 0.U)
   val newDelta_s2     = Mux(hit_s2, accessedBlock_s2.asSInt - rData_s2.lastBlock.asSInt, accessedBlock_s2.asSInt)
@@ -252,7 +252,7 @@ class PatternTable(implicit p: Parameters) extends SPPModule with HasPerfLogging
     new SRAMTemplate(pTableEntry(), set = pTableEntries, way = 1, bypassWrite = true, shouldReset = true)
   )
 
-  val q = Module(new Queue(chiselTypeOf(io.req.bits), pTableQueueEntries, flow = false, pipe = true))
+  val q = Module(new Queue(chiselTypeOf(io.req.bits), pTableQueueEntries, flow = true, pipe = true))
   q.io.enq <> io.req
   val req = Mux(q.io.deq.valid,q.io.deq.bits,0.U.asTypeOf(q.io.deq.bits.cloneType))
 
@@ -284,8 +284,8 @@ class PatternTable(implicit p: Parameters) extends SPPModule with HasPerfLogging
   pTable.io.r.req.valid := enread
   pTable.io.r.req.bits.setIdx := idx(readSignature)
   readResult := pTable.io.r.resp.data(0)
-  lastSignature := RegNext(readSignature)
-  lastDelta := RegNext(readDelta)
+  lastSignature := RegNext(readSignature,0.U)
+  lastDelta := RegNext(readDelta,0.U)
   hit := readResult.valid && tag(lastSignature) === readResult.tag
   //set output
   val maxEntry = readResult.deltaEntries.reduce((a, b) => Mux(a.cDelta >= b.cDelta, a, b))
@@ -379,7 +379,7 @@ class PatternTable(implicit p: Parameters) extends SPPModule with HasPerfLogging
       state := s_lookahead
     }
     is(s_lookahead) {
-      when(RegNext(pTable.io.r.req.fire)) {
+      when(RegNext(pTable.io.r.req.fire,false.B)) {
         when(hit) {
           val issued = delta_list_checked.map(a => Mux(a =/= 0.S, 1.U, 0.U)).reduce(_ +& _)
           val testOffset = RegEnable((current.block.asSInt + maxEntry.delta).asUInt, issued =/= 0.U)
@@ -448,7 +448,7 @@ class Unpack(implicit p: Parameters) extends SPPModule with HasPerfLogging{
   val inProcess = RegInit(false.B)
   val endeq = WireInit(false.B)
 
-  val q = Module(new Queue(chiselTypeOf(io.req.bits), unpackQueueEntries))
+  val q = Module(new Queue(chiselTypeOf(io.req.bits), unpackQueueEntries,flow = true))
   q.io.enq <> io.req //change logic to replace the tail entry
 
   val req = RegEnable(q.io.deq.bits, q.io.deq.fire)
