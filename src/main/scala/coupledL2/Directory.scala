@@ -138,8 +138,8 @@ class Directory(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val metaWen = io.metaWReq.valid
   val replacerWen = WireInit(false.B)
 
-  val tagArray  = Module(new BankedSRAM(UInt(tagBits.W), sets, ways, banks, singlePort = true, enableClockGate = true))
-  val metaArray = Module(new SRAMTemplate(new MetaEntry, sets, ways, singlePort = true, hasClkGate = true))
+  val tagArray  = Module(new BankedSRAM(UInt(tagBits.W), sets, ways, banks, singlePort = true, enableClockGate = enableClockGate))
+  val metaArray = Module(new SRAMTemplate(new MetaEntry, sets, ways, singlePort = true, hasClkGate = enableClockGate))
   val tagRead = Wire(Vec(ways, UInt(tagBits.W)))
   val metaRead = Wire(Vec(ways, new MetaEntry()))
 
