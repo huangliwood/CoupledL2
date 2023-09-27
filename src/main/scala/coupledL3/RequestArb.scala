@@ -19,16 +19,16 @@ package coupledL3
 
 import chisel3._
 import chisel3.util._
-import utility._
+import xs.utils._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
-import chipsalliance.rocketchip.config.Parameters
-import coupledL3.utils.XSPerfAccumulate
+import org.chipsalliance.cde.config.Parameters
 import coupledL3.noninclusive.ClientDirRead
 import chisel3.util.experimental.BoringUtils
+import xs.utils.perf.HasPerfLogging
 
 
-class RequestArb(implicit p: Parameters) extends L3Module {
+class RequestArb(implicit p: Parameters) extends L3Module with HasPerfLogging{
   val io = IO(new Bundle() {
     // receive incoming tasks
     val sinkA    = Flipped(DecoupledIO(new TaskBundle))
@@ -93,7 +93,7 @@ class RequestArb(implicit p: Parameters) extends L3Module {
   // --------------------------------------------------------------------------
   io.mshrTask.ready  := s0_ready
   val mshr_task_s0    = Wire(Valid(new TaskBundle()))
-  mshr_task_s0.valid := io.mshrTask.fire()
+  mshr_task_s0.valid := io.mshrTask.fire
   mshr_task_s0.bits  := io.mshrTask.bits
 
   s0_valid := io.mshrTask.valid
@@ -299,37 +299,37 @@ class RequestArb(implicit p: Parameters) extends L3Module {
   // --------------------------------------------------------------------------
   //  Performance counters 
   // --------------------------------------------------------------------------
-  XSPerfAccumulate(cacheParams, "mshr_req", mshr_task_s0.valid)
-  XSPerfAccumulate(cacheParams, "mshr_req_stall", io.mshrTask.valid && !io.mshrTask.ready)
+  XSPerfAccumulate( "mshr_req", mshr_task_s0.valid)
+  XSPerfAccumulate( "mshr_req_stall", io.mshrTask.valid && !io.mshrTask.ready)
 
-  XSPerfAccumulate(cacheParams, "sinkA_req", io.sinkA.fire())
-  XSPerfAccumulate(cacheParams, "sinkB_req", io.sinkB.fire())
-  XSPerfAccumulate(cacheParams, "sinkC_req", io.sinkC.fire())
+  XSPerfAccumulate( "sinkA_req", io.sinkA.fire)
+  XSPerfAccumulate( "sinkB_req", io.sinkB.fire)
+  XSPerfAccumulate( "sinkC_req", io.sinkC.fire)
   
-  XSPerfAccumulate(cacheParams, "sinkA_stall", io.sinkA.valid && !io.sinkA.ready)
-  XSPerfAccumulate(cacheParams, "sinkB_stall", io.sinkB.valid && !io.sinkB.ready)
-  XSPerfAccumulate(cacheParams, "sinkC_stall", io.sinkC.valid && !io.sinkC.ready)
+  XSPerfAccumulate( "sinkA_stall", io.sinkA.valid && !io.sinkA.ready)
+  XSPerfAccumulate( "sinkB_stall", io.sinkB.valid && !io.sinkB.ready)
+  XSPerfAccumulate( "sinkC_stall", io.sinkC.valid && !io.sinkC.ready)
 
-  XSPerfAccumulate(cacheParams, "sinkA_stall_by_mshr", io.sinkA.valid && io.fromMSHRCtl.blockA_s1)
-  XSPerfAccumulate(cacheParams, "sinkB_stall_by_mshr", io.sinkB.valid && io.fromMSHRCtl.blockB_s1)
+  XSPerfAccumulate( "sinkA_stall_by_mshr", io.sinkA.valid && io.fromMSHRCtl.blockA_s1)
+  XSPerfAccumulate( "sinkB_stall_by_mshr", io.sinkB.valid && io.fromMSHRCtl.blockB_s1)
 
-  XSPerfAccumulate(cacheParams, "sinkA_stall_by_mainpipe", io.sinkA.valid && io.fromMainPipe.blockA_s1)
-  XSPerfAccumulate(cacheParams, "sinkB_stall_by_mainpipe", io.sinkB.valid && io.fromMainPipe.blockB_s1)
-  XSPerfAccumulate(cacheParams, "sinkC_stall_by_mainpipe", io.sinkC.valid && io.fromMainPipe.blockC_s1)
+  XSPerfAccumulate( "sinkA_stall_by_mainpipe", io.sinkA.valid && io.fromMainPipe.blockA_s1)
+  XSPerfAccumulate( "sinkB_stall_by_mainpipe", io.sinkB.valid && io.fromMainPipe.blockB_s1)
+  XSPerfAccumulate( "sinkC_stall_by_mainpipe", io.sinkC.valid && io.fromMainPipe.blockC_s1)
 
-  XSPerfAccumulate(cacheParams, "sinkA_stall_by_grantbuf", io.sinkA.valid && io.fromGrantBuffer.blockSinkReqEntrance.blockA_s1)
-  XSPerfAccumulate(cacheParams, "sinkB_stall_by_grantbuf", io.sinkB.valid && io.fromGrantBuffer.blockSinkReqEntrance.blockB_s1)
-  XSPerfAccumulate(cacheParams, "sinkC_stall_by_grantbuf", io.sinkC.valid && io.fromGrantBuffer.blockSinkReqEntrance.blockC_s1)
+  XSPerfAccumulate( "sinkA_stall_by_grantbuf", io.sinkA.valid && io.fromGrantBuffer.blockSinkReqEntrance.blockA_s1)
+  XSPerfAccumulate( "sinkB_stall_by_grantbuf", io.sinkB.valid && io.fromGrantBuffer.blockSinkReqEntrance.blockB_s1)
+  XSPerfAccumulate( "sinkC_stall_by_grantbuf", io.sinkC.valid && io.fromGrantBuffer.blockSinkReqEntrance.blockC_s1)
 
-  XSPerfAccumulate(cacheParams, "sinkA_stall_by_dir", io.sinkA.valid && !blockA && !io.dirRead_s1.ready)
-  XSPerfAccumulate(cacheParams, "sinkB_stall_by_dir", io.sinkB.valid && !blockB && !io.dirRead_s1.ready)
-  XSPerfAccumulate(cacheParams, "sinkC_stall_by_dir", io.sinkC.valid && !blockC && !io.dirRead_s1.ready)
+  XSPerfAccumulate( "sinkA_stall_by_dir", io.sinkA.valid && !blockA && !io.dirRead_s1.ready)
+  XSPerfAccumulate( "sinkB_stall_by_dir", io.sinkB.valid && !blockB && !io.dirRead_s1.ready)
+  XSPerfAccumulate( "sinkC_stall_by_dir", io.sinkC.valid && !blockC && !io.dirRead_s1.ready)
 
-  XSPerfAccumulate(cacheParams, "sinkA_stall_by_sinkB", io.sinkA.valid && sinkReadyBasic && !blockA && sinkValids(1) && !sinkValids(0))
-  XSPerfAccumulate(cacheParams, "sinkA_stall_by_sinkC", io.sinkA.valid && sinkReadyBasic && !blockA && sinkValids(0))
-  XSPerfAccumulate(cacheParams, "sinkB_stall_by_sinkC", io.sinkB.valid && sinkReadyBasic && !blockB && sinkValids(0))
+  XSPerfAccumulate( "sinkA_stall_by_sinkB", io.sinkA.valid && sinkReadyBasic && !blockA && sinkValids(1) && !sinkValids(0))
+  XSPerfAccumulate( "sinkA_stall_by_sinkC", io.sinkA.valid && sinkReadyBasic && !blockA && sinkValids(0))
+  XSPerfAccumulate( "sinkB_stall_by_sinkC", io.sinkB.valid && sinkReadyBasic && !blockB && sinkValids(0))
 
-  XSPerfAccumulate(cacheParams, "sinkA_stall_by_mshrTask", io.sinkA.valid && mshrTask_s1.valid)
-  XSPerfAccumulate(cacheParams, "sinkB_stall_by_mshrTask", io.sinkB.valid && mshrTask_s1.valid)
-  XSPerfAccumulate(cacheParams, "sinkC_stall_by_mshrTask", io.sinkC.valid && mshrTask_s1.valid)
+  XSPerfAccumulate( "sinkA_stall_by_mshrTask", io.sinkA.valid && mshrTask_s1.valid)
+  XSPerfAccumulate( "sinkB_stall_by_mshrTask", io.sinkB.valid && mshrTask_s1.valid)
+  XSPerfAccumulate( "sinkC_stall_by_mshrTask", io.sinkC.valid && mshrTask_s1.valid)
 }

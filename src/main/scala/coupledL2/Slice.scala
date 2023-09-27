@@ -22,13 +22,14 @@ import chisel3.util._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.util.leftOR
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import coupledL2.utils._
 import coupledL2.debug._
 import coupledL2.prefetch.PrefetchIO
-import utility.RegNextN
+import xs.utils.RegNextN
+import xs.utils.perf.HasPerfLogging
 
-class Slice()(implicit p: Parameters) extends L2Module {
+class Slice()(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val io = IO(new Bundle {
     val in = Flipped(TLBundle(edgeIn.bundle))
     val out = TLBundle(edgeOut.bundle)
@@ -114,7 +115,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
 
   // priority: nested-ReleaseData / probeAckData [NEW] > mainPipe DS rdata [OLD]
   // 0/1 might happen at the same cycle with 2
-  releaseBuf.io.w(0).valid := mshrCtl.io.nestedwbDataId.valid
+  releaseBuf.io.w(0).valid_dups.foreach(_ := mshrCtl.io.nestedwbDataId.valid)
   releaseBuf.io.w(0).beat_sel := Fill(beatSize, 1.U(1.W))
   releaseBuf.io.w(0).data := mainPipe.io.nestedwbData
   releaseBuf.io.w(0).id := mshrCtl.io.nestedwbDataId.bits
@@ -138,16 +139,14 @@ class Slice()(implicit p: Parameters) extends L2Module {
   mshrCtl.io.pipeStatusVec(0) := reqArb.io.status_vec(1) // s2 status
   mshrCtl.io.pipeStatusVec(1) := mainPipe.io.status_vec(0) // s3 status
 
-  io.prefetch.foreach {
-    p =>
-      p.train <> mainPipe.io.prefetchTrain.get
-      sinkA.io.prefetchReq.get <> p.req
-      p.resp <> grantBuf.io.prefetchResp.get
-      p.recv_addr := 0.U.asTypeOf(ValidIO(UInt(64.W)))
-      p.evict match {
-      case Some(evict) => 
-        evict <> mainPipe.io.prefetchEvict.get
-      case None =>
+  if(io.prefetch.isDefined){
+    val pfio = io.prefetch.get
+    pfio.train <> mainPipe.io.prefetchTrain.get
+    sinkA.io.prefetchReq.get <> pfio.req
+    pfio.resp <> grantBuf.io.prefetchResp.get
+    pfio.recv_addr := 0.U.asTypeOf(ValidIO(UInt(64.W)))
+    if(pfio.evict.isDefined){
+      pfio.evict.get <> mainPipe.io.prefetchEvict.get
     }
   }
 
@@ -187,7 +186,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     timer := timer + 1.U
     a_begin_times.zipWithIndex.foreach {
       case (r, i) =>
-        when (sinkA.io.a.fire() && sinkA.io.a.bits.source === i.U) {
+        when (sinkA.io.a.fire && sinkA.io.a.bits.source === i.U) {
           r := timer
         }
     }
@@ -195,10 +194,10 @@ class Slice()(implicit p: Parameters) extends L2Module {
     val delay = timer - a_begin_times(d_source)
     val (first, _, _, _) = edgeIn.count(grantBuf.io.d)
     val delay_sample = grantBuf.io.d.fire && grantBuf.io.d.bits.opcode =/= ReleaseAck && first
-    XSPerfHistogram(cacheParams, "a_to_d_delay", delay, delay_sample, 0, 20, 1, true, true)
-    XSPerfHistogram(cacheParams, "a_to_d_delay", delay, delay_sample, 20, 300, 10, true, true)
-    XSPerfHistogram(cacheParams, "a_to_d_delay", delay, delay_sample, 300, 500, 20, true, true)
-    XSPerfHistogram(cacheParams, "a_to_d_delay", delay, delay_sample, 500, 1000, 100, true, false)
+    XSPerfHistogram("a_to_d_delay", delay, delay_sample, 0, 20, 1, true, true)
+    XSPerfHistogram("a_to_d_delay", delay, delay_sample, 20, 300, 10, true, true)
+    XSPerfHistogram("a_to_d_delay", delay, delay_sample, 300, 500, 20, true, true)
+    XSPerfHistogram("a_to_d_delay", delay, delay_sample, 500, 1000, 100, true, false)
   }
 
   if (cacheParams.enableMonitor) {

@@ -17,12 +17,12 @@
 
 package coupledL3.prefetch
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
 import coupledL3._
-import utility.Pipeline
+import xs.utils.Pipeline
 
 // TODO: PrefetchReceiver is temporarily used since L1&L3 do not support Hint.
 // TODO: Delete this after Hint is accomplished.

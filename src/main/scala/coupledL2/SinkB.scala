@@ -19,18 +19,17 @@ package coupledL2
 
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink._
-import freechips.rocketchip.tilelink.TLMessages._
-import coupledL2.utils.XSPerfAccumulate
-import utility.MemReqSource
+import xs.utils.perf.HasPerfLogging
+import xs.utils.tl.MemReqSource
 
 class BMergeTask(implicit p: Parameters) extends L2Bundle {
   val id = UInt(mshrBits.W)
   val task = new TaskBundle()
 }
 
-class SinkB(implicit p: Parameters) extends L2Module {
+class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val io = IO(new Bundle() {
     val b = Flipped(DecoupledIO(new TLBundleB(edgeIn.bundle)))
     val task = DecoupledIO(new TaskBundle)
@@ -105,6 +104,6 @@ class SinkB(implicit p: Parameters) extends L2Module {
   io.bMergeTask.bits.id := mergeBId
   io.bMergeTask.bits.task := task
 
-  XSPerfAccumulate(cacheParams, "mergeBTask", io.bMergeTask.valid)
+  XSPerfAccumulate("mergeBTask", io.bMergeTask.valid)
   //!!WARNING: TODO: if this is zero, that means fucntion [Probe merge into MSHR-Release] is never tested, and may have flaws
 }

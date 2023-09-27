@@ -2,12 +2,12 @@
 package coupledL2.prefetch
 
 import xs.utils.sram.SRAMTemplate
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import coupledL2.HasCoupledL2Parameters
-import coupledL2.utils.XSPerfAccumulate
-import utility.{CircularShift}
+import xs.utils.CircularShift
+import xs.utils.perf.HasPerfLogging
 
 case class SPPParameters(
   sTableEntries: Int = 256,
@@ -108,7 +108,7 @@ class sppPrefetchReq(implicit p:Parameters) extends PrefetchReq{
   val hint2llc = Bool()
 }
 
-class SignatureTable(implicit p: Parameters) extends SPPModule {
+class SignatureTable(implicit p: Parameters) extends SPPModule with HasPerfLogging{
   val io = IO(new Bundle {
     val req = Flipped(DecoupledIO(new SignatureTableReq))
     val resp = DecoupledIO(new SignatureTableResp) //output old signature and delta to write PT
@@ -139,7 +139,7 @@ class SignatureTable(implicit p: Parameters) extends SPPModule {
   // --------------------------------------------------------------------------------
   // read sTable
   val rAddr_s0  = io.req.bits.pageAddr
-  val rValid_s0 = io.req.fire()
+  val rValid_s0 = io.req.fire
   sTable.io.r.req.valid       := rValid_s0
   sTable.io.r.req.bits.setIdx := idx(rAddr_s0)
   val accessedPage_s1  = RegEnable(io.req.bits.pageAddr,  0.U(pageAddrBits.W),    rValid_s0)
@@ -223,11 +223,11 @@ class SignatureTable(implicit p: Parameters) extends SPPModule {
 
   io.req.ready := sTable.io.r.req.ready
 
-  XSPerfAccumulate(cacheParams,"spp_st_bp_req", bp_hit)
-  XSPerfAccumulate(cacheParams,"spp_st_bp_update",io.bp_update.valid)
+  XSPerfAccumulate("spp_st_bp_req", bp_hit)
+  XSPerfAccumulate("spp_st_bp_update",io.bp_update.valid)
 }
 
-class PatternTable(implicit p: Parameters) extends SPPModule {
+class PatternTable(implicit p: Parameters) extends SPPModule with HasPerfLogging{
   val io = IO(new Bundle {
     val req = Flipped(DecoupledIO(new SignatureTableResp))
     val resp = DecoupledIO(new PatternTableResp)
@@ -269,7 +269,7 @@ class PatternTable(implicit p: Parameters) extends SPPModule {
   val enread_reg = RegInit(false.B)
   val enprefetch = WireInit(false.B)
   val enprefetchnl = WireInit(false.B)
-  val enwrite = RegNext(q.io.deq.fire() && pTable.io.r.req.fire(),0.U) //we only modify-write on demand requests
+  val enwrite = RegNext(q.io.deq.fire && pTable.io.r.req.fire,0.U) //we only modify-write on demand requests
   val current = RegInit(0.U.asTypeOf(new SignatureTableResp))
   val lookCount = RegInit(0.U(lookCountBits.W))
   val miniCount = lookCount >> 2.U
@@ -365,7 +365,7 @@ class PatternTable(implicit p: Parameters) extends SPPModule {
   //FSM
   switch(state) {
     is(s_idle) {
-      when(q.io.deq.fire()) {
+      when(q.io.deq.fire) {
         readSignature := req.signature
         readDelta := req.delta
         state := s_lookahead0
@@ -379,7 +379,7 @@ class PatternTable(implicit p: Parameters) extends SPPModule {
       state := s_lookahead
     }
     is(s_lookahead) {
-      when(RegNext(pTable.io.r.req.fire())) {
+      when(RegNext(pTable.io.r.req.fire)) {
         when(hit) {
           val issued = delta_list_checked.map(a => Mux(a =/= 0.S, 1.U, 0.U)).reduce(_ +& _)
           val testOffset = RegEnable((current.block.asSInt + maxEntry.delta).asUInt, issued =/= 0.U)
@@ -422,15 +422,15 @@ class PatternTable(implicit p: Parameters) extends SPPModule {
   q.io.deq.ready := state === s_idle
 
   //perf
-  //XSPerfAccumulate(cacheParams,s"spp_pt_do_nextline", enprefetchnl)
-  //for (i <- 0 until pTableEntries) {
-  //  XSPerfAccumulate(cacheParams,s"spp_pt_touched_entry_onlyset_${i.toString}", pTable.io.r.req.bits.setIdx === i.U(log2Up(pTableEntries).W)
-  //  )
-  //}
+  XSPerfAccumulate(s"spp_pt_do_nextline", enprefetchnl)
+  for (i <- 0 until pTableEntries) {
+    XSPerfAccumulate(s"spp_pt_touched_entry_onlyset_${i.toString}", pTable.io.r.req.bits.setIdx === i.U(log2Up(pTableEntries).W)
+    )
+  }
 }
 
 //Can add eviction notify or cycle counter for each entry
-class Unpack(implicit p: Parameters) extends SPPModule {
+class Unpack(implicit p: Parameters) extends SPPModule with HasPerfLogging{
   val io = IO(new Bundle {
     val req = Flipped(DecoupledIO(new PatternTableResp))
     val resp = ValidIO(new UnpackResp)
@@ -451,11 +451,11 @@ class Unpack(implicit p: Parameters) extends SPPModule {
   val q = Module(new Queue(chiselTypeOf(io.req.bits), unpackQueueEntries))
   q.io.enq <> io.req //change logic to replace the tail entry
 
-  val req = RegEnable(q.io.deq.bits, q.io.deq.fire())
+  val req = RegEnable(q.io.deq.bits, q.io.deq.fire)
   val req_deltas = RegInit(VecInit(Seq.fill(pTableDeltaEntries)(0.S((blkOffsetBits + 1).W))))
   val issue_finish = req_deltas.map(_ === 0.S).reduce(_ && _)
   q.io.deq.ready := !inProcess || issue_finish || endeq
-  when(q.io.deq.fire()) {
+  when(q.io.deq.fire) {
     req_deltas := q.io.deq.bits.deltas
   }
 
@@ -486,35 +486,35 @@ class Unpack(implicit p: Parameters) extends SPPModule {
       // req_deltas := req_deltas.map(a => Mux(a === extract_delta, 0.S, a))
       when(cnt === 1.U) {
         endeq := true.B
-        when(!q.io.deq.fire()) {
+        when(!q.io.deq.fire) {
           req_deltas := req_deltas.map(a => Mux(a === extract_delta, 0.S, a))
         }
       } .otherwise {
         req_deltas := req_deltas.map(a => Mux(a === extract_delta, 0.S, a))
       }
     } .otherwise {
-      when(!q.io.deq.fire()) {
+      when(!q.io.deq.fire) {
         inProcess := false.B
       }
     }
   } .otherwise {
-    when(q.io.deq.fire()) {
+    when(q.io.deq.fire) {
       inProcess := true.B
     }
   }
-  XSPerfAccumulate(cacheParams,"spp_filter_recv_req", io.req.valid)
-  XSPerfAccumulate(cacheParams,"spp_filter_hit", q.io.deq.fire() && hit)
-  XSPerfAccumulate(cacheParams,"spp_filter_l2_req", io.req.valid)
+  XSPerfAccumulate("spp_filter_recv_req", io.req.valid)
+  XSPerfAccumulate("spp_filter_hit", q.io.deq.fire && hit)
+  XSPerfAccumulate("spp_filter_l2_req", io.req.valid)
   for (off <- (-63 until 64 by 1).toList) {
     if (off < 0) {
-      XSPerfAccumulate(cacheParams,"spp_pt_pfDelta_neg_" + (-off).toString, hit && extract_delta === off.S((blkOffsetBits + 1).W))
+      XSPerfAccumulate("spp_pt_pfDelta_neg_" + (-off).toString, hit && extract_delta === off.S((blkOffsetBits + 1).W))
     } else {
-      XSPerfAccumulate(cacheParams,"spp_pt_pfDelta_pos_" + off.toString, hit && extract_delta === off.S((blkOffsetBits + 1).W))
+      XSPerfAccumulate("spp_pt_pfDelta_pos_" + off.toString, hit && extract_delta === off.S((blkOffsetBits + 1).W))
     }
   }
 }
 
-class SignaturePathPrefetch(implicit p: Parameters) extends SPPModule {
+class SignaturePathPrefetch(implicit p: Parameters) extends SPPModule with HasPerfLogging{
   val io = IO(new Bundle() {
     val train = Flipped(DecoupledIO(new PrefetchTrain)) //from higher level cache
     val req = DecoupledIO(new sppPrefetchReq) //issue to next-level cache
@@ -536,7 +536,7 @@ class SignaturePathPrefetch(implicit p: Parameters) extends SPPModule {
 
   sTable.io.req.bits.pageAddr := pageAddr
   sTable.io.req.bits.blkOffset := blkOffset
-  sTable.io.req.valid := io.train.fire()
+  sTable.io.req.valid := io.train.fire
 
   pTable.io.req <> sTable.io.resp //to detail
   pTable.io.pt2st_bp <> sTable.io.bp_update
@@ -561,8 +561,8 @@ class SignaturePathPrefetch(implicit p: Parameters) extends SPPModule {
 
   io.resp.ready := true.B
   //perf
-  XSPerfAccumulate(cacheParams, "spp_recv_train", io.train.fire())
-  XSPerfAccumulate(cacheParams, "spp_recv_st", sTable.io.resp.fire())
-  XSPerfAccumulate(cacheParams, "spp_recv_pt", Mux(pTable.io.resp.fire(), pTable.io.resp.bits.deltas.map(a => Mux(a =/= 0.S, 1.U, 0.U)).reduce(_ +& _), 0.U))
-  XSPerfAccumulate(cacheParams, "spp_hintReq", io.req.bits.hint2llc)
+  XSPerfAccumulate("spp_recv_train", io.train.fire)
+  XSPerfAccumulate("spp_recv_st", sTable.io.resp.fire)
+  XSPerfAccumulate("spp_recv_pt", Mux(pTable.io.resp.fire, pTable.io.resp.bits.deltas.map(a => Mux(a =/= 0.S, 1.U, 0.U)).reduce(_ +& _), 0.U))
+  XSPerfAccumulate("spp_hint", io.req.bits.hint2llc)
 }

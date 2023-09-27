@@ -1,15 +1,14 @@
 package coupledL3
-
+import circt.stage.{ChiselStage, FirtoolOption}
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config._
-import chisel3.stage.{ChiselGeneratorAnnotation, ChiselStage}
+import org.chipsalliance.cde.config._
+import chisel3.stage.ChiselGeneratorAnnotation
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
-import huancun._
 import coupledL2._
 import coupledL2.prefetch._
-
+import huancun.{HuanCun, HCCacheParameters, HCCacheParamsKey, CacheParameters}
 import scala.collection.mutable.ArrayBuffer
 
 class TestTop_L3()(implicit p: Parameters) extends LazyModule {
@@ -195,8 +194,9 @@ object TestTop_L3 extends App {
   })
   val top = DisableMonitors(p => LazyModule(new TestTop_L3()(p)) )(config)
 
-  (new ChiselStage).execute(args, Seq(
-    ChiselGeneratorAnnotation(() => top.module)
+  (new ChiselStage).execute(Array("--target", "verilog") ++ args, Seq(
+    ChiselGeneratorAnnotation(() => top.module),
+    FirtoolOption("--disable-annotation-unknown")
   ))
 }
 
@@ -212,7 +212,8 @@ object TestTop_L3_for_sysn extends App {
   })
   val top = DisableMonitors(p => LazyModule(new TestTop_L3_for_sysn()(p)) )(config)
 
-  (new ChiselStage).execute(args, Seq(
-    ChiselGeneratorAnnotation(() => top.module)
+  (new ChiselStage).execute(Array("--target", "verilog") ++ args, Seq(
+    ChiselGeneratorAnnotation(() => top.module),
+    FirtoolOption("--disable-annotation-unknown")
   ))
 }

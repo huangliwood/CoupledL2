@@ -17,13 +17,13 @@
 
 package coupledL2.prefetch
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.diplomacy.{BundleBridgeSink,BundleBridgeSource, LazyModule, LazyModuleImp}
 import coupledL2._
-import utility.Pipeline
+import xs.utils.Pipeline
 import huancun.PrefetchRecv
 
 // TODO: PrefetchReceiver is temporarily used since L1&L2 do not support Hint.

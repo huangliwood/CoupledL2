@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 // import coupledL2.utils.XSPerfAccumulate
 
 class grantAckQEntry(implicit p: Parameters) extends L2Bundle {
@@ -54,7 +54,7 @@ class RefillUnit(implicit p: Parameters) extends L2Module {
   io.sourceE.bits.sink := grantAckQ.io.deq.bits.sink
   io.sourceE.valid := grantAckQ.io.deq.valid
 
-  io.refillBufWrite.valid := io.sinkD.valid && hasData
+  io.refillBufWrite.valid_dups.foreach(_ := io.sinkD.valid && hasData)
   io.refillBufWrite.beat_sel := UIntToOH(beat)
   io.refillBufWrite.data.data := Fill(beatSize, io.sinkD.bits.data)
   io.refillBufWrite.id := io.sinkD.bits.source

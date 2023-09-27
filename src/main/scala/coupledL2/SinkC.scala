@@ -21,9 +21,9 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
-import chipsalliance.rocketchip.config.Parameters
-import coupledL2.utils.XSPerfAccumulate
-import utility.MemReqSource
+import org.chipsalliance.cde.config.Parameters
+import xs.utils.perf.HasPerfLogging
+import xs.utils.tl.MemReqSource
 
 class PipeBufferRead(implicit p: Parameters) extends L2Bundle {
   val bufIdx = UInt(bufIdxBits.W)
@@ -37,7 +37,7 @@ class PipeBufferResp(implicit p: Parameters) extends L2Bundle {
 // (1) For Release/ReleaseData, send it to RequestArb directly
 // (2) For ProbeAck/ProbeAckData, wakeup w_probeack in MSHR
 //     For ProbeAckData, save data into ReleaseBuffer
-class SinkC(implicit p: Parameters) extends L2Module {
+class SinkC(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val io = IO(new Bundle() {
     val c = Flipped(DecoupledIO(new TLBundleC(edgeIn.bundle)))
     val task = DecoupledIO(new TaskBundle) // Release/ReleaseData
@@ -66,7 +66,7 @@ class SinkC(implicit p: Parameters) extends L2Module {
   val full = bufValids.andR
   val noSpace = full && hasData
   val nextPtr = PriorityEncoder(~bufValids)
-  val nextPtrReg = RegEnable(nextPtr, 0.U.asTypeOf(nextPtr), io.c.fire() && isRelease && first && hasData)
+  val nextPtrReg = RegEnable(nextPtr, 0.U.asTypeOf(nextPtr), io.c.fire && isRelease && first && hasData)
 
   def toTaskBundle(c: TLBundleC): TaskBundle = {
     val task = Wire(new TaskBundle)
@@ -101,7 +101,7 @@ class SinkC(implicit p: Parameters) extends L2Module {
     task
   }
 
-  when (io.c.fire() && isRelease) {
+  when (io.c.fire && isRelease) {
     when (hasData) {
       when (first) {
         dataBuf(nextPtr)(beat) := io.c.bits.data
@@ -114,7 +114,7 @@ class SinkC(implicit p: Parameters) extends L2Module {
     }
   }
 
-  when (io.c.fire() && isRelease && last && (!io.task.ready || taskArb.io.out.valid)) {
+  when (io.c.fire && isRelease && last && (!io.task.ready || taskArb.io.out.valid)) {
     when (hasData) {
       taskValids(nextPtrReg) := true.B
       taskBuf(nextPtrReg) := toTaskBundle(io.c.bits)
@@ -131,7 +131,7 @@ class SinkC(implicit p: Parameters) extends L2Module {
     case (in, i) =>
       in.valid := taskValids(i)
       in.bits := taskBuf(i)
-      when (in.fire()) {
+      when (in.fire) {
         taskValids(i) := false.B
       }
   }
@@ -155,7 +155,7 @@ class SinkC(implicit p: Parameters) extends L2Module {
   io.resp.respInfo.dirty := io.c.bits.opcode(0)
   io.resp.respInfo.isHit := io.c.bits.opcode(0)
 
-  io.releaseBufWrite.valid := io.c.valid && io.c.bits.opcode === ProbeAckData
+  io.releaseBufWrite.valid_dups.foreach(_ := io.c.valid && io.c.bits.opcode === ProbeAckData)
   io.releaseBufWrite.beat_sel := UIntToOH(beat)
   io.releaseBufWrite.data.data := Fill(beatSize, io.c.bits.data)
   io.releaseBufWrite.id := 0.U(mshrBits.W) // id is given by MSHRCtl by comparing address to the MSHRs
@@ -172,7 +172,7 @@ class SinkC(implicit p: Parameters) extends L2Module {
   // since what we are trying to prevent is that C-Release comes first and MSHR-Release comes later
   // we can make sure this refillBufWrite can be read by MSHR-Release
   // TODO: this is rarely triggered, consider just blocking?
-  io.refillBufWrite.valid := RegNext(io.task.fire && io.task.bits.opcode === ReleaseData && newdataMask.orR, false.B)
+  io.refillBufWrite.valid_dups.foreach(_ := RegNext(io.task.fire && io.task.bits.opcode === ReleaseData && newdataMask.orR, false.B))
   io.refillBufWrite.beat_sel := Fill(beatSize, 1.U(1.W))
   io.refillBufWrite.id := RegNext(OHToUInt(newdataMask))
   io.refillBufWrite.data.data := dataBuf(RegNext(io.task.bits.bufIdx)).asUInt
@@ -183,8 +183,8 @@ class SinkC(implicit p: Parameters) extends L2Module {
 
   // Performance counters
   val stall = io.c.valid && isRelease && !io.c.ready
-  XSPerfAccumulate(cacheParams, "sinkC_c_stall", stall)
-  XSPerfAccumulate(cacheParams, "sinkC_c_stall_for_noSpace", stall && hasData && first && full)
-  XSPerfAccumulate(cacheParams, "sinkC_toReqArb_stall", io.task.valid && !io.task.ready)
-  XSPerfAccumulate(cacheParams, "sinkC_buf_full", full)
+  XSPerfAccumulate("sinkC_c_stall", stall)
+  XSPerfAccumulate("sinkC_c_stall_for_noSpace", stall && hasData && first && full)
+  XSPerfAccumulate("sinkC_toReqArb_stall", io.task.valid && !io.task.ready)
+  XSPerfAccumulate("sinkC_buf_full", full)
 }

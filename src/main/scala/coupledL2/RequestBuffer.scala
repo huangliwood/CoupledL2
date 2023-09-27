@@ -1,11 +1,12 @@
 package coupledL2
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink.TLMessages._
 import chisel3._
 import chisel3.util._
 import coupledL2.utils._
-import utility._
+import xs.utils._
+import xs.utils.perf.HasPerfLogging
 
 class ReqEntry(entries: Int = 4)(implicit p: Parameters) extends L2Bundle() {
   val valid    = Bool()
@@ -43,7 +44,7 @@ class ChosenQBundle(idWIdth: Int = 2)(implicit p: Parameters) extends L2Bundle {
   val id = UInt(idWIdth.W)
 }
 
-class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Parameters) extends L2Module {
+class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Parameters) extends L2Module with HasPerfLogging{
 
   val io = IO(new Bundle() {
     val in          = Flipped(DecoupledIO(new TaskBundle))
@@ -231,19 +232,19 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
 
   // add XSPerf to see how many cycles the req is held in Buffer
   if(cacheParams.enablePerf) {
-    XSPerfAccumulate(cacheParams, "drop_prefetch", dup) // this also serves as late prefetch
+    XSPerfAccumulate("drop_prefetch", dup) // this also serves as late prefetch
     if(flow){
-      XSPerfAccumulate(cacheParams, "req_buffer_flow", io.in.valid && doFlow)
+      XSPerfAccumulate("req_buffer_flow", io.in.valid && doFlow)
     }
-    XSPerfAccumulate(cacheParams, "req_buffer_alloc", alloc)
-    XSPerfAccumulate(cacheParams, "req_buffer_full", full)
-    XSPerfAccumulate(cacheParams, "recv_prefetch", io.in.fire && isPrefetch)
-    XSPerfAccumulate(cacheParams, "recv_normal", io.in.fire && !isPrefetch)
-    XSPerfAccumulate(cacheParams, "chosenQ_cancel", chosenQValid && cancel)
+    XSPerfAccumulate("req_buffer_alloc", alloc)
+    XSPerfAccumulate("req_buffer_full", full)
+    XSPerfAccumulate("recv_prefetch", io.in.fire && isPrefetch)
+    XSPerfAccumulate("recv_normal", io.in.fire && !isPrefetch)
+    XSPerfAccumulate("chosenQ_cancel", chosenQValid && cancel)
     // TODO: count conflict
     for(i <- 0 until entries){
       val cntEnable = PopCount(buffer.map(_.valid)) === i.U
-      XSPerfAccumulate(cacheParams, s"req_buffer_util_$i", cntEnable)
+      XSPerfAccumulate(s"req_buffer_util_$i", cntEnable)
     }
     val bufferTimer = RegInit(VecInit(Seq.fill(entries)(0.U(16.W))))
     buffer zip bufferTimer map {
@@ -253,9 +254,9 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
         assert(t < 20000.U, "ReqBuf Leak")
 
         val enable = RegNext(e.valid) && !e.valid
-        XSPerfHistogram(cacheParams, "reqBuf_timer", t, enable, 0, 20, 1, right_strict = true)
-        XSPerfHistogram(cacheParams, "reqBuf_timer", t, enable, 20, 400, 20, left_strict = true)
-        XSPerfMax(cacheParams, "max_reqBuf_timer", t, enable)
+        XSPerfHistogram("reqBuf_timer", t, enable, 0, 20, 1, right_strict = true)
+        XSPerfHistogram("reqBuf_timer", t, enable, 20, 400, 20, left_strict = true)
+        XSPerfMax("max_reqBuf_timer", t, enable)
 
         // assert !(all entries occupied for 100 cycles)
     }

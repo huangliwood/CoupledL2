@@ -19,15 +19,16 @@ package coupledL2
 
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink.TLHints._
 import coupledL2.prefetch.PrefetchReq
-import coupledL2.utils.XSPerfAccumulate
-import utility.{MemReqSource,Pipeline}
+import xs.utils.Pipeline
+import xs.utils.perf.HasPerfLogging
+import xs.utils.tl.MemReqSource
 
-class SinkA(implicit p: Parameters) extends L2Module {
+class SinkA(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val io = IO(new Bundle() {
     val a = Flipped(DecoupledIO(new TLBundleA(edgeIn.bundle)))
     val prefetchReq = prefetchOpt.map(_ => Flipped(DecoupledIO(new PrefetchReq)))
@@ -46,7 +47,7 @@ class SinkA(implicit p: Parameters) extends L2Module {
     task.tag := parseAddress(a.address)._1
     task.set := parseAddress(a.address)._2
     task.off := parseAddress(a.address)._3
-    task.alias.foreach(_ := a.user.lift(AliasKey).getOrElse(0.U))
+    task.alias.foreach(_ := a.data(aliasBitsOpt.getOrElse(1), 1))
     task.opcode := a.opcode
     task.param := a.param
     task.size := a.size
@@ -58,7 +59,7 @@ class SinkA(implicit p: Parameters) extends L2Module {
     task.aliasTask.foreach(_ := false.B)
     task.useProbeData := false.B
     task.fromL2pft.foreach(_ := false.B)
-    task.needHint.foreach(_ := a.user.lift(PrefetchKey).getOrElse(false.B))
+    task.needHint.foreach(_ := a.data(0))
     task.dirty := false.B
     task.way := 0.U(wayBits.W)
     task.meta := 0.U.asTypeOf(new MetaEntry)
@@ -66,7 +67,7 @@ class SinkA(implicit p: Parameters) extends L2Module {
     task.tagWen := false.B
     task.dsWen := false.B
     task.wayMask := 0.U(cacheParams.ways.W)
-    task.reqSource := a.user.lift(utility.ReqSourceKey).getOrElse(MemReqSource.NoWhere.id.U)
+    task.reqSource := a.user.lift(xs.utils.tl.ReqSourceKey).getOrElse(MemReqSource.NoWhere.id.U)
     task.replTask := false.B
     task.vaddr.foreach(_ := a.user.lift(VaddrKey).getOrElse(0.U))
     task.mergeTask := false.B
@@ -122,27 +123,27 @@ class SinkA(implicit p: Parameters) extends L2Module {
 
   // Performance counters
   // num of reqs
-  XSPerfAccumulate(cacheParams, "sinkA_req", io.task.fire())
-  XSPerfAccumulate(cacheParams, "sinkA_req", io.task.fire())
-  XSPerfAccumulate(cacheParams, "sinkA_req_is_free", io.task.ready && !io.task.valid)
-  XSPerfAccumulate(cacheParams, "sinkA_acquire_req", io.a.fire() && io.a.bits.opcode(2, 1) === AcquireBlock(2, 1))
-  XSPerfAccumulate(cacheParams, "sinkA_acquireblock_req", io.a.fire() && io.a.bits.opcode === AcquireBlock)
-  XSPerfAccumulate(cacheParams, "sinkA_acquireperm_req", io.a.fire() && io.a.bits.opcode === AcquirePerm)
-  XSPerfAccumulate(cacheParams, "sinkA_get_req", io.a.fire() && io.a.bits.opcode === Get)
+  XSPerfAccumulate("sinkA_req", io.task.fire)
+  XSPerfAccumulate("sinkA_req", io.task.fire)
+  XSPerfAccumulate("sinkA_req_is_free", io.task.ready && !io.task.valid)
+  XSPerfAccumulate("sinkA_acquire_req", io.a.fire && io.a.bits.opcode(2, 1) === AcquireBlock(2, 1))
+  XSPerfAccumulate("sinkA_acquireblock_req", io.a.fire && io.a.bits.opcode === AcquireBlock)
+  XSPerfAccumulate("sinkA_acquireperm_req", io.a.fire && io.a.bits.opcode === AcquirePerm)
+  XSPerfAccumulate("sinkA_get_req", io.a.fire && io.a.bits.opcode === Get)
   prefetchOpt.foreach {
     _ =>
-      XSPerfAccumulate(cacheParams, "sinkA_prefetch_req", io.prefetchReq.get.fire)
-      XSPerfAccumulate(cacheParams, "sinkA_prefetch_from_l2", io.prefetchReq.get.bits.isBOP && io.prefetchReq.get.fire)
-      XSPerfAccumulate(cacheParams, "sinkA_prefetch_from_l1", !io.prefetchReq.get.bits.isBOP && io.prefetchReq.get.fire)
+      XSPerfAccumulate("sinkA_prefetch_req", io.prefetchReq.get.fire)
+      XSPerfAccumulate("sinkA_prefetch_from_l2", io.prefetchReq.get.bits.isBOP && io.prefetchReq.get.fire)
+      XSPerfAccumulate("sinkA_prefetch_from_l1", !io.prefetchReq.get.bits.isBOP && io.prefetchReq.get.fire)
   }
 
   // cycels stalled by mainpipe
   val stall = io.task.valid && !io.task.ready
-  XSPerfAccumulate(cacheParams, "sinkA_stall_by_mainpipe", stall)
-  XSPerfAccumulate(cacheParams, "sinkA_acquire_stall_by_mainpipe", stall &&
+  XSPerfAccumulate("sinkA_stall_by_mainpipe", stall)
+  XSPerfAccumulate("sinkA_acquire_stall_by_mainpipe", stall &&
     (io.task.bits.opcode === AcquireBlock || io.task.bits.opcode === AcquirePerm))
-  XSPerfAccumulate(cacheParams, "sinkA_get_stall_by_mainpipe", stall && io.task.bits.opcode === Get)
-  XSPerfAccumulate(cacheParams, "sinkA_put_stall_by_mainpipe", stall &&
+  XSPerfAccumulate("sinkA_get_stall_by_mainpipe", stall && io.task.bits.opcode === Get)
+  XSPerfAccumulate("sinkA_put_stall_by_mainpipe", stall &&
     (io.task.bits.opcode === PutFullData || io.task.bits.opcode === PutPartialData))
-  prefetchOpt.foreach { _ => XSPerfAccumulate(cacheParams, "sinkA_prefetch_stall_by_mainpipe", stall && io.task.bits.opcode === Hint) }
+  prefetchOpt.foreach { _ => XSPerfAccumulate("sinkA_prefetch_stall_by_mainpipe", stall && io.task.bits.opcode === Hint) }
 }

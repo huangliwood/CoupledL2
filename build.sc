@@ -4,18 +4,18 @@ import scalafmt._
 import os.Path
 import publish._
 import $file.`rocket-chip`.common
-import $file.`rocket-chip`.`api-config-chipsalliance`.`build-rules`.mill.build
+import $file.`rocket-chip`.cde.common
 import $file.`rocket-chip`.hardfloat.build
 
 val defaultVersions = Map(
-  "chisel3" -> "3.5.0",
-  "chisel3-plugin" -> "3.5.0",
-  "chiseltest" -> "0.3.2",
-  "scala" -> "2.12.13",
+  "chisel" -> "6.0.0-M3",
+  "chisel-plugin" -> "6.0.0-M3",
+  "chiseltest" -> "5.0.0",
+  "scala" -> "2.13.10",
   "scalatest" -> "3.2.7"
 )
 
-def getVersion(dep: String, org: String = "edu.berkeley.cs", cross: Boolean = false) = {
+def getVersion(dep: String, org: String = "org.chipsalliance", cross: Boolean = false) = {
   val version = sys.env.getOrElse(dep + "Version", defaultVersions(dep))
   if (cross)
     ivy"$org:::$dep:$version"
@@ -26,99 +26,112 @@ def getVersion(dep: String, org: String = "edu.berkeley.cs", cross: Boolean = fa
 trait CommonModule extends ScalaModule {
   override def scalaVersion = defaultVersions("scala")
 
-  override def scalacOptions = Seq("-Xsource:2.11")
+  override def scalacPluginIvyDeps = Agg(getVersion("chisel-plugin", cross = true))
 
-  val macroParadise = ivy"org.scalamacros:::paradise:2.1.1"
-  val chisel3Plugin = ivy"edu.berkeley.cs:::chisel3-plugin:3.5.0"
-
-  override def compileIvyDeps = Agg(macroParadise)
-  override def scalacPluginIvyDeps = Agg(macroParadise, chisel3Plugin)
+  override def scalacOptions = super.scalacOptions() ++ Agg("-Ymacro-annotations", "-Ytasty-reader")
 
 }
 
-object rocketchip extends `rocket-chip`.common.CommonRocketChip {
+object rocketchip extends RocketChip
 
-  val rcPath = os.pwd / "rocket-chip"
+trait RocketChip
+  extends millbuild.`rocket-chip`.common.RocketChipModule
+    with SbtModule {
+  def scalaVersion: T[String] = T(defaultVersions("scala"))
 
-  override def scalaVersion = defaultVersions("scala")
+  override def millSourcePath = os.pwd / "rocket-chip"
 
-  override def scalacOptions = Seq("-Xsource:2.11")
+  def chiselModule = None
 
-  override def millSourcePath = rcPath
+  def chiselPluginJar = None
 
-  object configRocket extends `rocket-chip`.`api-config-chipsalliance`.`build-rules`.mill.build.config with PublishModule {
-    override def millSourcePath = rcPath / "api-config-chipsalliance" / "design" / "craft"
+  def chiselIvy = Some(getVersion("chisel"))
 
-    override def scalaVersion = T {
-      rocketchip.scalaVersion()
-    }
+  def chiselPluginIvy = Some(getVersion("chisel-plugin", cross=true))
 
-    override def pomSettings = T {
-      rocketchip.pomSettings()
-    }
+  def macrosModule = macros
 
-    override def publishVersion = T {
-      rocketchip.publishVersion()
-    }
+  def hardfloatModule = hardfloat
+
+  def cdeModule = cde
+
+  def mainargsIvy = ivy"com.lihaoyi::mainargs:0.5.0"
+
+  def json4sJacksonIvy = ivy"org.json4s::json4s-jackson:4.0.5"
+
+  object macros extends Macros
+
+  trait Macros
+    extends millbuild.`rocket-chip`.common.MacrosModule
+      with SbtModule {
+
+    def scalaVersion: T[String] = T(defaultVersions("scala"))
+
+    def scalaReflectIvy = ivy"org.scala-lang:scala-reflect:${defaultVersions("scala")}"
   }
 
-  object hardfloatRocket extends `rocket-chip`.hardfloat.build.hardfloat {
-    override def millSourcePath = rcPath / "hardfloat"
+  object hardfloat extends Hardfloat
 
-    override def scalaVersion = T {
-      rocketchip.scalaVersion()
-    }
+  trait Hardfloat
+    extends millbuild.`rocket-chip`.hardfloat.common.HardfloatModule {
 
-    def chisel3IvyDeps = if(chisel3Module.isEmpty) Agg(
-      common.getVersion("chisel3")
-    ) else Agg.empty[Dep]
+    def scalaVersion: T[String] = T(defaultVersions("scala"))
 
-    def chisel3PluginIvyDeps = Agg(common.getVersion("chisel3-plugin", cross=true))
+    override def millSourcePath = os.pwd / "rocket-chip" / "hardfloat" / "hardfloat"
+
+    def chiselModule = None
+
+    def chiselPluginJar = None
+
+    def chiselIvy = Some(getVersion("chisel"))
+
+    def chiselPluginIvy = Some(getVersion("chisel-plugin", cross=true))
   }
 
-  def hardfloatModule = hardfloatRocket
+  object cde extends CDE
 
-  def configModule = configRocket
+  trait CDE
+    extends millbuild.`rocket-chip`.cde.common.CDEModule
+      with ScalaModule {
 
+    def scalaVersion: T[String] = T(defaultVersions("scala"))
+
+    override def millSourcePath = os.pwd / "rocket-chip" / "cde" / "cde"
+  }
 }
-
-object utility extends SbtModule with ScalafmtModule with CommonModule {
-
-   override def ivyDeps = Agg(common.getVersion("chisel3"))
-
-   override def millSourcePath = os.pwd / "utility"
-
-   override def moduleDeps = super.moduleDeps ++ Seq(rocketchip)
- }
 
 object xsutils extends SbtModule with ScalafmtModule with CommonModule {
-
+  override def ivyDeps = Agg(getVersion("chisel"))
   override def millSourcePath = os.pwd / "xs-utils"
-
   override def moduleDeps = super.moduleDeps ++ Seq(
     rocketchip
   )
 }
 
 object huancun extends SbtModule with ScalafmtModule with CommonModule {
+  override def ivyDeps = Agg(getVersion("chisel"))
   override def millSourcePath = os.pwd / "HuanCun"
   override def moduleDeps = super.moduleDeps ++ Seq(
-    rocketchip, utility, xsutils
+    rocketchip, xsutils
+  )
+}
+
+object axi2tl extends SbtModule with ScalafmtModule with CommonModule {
+  override def millSourcePath = os.pwd / "AXItoTL"
+  override def moduleDeps = super.moduleDeps ++ Seq(
+    rocketchip, xsutils
   )
 }
 
 object CoupledL2 extends SbtModule with ScalafmtModule with CommonModule {
   override def millSourcePath = millOuterCtx.millSourcePath
-
-
   override def ivyDeps = super.ivyDeps() ++ Agg(
-    getVersion("chisel3"),
-    getVersion("chiseltest"),
+    getVersion("chisel"),
+    getVersion("chiseltest", "edu.berkeley.cs"),
   )
+  override def moduleDeps = super.moduleDeps ++ Seq(rocketchip, huancun, xsutils, axi2tl)
 
-  override def moduleDeps = super.moduleDeps ++ Seq(rocketchip, utility, huancun, xsutils)
-
-  object test extends Tests {
+  object test extends SbtModuleTests with TestModule.ScalaTest {
     override def ivyDeps = super.ivyDeps() ++ Agg(
       getVersion("scalatest","org.scalatest")
     )

@@ -19,10 +19,10 @@ package coupledL2
 
 import chisel3._
 import chisel3.util._
-import utility._
-import chipsalliance.rocketchip.config.Parameters
+import xs.utils._
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink._
-import coupledL2.utils.XSPerfAccumulate
+import xs.utils.perf.HasPerfLogging
 
 //class SourceC(implicit p: Parameters) extends L2Module {
 //  val io = IO(new Bundle() {
@@ -45,7 +45,7 @@ import coupledL2.utils.XSPerfAccumulate
 //
 //  selectOH.asBools.zipWithIndex.foreach {
 //    case (sel, i) =>
-//      when (sel && io.in.fire()) {
+//      when (sel && io.in.fire) {
 //        beat_valids(i).foreach(_ := true.B)
 //        tasks(i) := io.in.bits.task
 //        datas(i) := io.in.bits.data
@@ -61,7 +61,7 @@ import coupledL2.utils.XSPerfAccumulate
 //    c.address := Cat(task.tag, task.set, task.off)
 //    c.data := data
 //    c.corrupt := false.B
-//    c.user.lift(utility.ReqSourceKey).foreach(_ := task.reqSource)
+//    c.user.lift(xs.utils.ReqSourceKey).foreach(_ := task.reqSource)
 //    c.echo.lift(DirtyKey).foreach(_ := task.dirty)
 //    c
 //  }
@@ -88,7 +88,7 @@ import coupledL2.utils.XSPerfAccumulate
 //      out.bits := toTLBundleC(tasks(i), beat)
 //      val hasData = out.bits.opcode(0)
 //
-//      when (out.fire()) {
+//      when (out.fire) {
 //        when (hasData) {
 //          beat_valids(i) := VecInit(next_beatsOH.asBools)
 //        }.otherwise {
@@ -106,16 +106,16 @@ import coupledL2.utils.XSPerfAccumulate
 //  val isRelease = io.out.bits.opcode === TLMessages.Release
 //  val isReleaseData = io.out.bits.opcode === TLMessages.ReleaseData
 //  // [LRelease] TODO: resp from SourceC indicating w_release_sent may be deprecated
-//  io.resp.valid := io.out.fire() && first && (isRelease || isReleaseData)
+//  io.resp.valid := io.out.fire && first && (isRelease || isReleaseData)
 //  io.resp.mshrId := io.out.bits.source
 //  io.resp.set := parseFullAddress(io.out.bits.address)._2
 //  io.resp.tag := parseFullAddress(io.out.bits.address)._1
 //  io.resp.respInfo := 0.U.asTypeOf(new RespInfoBundle)
 //
-//  XSPerfAccumulate(cacheParams, "sourceC_full", full)
+//  XSPerfAccumulate("sourceC_full", full)
 //}
 
-class SourceC(implicit p: Parameters) extends L2Module {
+class SourceC(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val io = IO(new Bundle() {
     val in = Flipped(DecoupledIO(new Bundle() {
       val task = new TaskBundle()
@@ -158,7 +158,7 @@ class SourceC(implicit p: Parameters) extends L2Module {
     c.address := Cat(task.tag, task.set, task.off)
     c.data := data
     c.corrupt := false.B
-    c.user.lift(utility.ReqSourceKey).foreach(_ := task.reqSource)
+    c.user.lift(xs.utils.tl.ReqSourceKey).foreach(_ := task.reqSource)
     c.echo.lift(DirtyKey).foreach(_ := task.dirty)
     c
   }

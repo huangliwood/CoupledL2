@@ -20,8 +20,8 @@ package coupledL2
 import chisel3._
 import chisel3.util._
 import xs.utils.sram.SRAMTemplate
-import utility.RegNextN
-import chipsalliance.rocketchip.config.Parameters
+import xs.utils.RegNextN
+import org.chipsalliance.cde.config.Parameters
 import coupledL2.utils.BankedSRAM
 import xs.utils.Code
 
@@ -51,11 +51,21 @@ class DataStorage(implicit p: Parameters) extends L2Module {
 
   val array  = Module(new BankedSRAM(new DSBlock, blocks, 1, cacheParams.dsNBanks, singlePort = true, enableClockGate = enableClockGate))
 
+  // read
   val arrayIdx = Cat(io.req.bits.way, io.req.bits.set)
-  val wen = io.req.valid && io.req.bits.wen
   val ren = io.req.valid && !io.req.bits.wen
-  array.io.w.apply(wen, io.wdata, arrayIdx, 1.U)
   array.io.r.apply(ren, arrayIdx)
+
+  // write
+  val wReqReg = RegNext(io.req)
+  val wDataReg = RegEnable(io.wdata, io.req.valid && io.req.bits.wen)
+  val wArrayIdx = Cat(wReqReg.bits.way, wReqReg.bits.set)
+  val wen = wReqReg.valid && wReqReg.bits.wen
+  array.io.w.apply(wen, wDataReg, wArrayIdx, 1.U)
+
+  val wrSameTime = ren && wen
+  dontTouch(wrSameTime)
+  assert(!wrSameTime, "Wraning: write and read same time, wReq_set:%d wReq_way:%d rReq_set:%d rReq_way:%d\n", wReqReg.bits.set, wReqReg.bits.way, io.req.bits.set, io.req.bits.way)
 
   // Seperate the whole block of data into several banksECC, each bank contains 8 bytes(64-bit).
   // For every bank, we attach ECC protection bits.

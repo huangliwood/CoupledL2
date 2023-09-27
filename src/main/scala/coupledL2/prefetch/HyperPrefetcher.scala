@@ -1,12 +1,12 @@
 package coupledL2.prefetch
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
 import coupledL2._
 import coupledL2.HasCoupledL2Parameters
-import coupledL2.utils.XSPerfAccumulate
+import xs.utils.perf.HasPerfLogging
 
 case class HyperPrefetchParams(
   fTableEntries: Int = 32,
@@ -145,7 +145,7 @@ class FilterV2(implicit p: Parameters) extends PrefetchBranchV2Module {
 }
 
 //Only used for hybrid spp and bop
-class HyperPrefetcher()(implicit p: Parameters) extends PrefetchBranchV2Module {
+class HyperPrefetcher()(implicit p: Parameters) extends PrefetchBranchV2Module with HasPerfLogging{
   val io = IO(new Bundle() {
     val train = Flipped(DecoupledIO(new PrefetchTrain))
     val req = DecoupledIO(new PrefetchReq)
@@ -190,7 +190,7 @@ class HyperPrefetcher()(implicit p: Parameters) extends PrefetchBranchV2Module {
   }
   bop.io.train.valid := io.train.valid || train_for_bop_valid
   bop.io.train.bits := Mux(io.train.valid, io.train.bits, train_for_bop)
-  when(bop.io.train.fire() && !io.train.valid) {
+  when(bop.io.train.fire && !io.train.valid) {
     train_for_bop_valid := false.B
   }
 
@@ -238,8 +238,8 @@ class HyperPrefetcher()(implicit p: Parameters) extends PrefetchBranchV2Module {
   spp.io.db_degree.bits := io.db_degree.bits
   spp.io.queue_used := io.queue_used
 
-  XSPerfAccumulate(cacheParams, "bop_send2_queue", fTable.io.resp.fire && bop.io.req.valid)
-  XSPerfAccumulate(cacheParams, "sms_send2_queue", fTable.io.resp.fire && q_sms.io.deq.fire)
-  XSPerfAccumulate(cacheParams, "spp_send2_queue", fTable.io.resp.fire && q_spp.io.deq.fire)
-  XSPerfAccumulate(cacheParams, "prefetcher_has_evict", io.evict.fire())
+  XSPerfAccumulate("bop_send2_queue", fTable.io.resp.fire && bop.io.req.valid)
+  XSPerfAccumulate("sms_send2_queue", fTable.io.resp.fire && q_sms.io.deq.fire)
+  XSPerfAccumulate("spp_send2_queue", fTable.io.resp.fire && q_spp.io.deq.fire)
+  XSPerfAccumulate("prefetcher_has_evict", io.evict.fire)
 }

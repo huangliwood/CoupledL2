@@ -2,10 +2,10 @@ package coupledL3
 
 import chisel3._
 import chisel3.util._
-import utility._
-import utility.ParallelMax
+import xs.utils._
+import xs.utils.ParallelMax
 import coupledL3.MetaData._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink.TLPermissions._

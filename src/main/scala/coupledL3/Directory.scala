@@ -19,13 +19,11 @@ package coupledL3
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.util.SetAssocLRU
 import coupledL3.utils._
-import utility.ParallelPriorityMux
-import chipsalliance.rocketchip.config.Parameters
+import xs.utils.ParallelPriorityMux
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink.TLMessages
-import xs.utils.sram._
-import xs.utils.RegNextN
+import xs.utils.perf.HasPerfLogging
 import xs.utils.sram.SRAMTemplate
 
 
@@ -92,7 +90,7 @@ class TagWrite(implicit p: Parameters) extends L3Bundle {
   val wtag = UInt(tagBits.W)
 }
 
-class Directory(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
+class Directory(implicit p: Parameters) extends L3Module with DontCareInnerLogic with HasPerfLogging{
 
   val io = IO(new Bundle() {
     val read = Flipped(DecoupledIO(new DirRead))
@@ -158,7 +156,7 @@ class Directory(implicit p: Parameters) extends L3Module with DontCareInnerLogic
      stage 3: output latched hit/way and chosen meta/tag by way
   */
   // TODO: how about moving hit/way calculation to stage 2? Cuz SRAM latency can be high under high frequency
-  val reqReg = RegEnable(io.read.bits, 0.U.asTypeOf(io.read.bits), enable = io.read.fire)
+  val reqReg = RegEnable(io.read.bits, 0.U.asTypeOf(io.read.bits), io.read.fire)
   val hit_s2 = Wire(Bool())
   val way_s2 = Wire(UInt(wayBits.W))
   val err_s2 = WireInit(VecInit(Seq.fill(ways)(false.B)))
@@ -175,9 +173,9 @@ class Directory(implicit p: Parameters) extends L3Module with DontCareInnerLogic
     }
     0.U
   } else if(cacheParams.replacement == "srrip"){
-    val repl_sram_r = replacer_sram_opt.get.io.r(io.read.fire(), io.read.bits.set).resp.data(0)
+    val repl_sram_r = replacer_sram_opt.get.io.r(io.read.fire, io.read.bits.set).resp.data(0)
     val repl_state_hold = WireInit(0.U(repl.nBits.W))
-    repl_state_hold := HoldUnless(repl_sram_r, RegNext(io.read.fire(), false.B))
+    repl_state_hold := HoldUnless(repl_sram_r, RegNext(io.read.fire, false.B))
     val next_state = repl.get_next_state(repl_state_hold, way_s2, hit_s2)
     val repl_init = Wire(Vec(ways, UInt(2.W)))
     repl_init.foreach(_ := 2.U(2.W))
@@ -199,9 +197,9 @@ class Directory(implicit p: Parameters) extends L3Module with DontCareInnerLogic
       PSEL := PSEL - 1.U
     }
 
-    val repl_sram_r = replacer_sram_opt.get.io.r(io.read.fire(), io.read.bits.set).resp.data(0)
+    val repl_sram_r = replacer_sram_opt.get.io.r(io.read.fire, io.read.bits.set).resp.data(0)
     val repl_state_hold = WireInit(0.U(repl.nBits.W))
-    repl_state_hold := HoldUnless(repl_sram_r, RegNext(io.read.fire(), false.B))
+    repl_state_hold := HoldUnless(repl_sram_r, RegNext(io.read.fire, false.B))
     // decide use which policy by policy selection counter, for insertion
     /*if set -> SDMs: use fix policy
       else if PSEL(MSB)==0: use srrip
@@ -336,6 +334,6 @@ class Directory(implicit p: Parameters) extends L3Module with DontCareInnerLogic
     resetIdx := resetIdx - 1.U
   }
 
-  XSPerfAccumulate(cacheParams, "dirRead_cnt", reqValidReg)
-  XSPerfAccumulate(cacheParams, "choose_busy_way", reqValidReg && !reqReg.wayMask(chosenWay))
+  XSPerfAccumulate( "dirRead_cnt", reqValidReg)
+  XSPerfAccumulate( "choose_busy_way", reqValidReg && !reqReg.wayMask(chosenWay))
 }

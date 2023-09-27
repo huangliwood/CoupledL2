@@ -191,6 +191,6 @@ object HoldUnless {
 
 //   // latch read results
 //   io.r.map{ case r => {
-//     r.resp.data := HoldUnless(ram.io.r.resp.data, RegNext(r.req.fire()))
+//     r.resp.data := HoldUnless(ram.io.r.resp.data, RegNext(r.req.fire))
 //   }}
 // }

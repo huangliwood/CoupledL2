@@ -22,14 +22,15 @@ import chisel3.util._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.util.leftOR
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import coupledL3.utils._
 import coupledL3.debug._
 import coupledL3.noninclusive.ProbeHelper
-import utility.RegNextN
+import xs.utils.{GTimer, RegNextN}
 import chisel3.util.experimental.BoringUtils
+import xs.utils.perf.HasPerfLogging
 
-class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
+class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic with HasPerfLogging{
   val io = IO(new Bundle {
     val in = Flipped(TLBundle(edgeIn.bundle))
     val out = TLBundle(edgeOut.bundle)
@@ -220,7 +221,7 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
     timer := timer + 1.U
     a_begin_times.zipWithIndex.foreach {
       case (r, i) =>
-        when (sinkA.io.a.fire() && sinkA.io.a.bits.source === i.U) {
+        when (sinkA.io.a.fire && sinkA.io.a.bits.source === i.U) {
           r := timer
         }
     }
@@ -228,10 +229,10 @@ class Slice()(implicit p: Parameters) extends L3Module with DontCareInnerLogic {
     val delay = timer - a_begin_times(d_source)
     val (first, _, _, _) = edgeIn.count(grantBuf.io.d)
     val delay_sample = grantBuf.io.d.fire && grantBuf.io.d.bits.opcode =/= ReleaseAck && first
-    XSPerfHistogram(cacheParams, "a_to_d_delay", delay, delay_sample, 0, 20, 1, true, true)
-    XSPerfHistogram(cacheParams, "a_to_d_delay", delay, delay_sample, 20, 300, 10, true, true)
-    XSPerfHistogram(cacheParams, "a_to_d_delay", delay, delay_sample, 300, 500, 20, true, true)
-    XSPerfHistogram(cacheParams, "a_to_d_delay", delay, delay_sample, 500, 1000, 100, true, false)
+    XSPerfHistogram( "a_to_d_delay", delay, delay_sample, 0, 20, 1, true, true)
+    XSPerfHistogram( "a_to_d_delay", delay, delay_sample, 20, 300, 10, true, true)
+    XSPerfHistogram( "a_to_d_delay", delay, delay_sample, 300, 500, 20, true, true)
+    XSPerfHistogram( "a_to_d_delay", delay, delay_sample, 500, 1000, 100, true, false)
   }
 
   val dirRespBuffer = Module(new DirRespBuffer)

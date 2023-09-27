@@ -2,7 +2,7 @@ package coupledL2.utils
 
 import chisel3._
 import chisel3.util._
-import xs.utils.sram.SRAMTemplate
+import xs.utils.sram._
 
 
 // divide SRAM into n banks
@@ -36,7 +36,7 @@ class BankedSRAM[T <: Data]
     val sram = Module(new SRAMTemplate(
       gen, innerSet, ways,
       shouldReset = shouldReset, holdRead = holdRead,
-      singlePort = true, bypassWrite = bypassWrite,
+      singlePort = singlePort, bypassWrite = bypassWrite,
       clk_div_by_2 = clk_div_by_2,
       hasMbist = hasMbist,
       hasClkGate = enableClockGate

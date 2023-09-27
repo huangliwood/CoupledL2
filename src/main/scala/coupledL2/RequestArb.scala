@@ -19,13 +19,14 @@ package coupledL2
 
 import chisel3._
 import chisel3.util._
-import utility._
+import xs.utils._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
-import chipsalliance.rocketchip.config.Parameters
-import coupledL2.utils.XSPerfAccumulate
+import org.chipsalliance.cde.config.Parameters
+import coupledL2.MetaData.isParamFromT
+import xs.utils.perf.HasPerfLogging
 
-class RequestArb(implicit p: Parameters) extends L2Module {
+class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val io = IO(new Bundle() {
     /* receive incoming tasks */
     val sinkA    = Flipped(DecoupledIO(new TaskBundle))
@@ -88,7 +89,7 @@ class RequestArb(implicit p: Parameters) extends L2Module {
   // if mshr_task_s1 is replRead, it might stall and wait for dirRead.ready, so we block new mshrTask from entering
   // TODO: will cause msTask path vacant for one-cycle after replRead, since not use Flow so as to avoid ready propagation
   io.mshrTask.ready := !io.fromGrantBuffer.blockMSHRReqEntrance && !s1_needs_replRead
-  mshr_task_s0.valid := io.mshrTask.fire()
+  mshr_task_s0.valid := io.mshrTask.fire
   mshr_task_s0.bits := io.mshrTask.bits
 
   /* ======== Stage 1 ======== */
@@ -104,8 +105,15 @@ class RequestArb(implicit p: Parameters) extends L2Module {
   val A_task = io.sinkA.bits
   val B_task = io.sinkB.bits
   val C_task = io.sinkC.bits
-  val block_A = io.fromMSHRCtl.blockA_s1 || io.fromMainPipe.blockA_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockA_s1
-  val block_B = io.fromMSHRCtl.blockB_s1 || io.fromMainPipe.blockB_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockB_s1
+
+  // block req when reads_DS and writes_DS occur at the same time
+  val wen = RegInit(false.B)
+  val a_ren_block = (A_task.opcode === Get || A_task.opcode === AcquireBlock) && wen
+  val b_ren_block = wen
+
+  // block chnl
+  val block_A = io.fromMSHRCtl.blockA_s1 || io.fromMainPipe.blockA_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockA_s1 || a_ren_block
+  val block_B = io.fromMSHRCtl.blockB_s1 || io.fromMainPipe.blockB_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockB_s1 || b_ren_block
   val block_C = io.fromMSHRCtl.blockC_s1 || io.fromMainPipe.blockC_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockC_s1
 
   val sinkValids = VecInit(Seq(
@@ -128,6 +136,11 @@ class RequestArb(implicit p: Parameters) extends L2Module {
   val task_s1 = Mux(mshr_task_s1.valid, mshr_task_s1, chnl_task_s1)
 
   io.taskInfo_s1 := mshr_task_s1
+
+  // recording req wen with a loose scope
+  val wen_c = !task_s1.bits.mshrTask && task_s1.bits.fromC && isParamFromT(task_s1.bits.param)
+  val wen_mshr = task_s1.bits.mshrTask && task_s1.bits.dsWen // TODO: Can be optimized
+  wen := task_s1.valid  && (wen_c || wen_mshr && !mshr_replRead_stall)
 
   /* Meta read request */
   // ^ only sinkA/B/C tasks need to read directory
@@ -196,37 +209,37 @@ class RequestArb(implicit p: Parameters) extends L2Module {
   dontTouch(io)
 
   // Performance counters
-  XSPerfAccumulate(cacheParams, "mshr_req", mshr_task_s0.valid)
-  XSPerfAccumulate(cacheParams, "mshr_req_stall", io.mshrTask.valid && !io.mshrTask.ready)
+  XSPerfAccumulate("mshr_req", mshr_task_s0.valid)
+  XSPerfAccumulate("mshr_req_stall", io.mshrTask.valid && !io.mshrTask.ready)
 
-  XSPerfAccumulate(cacheParams, "sinkA_req", io.sinkA.fire())
-  XSPerfAccumulate(cacheParams, "sinkB_req", io.sinkB.fire())
-  XSPerfAccumulate(cacheParams, "sinkC_req", io.sinkC.fire())
+  XSPerfAccumulate("sinkA_req", io.sinkA.fire)
+  XSPerfAccumulate("sinkB_req", io.sinkB.fire)
+  XSPerfAccumulate("sinkC_req", io.sinkC.fire)
   
-  XSPerfAccumulate(cacheParams, "sinkA_stall", io.sinkA.valid && !io.sinkA.ready)
-  XSPerfAccumulate(cacheParams, "sinkB_stall", io.sinkB.valid && !io.sinkB.ready)
-  XSPerfAccumulate(cacheParams, "sinkC_stall", io.sinkC.valid && !io.sinkC.ready)
+  XSPerfAccumulate("sinkA_stall", io.sinkA.valid && !io.sinkA.ready)
+  XSPerfAccumulate("sinkB_stall", io.sinkB.valid && !io.sinkB.ready)
+  XSPerfAccumulate("sinkC_stall", io.sinkC.valid && !io.sinkC.ready)
 
-  XSPerfAccumulate(cacheParams, "sinkA_stall_by_mshr", io.sinkA.valid && io.fromMSHRCtl.blockA_s1)
-  XSPerfAccumulate(cacheParams, "sinkB_stall_by_mshr", io.sinkB.valid && io.fromMSHRCtl.blockB_s1)
+  XSPerfAccumulate("sinkA_stall_by_mshr", io.sinkA.valid && io.fromMSHRCtl.blockA_s1)
+  XSPerfAccumulate("sinkB_stall_by_mshr", io.sinkB.valid && io.fromMSHRCtl.blockB_s1)
 
-  XSPerfAccumulate(cacheParams, "sinkA_stall_by_mainpipe", io.sinkA.valid && io.fromMainPipe.blockA_s1)
-  XSPerfAccumulate(cacheParams, "sinkB_stall_by_mainpipe", io.sinkB.valid && io.fromMainPipe.blockB_s1)
-  XSPerfAccumulate(cacheParams, "sinkC_stall_by_mainpipe", io.sinkC.valid && io.fromMainPipe.blockC_s1)
+  XSPerfAccumulate("sinkA_stall_by_mainpipe", io.sinkA.valid && io.fromMainPipe.blockA_s1)
+  XSPerfAccumulate("sinkB_stall_by_mainpipe", io.sinkB.valid && io.fromMainPipe.blockB_s1)
+  XSPerfAccumulate("sinkC_stall_by_mainpipe", io.sinkC.valid && io.fromMainPipe.blockC_s1)
 
-  XSPerfAccumulate(cacheParams, "sinkA_stall_by_grantbuf", io.sinkA.valid && io.fromGrantBuffer.blockSinkReqEntrance.blockA_s1)
-  XSPerfAccumulate(cacheParams, "sinkB_stall_by_grantbuf", io.sinkB.valid && io.fromGrantBuffer.blockSinkReqEntrance.blockB_s1)
-  XSPerfAccumulate(cacheParams, "sinkC_stall_by_grantbuf", io.sinkC.valid && io.fromGrantBuffer.blockSinkReqEntrance.blockC_s1)
+  XSPerfAccumulate("sinkA_stall_by_grantbuf", io.sinkA.valid && io.fromGrantBuffer.blockSinkReqEntrance.blockA_s1)
+  XSPerfAccumulate("sinkB_stall_by_grantbuf", io.sinkB.valid && io.fromGrantBuffer.blockSinkReqEntrance.blockB_s1)
+  XSPerfAccumulate("sinkC_stall_by_grantbuf", io.sinkC.valid && io.fromGrantBuffer.blockSinkReqEntrance.blockC_s1)
 
-  XSPerfAccumulate(cacheParams, "sinkA_stall_by_dir", io.sinkA.valid && !block_A && !io.dirRead_s1.ready)
-  XSPerfAccumulate(cacheParams, "sinkB_stall_by_dir", io.sinkB.valid && !block_B && !io.dirRead_s1.ready)
-  XSPerfAccumulate(cacheParams, "sinkC_stall_by_dir", io.sinkC.valid && !block_C && !io.dirRead_s1.ready)
+  XSPerfAccumulate("sinkA_stall_by_dir", io.sinkA.valid && !block_A && !io.dirRead_s1.ready)
+  XSPerfAccumulate("sinkB_stall_by_dir", io.sinkB.valid && !block_B && !io.dirRead_s1.ready)
+  XSPerfAccumulate("sinkC_stall_by_dir", io.sinkC.valid && !block_C && !io.dirRead_s1.ready)
 
-  XSPerfAccumulate(cacheParams, "sinkA_stall_by_sinkB", io.sinkA.valid && sink_ready_basic && !block_A && sinkValids(1) && !sinkValids(0))
-  XSPerfAccumulate(cacheParams, "sinkA_stall_by_sinkC", io.sinkA.valid && sink_ready_basic && !block_A && sinkValids(0))
-  XSPerfAccumulate(cacheParams, "sinkB_stall_by_sinkC", io.sinkB.valid && sink_ready_basic && !block_B && sinkValids(0))
+  XSPerfAccumulate("sinkA_stall_by_sinkB", io.sinkA.valid && sink_ready_basic && !block_A && sinkValids(1) && !sinkValids(0))
+  XSPerfAccumulate("sinkA_stall_by_sinkC", io.sinkA.valid && sink_ready_basic && !block_A && sinkValids(0))
+  XSPerfAccumulate("sinkB_stall_by_sinkC", io.sinkB.valid && sink_ready_basic && !block_B && sinkValids(0))
 
-  XSPerfAccumulate(cacheParams, "sinkA_stall_by_mshrTask", io.sinkA.valid && mshr_task_s1.valid)
-  XSPerfAccumulate(cacheParams, "sinkB_stall_by_mshrTask", io.sinkB.valid && mshr_task_s1.valid)
-  XSPerfAccumulate(cacheParams, "sinkC_stall_by_mshrTask", io.sinkC.valid && mshr_task_s1.valid)
+  XSPerfAccumulate("sinkA_stall_by_mshrTask", io.sinkA.valid && mshr_task_s1.valid)
+  XSPerfAccumulate("sinkB_stall_by_mshrTask", io.sinkB.valid && mshr_task_s1.valid)
+  XSPerfAccumulate("sinkC_stall_by_mshrTask", io.sinkC.valid && mshr_task_s1.valid)
 }

@@ -21,15 +21,14 @@ package coupledL2
 
 import chisel3._
 import chisel3.util._
-import utility.{FastArbiter, Pipeline}
+import xs.utils.{FastArbiter, Pipeline}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.util._
-import chipsalliance.rocketchip.config.Parameters
-import scala.math.max
+import org.chipsalliance.cde.config.Parameters
 import coupledL2.prefetch._
-import coupledL2.utils.XSPerfAccumulate
+import xs.utils.perf.HasPerfLogging
 
 trait HasCoupledL2Parameters {
   val p: Parameters
@@ -245,7 +244,7 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
     case _ => None //Spp not exist, can not use multl-level refill
   }
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) with HasPerfLogging{
     val banks = node.in.size
     val bankBits = if (banks == 1) 0 else log2Up(banks)
     val io = IO(new Bundle {
@@ -290,22 +289,22 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
     val prefetcher = prefetchOpt.map(_ => Module(new Prefetcher()(pftParams)))
     val prefetchTrains = prefetchOpt.map(_ => Wire(Vec(banks, DecoupledIO(new PrefetchTrain()(pftParams)))))
     val prefetchResps = prefetchOpt.map(_ => Wire(Vec(banks, DecoupledIO(new PrefetchResp()(pftParams)))))
-    val prefetchEvicts = prefetchOpt.get match{
+    val prefetchEvicts = prefetchOpt.map({
       case hyper : HyperPrefetchParams =>
         Some( Wire(Vec(banks, DecoupledIO(new PrefetchEvict()(pftParams)))))
       case _ => None
-    }
+    })
     val prefetchReqsReady = WireInit(VecInit(Seq.fill(banks)(false.B)))
     prefetchOpt.foreach {
       _ =>
         fastArb(prefetchTrains.get, prefetcher.get.io.train, Some("prefetch_train"))
         prefetcher.get.io.req.ready := Cat(prefetchReqsReady).orR
         fastArb(prefetchResps.get, prefetcher.get.io.resp, Some("prefetch_resp"))
-        prefetchEvicts match {
+        prefetchEvicts.foreach({
           case Some(evict_wire) => 
-          fastArb(evict_wire, prefetcher.get.io.evict.get, Some("prefetch_evict"))
+            fastArb(evict_wire, prefetcher.get.io.evict.get, Some("prefetch_evict"))
           case None =>
-        }
+        })
     }
 
     pf_recv_node match {
@@ -395,20 +394,20 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
             val resp = Pipeline(s.resp)
             prefetchTrains.get(i) <> train
             prefetchResps.get(i) <> resp
-            prefetchEvicts match {
+            prefetchEvicts.foreach({
                   case Some(evict_wire) => 
-                  val s_evict = Pipeline(s.evict.get)
-                  evict_wire(i) <> s_evict
-                  if(bankBits != 0){
-                    val evict_full_addr = Cat(
-                      s_evict.bits.tag, s_evict.bits.set, i.U(bankBits.W), 0.U(offsetBits.W)
-                    )
-                    val (evict_tag, evict_set, _) = s.parseFullAddress(evict_full_addr)
-                    evict_wire(i).bits.tag := evict_tag
-                    evict_wire(i).bits.set := evict_set
-                  }
+                    val s_evict = Pipeline(s.evict.get)
+                    evict_wire(i) <> s_evict
+                    if(bankBits != 0){
+                      val evict_full_addr = Cat(
+                        s_evict.bits.tag, s_evict.bits.set, i.U(bankBits.W), 0.U(offsetBits.W)
+                      )
+                      val (evict_tag, evict_set, _) = s.parseFullAddress(evict_full_addr)
+                      evict_wire(i).bits.tag := evict_tag
+                      evict_wire(i).bits.set := evict_set
+                    }
                   case None =>
-                }
+                })
             // restore to full address
             if(bankBits != 0){
               val train_full_addr = Cat(
@@ -449,7 +448,7 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
                                                               })
                                                           .unzip
     l1Hint_arb.io.in <> VecInit(slices_l1Hint)
-    io.l2_hint.valid := l1Hint_arb.io.out.fire()
+    io.l2_hint.valid := l1Hint_arb.io.out.fire
     io.l2_hint.bits := l1Hint_arb.io.out.bits.sourceId - Mux1H(client_sourceId_match_oh, client_sourceId_start)
     // always ready for grant hint
     l1Hint_arb.io.out.ready := true.B
@@ -473,12 +472,12 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
       }
     }
 
-    XSPerfAccumulate(cacheParams, "hint_fire", io.l2_hint.valid)
+    XSPerfAccumulate("hint_fire", io.l2_hint.valid)
     val grant_fire = slices.map{ slice => {
                         val (_, _, grant_fire_last, _) = node.in.head._2.count(slice.io.in.d)
-                        slice.io.in.d.fire() && grant_fire_last && slice.io.in.d.bits.opcode === GrantData
+                        slice.io.in.d.fire && grant_fire_last && slice.io.in.d.bits.opcode === GrantData
                       }}
-    XSPerfAccumulate(cacheParams, "grant_data_fire", PopCount(VecInit(grant_fire)))
+    XSPerfAccumulate("grant_data_fire", PopCount(VecInit(grant_fire)))
   }
 
 }

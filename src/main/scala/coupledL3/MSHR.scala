@@ -20,14 +20,13 @@ package coupledL3
 import chisel3._
 import chisel3.util._
 import coupledL3.MetaData._
-import utility.ParallelMax
-import utility.{ParallelLookUp, ParallelPriorityMux}
+import xs.utils.ParallelMax
+import xs.utils.{ParallelLookUp, ParallelPriorityMux}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink.TLPermissions._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import coupledL3.prefetch.PrefetchTrain
-import coupledL3.utils.XSPerfAccumulate
 
 class MSHRTasks(implicit p: Parameters) extends L3Bundle {
   // outer

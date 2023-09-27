@@ -19,10 +19,10 @@ package coupledL3
 
 import chisel3._
 import chisel3.util._
-import utility._
-import chipsalliance.rocketchip.config.Parameters
+import xs.utils._
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink._
-import coupledL3.utils.XSPerfAccumulate
+import xs.utils.perf.HasPerfLogging
 
 // // wbq receive reqs from MainPipe unconditionally, and send them out through channel C
 // // NOTICE: channel C may be unable to receive
@@ -102,7 +102,7 @@ import coupledL3.utils.XSPerfAccumulate
 //   io.c.bits  := wb_bits_s0_reg
 // }
 
-class SourceC(implicit p: Parameters) extends L3Module {
+class SourceC(implicit p: Parameters) extends L3Module with HasPerfLogging{
   val io = IO(new Bundle() {
     val in = Flipped(DecoupledIO(new Bundle() {
       val task = new TaskBundle()
@@ -171,7 +171,7 @@ class SourceC(implicit p: Parameters) extends L3Module {
       out.bits := toTLBundleC(tasks(i), beat)
       val hasData = out.bits.opcode(0)
 
-      when (out.fire()) {
+      when (out.fire) {
         when (hasData) {
           beat_valids(i) := VecInit(next_beatsOH.asBools)
         }.otherwise {
@@ -188,11 +188,11 @@ class SourceC(implicit p: Parameters) extends L3Module {
   val (first, last, done, count) = edgeOut.count(io.out)
   val isRelease = io.out.bits.opcode === TLMessages.Release
   val isReleaseData = io.out.bits.opcode === TLMessages.ReleaseData
-  io.resp.valid := io.out.fire() && first && (isRelease || isReleaseData)
+  io.resp.valid := io.out.fire && first && (isRelease || isReleaseData)
   io.resp.mshrId := io.out.bits.source
   io.resp.set := parseFullAddress(io.out.bits.address)._2
   io.resp.tag := parseFullAddress(io.out.bits.address)._1
   io.resp.respInfo := DontCare
 
-  XSPerfAccumulate(cacheParams, "sourceC_full", full)
+  XSPerfAccumulate( "sourceC_full", full)
 }

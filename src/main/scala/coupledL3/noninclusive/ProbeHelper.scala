@@ -3,7 +3,7 @@ package coupledL3.noninclusive
 import chisel3._
 import chisel3.util._
 import coupledL3._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink.TLPermissions._
 
@@ -46,7 +46,7 @@ class ProbeHelper(entries: Int = 5, enqDelay: Int = 1)(implicit p: Parameters) e
   probeTask.dirty := false.B // ignored
 
   val metaOccupied = dir.metas.zip(dir.hits).map { case (s, hit) => !hit && s.state =/= MetaData.INVALID }
-  val dirConflict = !dir.tagMatch() && Cat(metaOccupied).orR()
+  val dirConflict = !dir.tagMatch() && Cat(metaOccupied).orR
 
   io.dirConflict := dirConflict && io.clientDirResult.valid // send to MainPipe
   

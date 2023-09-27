@@ -21,9 +21,9 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
-import chipsalliance.rocketchip.config.Parameters
-import coupledL3.utils.XSPerfAccumulate
-import utility.FastArbiter
+import org.chipsalliance.cde.config.Parameters
+import xs.utils.FastArbiter
+import xs.utils.perf.HasPerfLogging
 
 class PipeBufferRead(implicit p: Parameters) extends L3Bundle {
   val bufIdx = UInt(bufIdxBits.W)
@@ -43,7 +43,7 @@ class TaskStatusSinkC(implicit p: Parameters) extends L3Bundle {
 // (1) For Release/ReleaseData, send it to RequestArb directly
 // (2) For ProbeAck/ProbeAckData, wakeup w_probeack in MSHR
 //     For ProbeAckData, save data into ReleaseBuffer
-class SinkC(implicit p: Parameters) extends L3Module with noninclusive.HasClientInfo{
+class SinkC(implicit p: Parameters) extends L3Module with noninclusive.HasClientInfo with HasPerfLogging{
   val io = IO(new Bundle() {
     val c = Flipped(DecoupledIO(new TLBundleC(edgeIn.bundle)))
     val toReqArb = DecoupledIO(new TaskBundle) // Release/ReleaseData
@@ -73,7 +73,7 @@ class SinkC(implicit p: Parameters) extends L3Module with noninclusive.HasClient
   val full = bufValids.andR
   val noSpace = full && hasData
   val nextPtr = PriorityEncoder(~bufValids)
-  val nextPtrReg = RegEnable(nextPtr, 0.U.asTypeOf(nextPtr), io.c.fire() && isRelease && first && hasData)
+  val nextPtrReg = RegEnable(nextPtr, 0.U.asTypeOf(nextPtr), io.c.fire && isRelease && first && hasData)
 
   def toTaskBundle(c: TLBundleC): TaskBundle = {
     val task = Wire(new TaskBundle)
@@ -105,7 +105,7 @@ class SinkC(implicit p: Parameters) extends L3Module with noninclusive.HasClient
     task
   }
 
-  when (io.c.fire() && isRelease) {
+  when (io.c.fire && isRelease) {
     when (hasData) {
       when (first) {
         dataBuf(nextPtr)(beat) := io.c.bits.data
@@ -119,7 +119,7 @@ class SinkC(implicit p: Parameters) extends L3Module with noninclusive.HasClient
   }
 
   val hasEmptyWay = WireInit(false.B)
-  when (io.c.fire() && isRelease && last && (!io.toReqArb.ready || taskArb.io.out.valid || !hasEmptyWay)) {
+  when (io.c.fire && isRelease && last && (!io.toReqArb.ready || taskArb.io.out.valid || !hasEmptyWay)) {
     when (hasData) {
       taskValids(nextPtrReg) := true.B
       taskBuf(nextPtrReg) := toTaskBundle(io.c.bits)
@@ -136,7 +136,7 @@ class SinkC(implicit p: Parameters) extends L3Module with noninclusive.HasClient
     case (in, i) =>
       in.valid := taskValids(i)
       in.bits := taskBuf(i)
-      when (in.fire()) {
+      when (in.fire) {
         taskValids(i) := false.B
       }
   }
@@ -198,8 +198,8 @@ class SinkC(implicit p: Parameters) extends L3Module with noninclusive.HasClient
 
   // Performance counters
   val stall = io.c.valid && isRelease && !io.c.ready
-  XSPerfAccumulate(cacheParams, "sinkC_c_stall", stall)
-  XSPerfAccumulate(cacheParams, "sinkC_c_stall_for_noSpace", stall && hasData && first && full)
-  XSPerfAccumulate(cacheParams, "sinkC_toReqArb_stall", io.toReqArb.valid && !io.toReqArb.ready)
-  XSPerfAccumulate(cacheParams, "sinkC_buf_full", full)
+  XSPerfAccumulate( "sinkC_c_stall", stall)
+  XSPerfAccumulate( "sinkC_c_stall_for_noSpace", stall && hasData && first && full)
+  XSPerfAccumulate( "sinkC_toReqArb_stall", io.toReqArb.valid && !io.toReqArb.ready)
+  XSPerfAccumulate( "sinkC_buf_full", full)
 }

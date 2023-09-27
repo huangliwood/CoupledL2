@@ -1,19 +1,21 @@
 package coupledL2
-
+import circt.stage.{ChiselStage, FirtoolOption}
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config._
-import chisel3.stage.{ChiselGeneratorAnnotation, ChiselStage}
+import org.chipsalliance.cde.config._
+import chisel3.stage.ChiselGeneratorAnnotation
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
-import huancun._
 import coupledL2.prefetch._
-import utility.{ChiselDB, FileRegisters}
+import xs.utils.{ChiselDB, FileRegisters}
+import axi2tl._
+import freechips.rocketchip.amba.axi4._
 import coupledL3._
 import chisel3.util.experimental.BoringUtils
-
 import scala.collection.mutable.ArrayBuffer
-import coupledL3.utils.GTimer
+import xs.utils.GTimer
+import xs.utils.perf.{DebugOptions,DebugOptionsKey}
+import huancun.{HuanCun, HCCacheParameters, HCCacheParamsKey, CacheParameters}
 
 class TestTop_L2()(implicit p: Parameters) extends LazyModule {
 
@@ -455,9 +457,9 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
 
   /* L1D L1I L1D L1I (L1I sends Get)
    *  \  /    \  /
-   *   L2      L2
-   *    \     /
-   *       L3(HuanCun)
+   *   L2      L2      
+   *    \     /       
+   *       L3
    */
 
   val delayFactor = 0.2
@@ -486,7 +488,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
   }
 
   val l2xbar = TLXbar()
-  val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffffffL), beatBytes = 32))
+  val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffffL), beatBytes = 32))
   var master_nodes: Seq[TLClientNode] = Seq() // TODO
   val NumCores=2
   // val nullNode = LazyModule(new SppSenderNull)
@@ -512,7 +514,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
         clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
         echoField = Seq(huancun.DirtyField()),
         // prefetch = Some(BOPParameters(rrTableEntries = 16,rrTagBits = 6))
-        prefetch = Some(HyperPrefetchParams()),/* 
+        prefetch = None,/* 
         del L2 prefetche recv option, move into: prefetch =  PrefetchReceiverParams
         prefetch options:
           SPPParameters          => spp only
@@ -520,22 +522,23 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
           PrefetchReceiverParams => sms+bop
           HyperPrefetchParams    => spp+bop+sms
         */
-        sppMultiLevelRefill = Some(coupledL2.prefetch.PrefetchReceiverParams()),
+        sppMultiLevelRefill = None
         /*must has spp, otherwise Assert Fail
         sppMultiLevelRefill options:
         PrefetchReceiverParams() => spp has cross level refill
         None                     => spp only refill L2 
         */
       )
+      case DebugOptionsKey => DebugOptions()
     })))
     l1xbar := TLBuffer() := l1i
     l1xbar := TLBuffer() := l1d
-    l2node.pf_recv_node match{
-      case Some(l2Recv) => 
-        val l1_sms_send_0_node = LazyModule(new PrefetchSmsOuterNode)
-        l2Recv := l1_sms_send_0_node.outNode
-      case None =>
-    }
+    // l2node.pf_recv_node match{
+    //   case Some(l2Recv) => 
+    //     val l1_sms_send_0_node = LazyModule(new PrefetchSmsOuterNode)
+    //     l2Recv := l1_sms_send_0_node.outNode
+    //   case None =>
+    // }
     l2xbar := TLBuffer() := l2node.node := l1xbar
     l2node // return l2 list
   }
@@ -553,72 +556,32 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       simulation = true,
       hasMbist = false,
       prefetch = None,
-      prefetchRecv = Some(huancun.prefetch.PrefetchReceiverParams())
+      prefetchRecv = None
     )
+    case DebugOptionsKey => DebugOptions()
   })))
 
-  // val l3 = LazyModule(new CoupledL3()(new Config((_, _, _) => {
-  //   case L3ParamKey => L3Param(
-  //     name = s"l3",
-  //     ways = 4,
-  //     // sets = 128,
-  //     // sets = 32,
-  //     sets = 64,
-  //     clientCaches = Seq(CacheParameters(
-  //       // sets = 64,
-  //       // ways = 2 * nrL2,
-  //       sets = 32,
-  //       // ways = 2 * nrL2,
-  //       ways = 4 * nrL2 + nrL2, // extra ways is needed for solving duble request conflict from the same sourceId(Acquire + Release)
-  //       aliasBitsOpt = None,
-  //       name = "l2",
-  //       blockGranularity = 64
-  //     )), // TODO: For L3 this should be L2Param
-  //     echoField = Seq(DirtyField()),
-  //     prefetch = None
-  //   )
-  // })))
-  // l2List.zipWithIndex.foreach {
-  //   case (l2, i) =>
-  //     l2.spp_send_node match{
-  //       case Some(sppSend) =>
-  //         val l3pf_RecvXbar =  LazyModule(new PrefetchReceiverXbar(NumCores))
-  //         l3pf_RecvXbar.inNode(i) := l2.spp_send_node.get
-  //         println(f"spp_send_node${i} connecting to l3pf_RecvXbar")
-  //       case None => 
-  //     }
-  // }
-  println(f"pf_l3recv_node connecting to l3pf_RecvXbar out")
-  val sppHasCrossLevelRefillOpt = p(L2ParamKey).sppMultiLevelRefill
-  println(f"SPP cross level refill: ${sppHasCrossLevelRefillOpt} ")
-  sppHasCrossLevelRefillOpt match{
-    case Some(x) =>
-      val l3pf_RecvXbar = LazyModule(new PrefetchReceiverXbar(NumCores))
-      l2List.zipWithIndex.foreach {
-        case (l2, i) =>
-          l2.spp_send_node match {
-            case Some(l2Send) =>
-              l3pf_RecvXbar.inNode(i) := l2Send
-              println(f"spp_send_node${i} connecting to l3pf_RecvXbar")
-            case None =>
-        }
-      }
-      println(f"pf_l3recv_node connecting to l3pf_RecvXbar out")
-      l3.pf_l3recv_node.map(l3_recv =>  l3_recv:= l3pf_RecvXbar.outNode.head)
-    case None =>
-  }
+//  val dma_node = TLClientNode(Seq(TLMasterPortParameters.v2(
+//      Seq(TLMasterParameters.v1(
+//        name = "dma",
+//        sourceId = IdRange(0, 16),
+//        supportsProbe = TransferSizes.none
+//      )),
+//      channelBytes = TLChannelBeatBytes(cacheParams.blockBytes),
+//      minLatency = 1,
+//      echoFields = Nil,
+//    )))
 
-  val dma_node = TLClientNode(Seq(TLMasterPortParameters.v2(
-      Seq(TLMasterParameters.v1(
-        name = "dma",
-        sourceId = IdRange(0, 16),
-        supportsProbe = TransferSizes.none
-      )),
-      channelBytes = TLChannelBeatBytes(cacheParams.blockBytes),
-      minLatency = 1,
-      echoFields = Nil,
-    )))
-  l2xbar := TLBuffer() := dma_node
+  val idBits = 14
+  val l3FrontendAXI4Node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
+    Seq(AXI4MasterParameters(
+      name = "dma",
+      id = IdRange(0, 1 << idBits),
+      maxFlight = Some(16)
+    ))
+  )))
+
+ l2xbar := TLBuffer() := AXI2TL(16, 16) := l3FrontendAXI4Node
 
   ram.node :=
     TLXbar() :=*
@@ -632,7 +595,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       case (node, i) =>
         node.makeIOs()(ValName(s"master_port_$i"))
     }
-    dma_node.makeIOs()(ValName("dma_port"))
+    l3FrontendAXI4Node.makeIOs()(ValName("dma_port"))
 
     val io = IO(new Bundle{
       val perfClean = Input(Bool())
@@ -642,10 +605,6 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
     val logTimestamp = WireInit(0.U(64.W))
     val perfClean = WireInit(false.B)
     val perfDump = WireInit(false.B)
-
-    BoringUtils.addSource(logTimestamp, "logTimestamp")
-    BoringUtils.addSource(perfClean, "XSPERF_CLEAN")
-    BoringUtils.addSource(perfDump, "XSPERF_DUMP")
   
     perfClean := io.perfClean
     perfDump := io.perfDump
@@ -779,11 +738,13 @@ object TestTop_L2 extends App {
       clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
       echoField = Seq(DirtyField())
     )
+    case DebugOptionsKey => DebugOptions()
   })
   val top = DisableMonitors(p => LazyModule(new TestTop_L2()(p)) )(config)
 
-  (new ChiselStage).execute(args, Seq(
-    ChiselGeneratorAnnotation(() => top.module)
+  (new ChiselStage).execute(Array("--target", "verilog") ++ args, Seq(
+    ChiselGeneratorAnnotation(() => top.module),
+    FirtoolOption("--disable-annotation-unknown")
   ))
 
   ChiselDB.init(false)
@@ -795,13 +756,16 @@ object TestTop_L2_Standalone extends App {
   val config = new Config((_, _, _) => {
     case L2ParamKey => L2Param(
       clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
-      echoField = Seq(DirtyField())
+      echoField = Seq(DirtyField()),
+      enablePerf = false
     )
+    case DebugOptionsKey => DebugOptions()
   })
   val top = DisableMonitors(p => LazyModule(new TestTop_L2_Standalone()(p)) )(config)
 
-  (new ChiselStage).execute(args, Seq(
-    ChiselGeneratorAnnotation(() => top.module)
+  (new ChiselStage).execute(Array("--target", "verilog") ++ args, Seq(
+    ChiselGeneratorAnnotation(() => top.module),
+    FirtoolOption("--disable-annotation-unknown")
   ))
 
   ChiselDB.init(false)
@@ -818,11 +782,13 @@ object TestTop_L2L3 extends App {
     case HCCacheParamsKey => HCCacheParameters(
       echoField = Seq(DirtyField())
     )
+    case DebugOptionsKey => DebugOptions()
   })
   val top = DisableMonitors(p => LazyModule(new TestTop_L2L3()(p)) )(config)
 
-  (new ChiselStage).execute(args, Seq(
-    ChiselGeneratorAnnotation(() => top.module)
+  (new ChiselStage).execute(Array("--target", "verilog") ++ args, Seq(
+    ChiselGeneratorAnnotation(() => top.module),
+    FirtoolOption("--disable-annotation-unknown")
   ))
 
   ChiselDB.init(false)
@@ -842,8 +808,9 @@ object TestTop_L2L3L2 extends App {
   })
   val top = DisableMonitors(p => LazyModule(new TestTop_L2L3L2()(p)))(config)
 
-  (new ChiselStage).execute(args, Seq(
-    ChiselGeneratorAnnotation(() => top.module)
+  (new ChiselStage).execute(Array("--target", "verilog") ++ args, Seq(
+    ChiselGeneratorAnnotation(() => top.module),
+    FirtoolOption("--disable-annotation-unknown")
   ))
 
   ChiselDB.init(false)
@@ -875,11 +842,13 @@ object TestTop_fullSys extends App {
     case HCCacheParamsKey => HCCacheParameters(
       echoField = Seq(DirtyField())
     )
+    case DebugOptionsKey => DebugOptions()
   })
   val top = DisableMonitors(p => LazyModule(new TestTop_fullSys()(p)))(config)
 
-  (new ChiselStage).execute(args, Seq(
-    ChiselGeneratorAnnotation(() => top.module)
+  (new ChiselStage).execute(Array("--target", "verilog") ++ args, Seq(
+    ChiselGeneratorAnnotation(() => top.module),
+    FirtoolOption("--disable-annotation-unknown")
   ))
 
   ChiselDB.init(false)
@@ -896,11 +865,13 @@ object TestTop_fullSys_1 extends App {
     case HCCacheParamsKey => HCCacheParameters(
       echoField = Seq(DirtyField())
     )
+    case DebugOptionsKey => DebugOptions()
   })
   val top = DisableMonitors(p => LazyModule(new TestTop_fullSys_1()(p)))(config)
 
-  (new ChiselStage).execute(args, Seq(
-    ChiselGeneratorAnnotation(() => top.module)
+  (new ChiselStage).execute(Array("--target", "verilog") ++ args, Seq(
+    ChiselGeneratorAnnotation(() => top.module),
+    FirtoolOption("--disable-annotation-unknown")
   ))
 
   ChiselDB.init(false)
@@ -998,11 +969,13 @@ object TestTop_l2_for_sysn extends App {
     case HCCacheParamsKey => HCCacheParameters(
       echoField = Seq(DirtyField())
     )
+    case DebugOptionsKey => DebugOptions()
   })
   val top = DisableMonitors(p => LazyModule(new TestTop_l2_for_sysn()(p)))(config)
 
-  (new ChiselStage).execute(args, Seq(
-    ChiselGeneratorAnnotation(() => top.module)
+  (new ChiselStage).execute(Array("--target", "verilog") ++ args, Seq(
+    ChiselGeneratorAnnotation(() => top.module),
+    FirtoolOption("--disable-annotation-unknown")
   ))
 
   ChiselDB.init(false)

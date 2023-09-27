@@ -19,10 +19,10 @@ package coupledL3
 
 import chisel3._
 import chisel3.util._
-import utility._
+import xs.utils._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import huancun.{PreferCacheKey}
 
 class AcquireUnit(implicit p: Parameters) extends L3Module {
@@ -45,7 +45,7 @@ class AcquireUnit(implicit p: Parameters) extends L3Module {
   a_acquire.bits.data := DontCare
   a_acquire.bits.echo.lift(DirtyKey).foreach(_ := true.B)
   a_acquire.bits.user.lift(PreferCacheKey).foreach(_ := false.B)
-  a_acquire.bits.user.lift(utility.ReqSourceKey).foreach(_ := task.reqSource)
+  a_acquire.bits.user.lift(xs.utils.tl.ReqSourceKey).foreach(_ := task.reqSource)
   a_acquire.bits.corrupt := false.B
 
   io.sourceA <> a_acquire

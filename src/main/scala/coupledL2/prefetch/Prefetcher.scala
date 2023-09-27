@@ -19,11 +19,11 @@ package coupledL2.prefetch
 
 import chisel3._
 import chisel3.util._
-import utility._
-import chipsalliance.rocketchip.config.Parameters
+import xs.utils._
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink._
 import coupledL2._
-import coupledL2.utils.{XSPerfAccumulate, XSPerfHistogram}
+import xs.utils.perf.HasPerfLogging
 
 object AccessState {
   val bits = 2
@@ -84,7 +84,7 @@ class PrefetchIO(implicit p: Parameters) extends PrefetchBundle {
   val hint2llc = if(sppMultiLevelRefillOpt.nonEmpty)  Some(ValidIO(new PrefetchReq)) else None
 }
 
-class PrefetchQueue(implicit p: Parameters) extends PrefetchModule {
+class PrefetchQueue(implicit p: Parameters) extends PrefetchModule with HasPerfLogging{
   val io = IO(new Bundle {
     val enq = Flipped(DecoupledIO(new PrefetchReq))
     val deq = DecoupledIO(new PrefetchReq)
@@ -126,17 +126,17 @@ class PrefetchQueue(implicit p: Parameters) extends PrefetchModule {
   io.used := PopCount(valids.asUInt)
 
   // The reqs that are discarded = enq - deq
-  XSPerfAccumulate(cacheParams, "prefetch_queue_enq", io.enq.fire())
-  XSPerfAccumulate(cacheParams, "prefetch_queue_fromL1_enq", io.enq.fire() && !io.enq.bits.isBOP)
-  XSPerfAccumulate(cacheParams, "prefetch_queue_fromL2_enq", io.enq.fire() && io.enq.bits.isBOP)
-  XSPerfAccumulate(cacheParams, "prefetch_queue_deq", io.deq.fire())
-  XSPerfAccumulate(cacheParams, "prefetch_queue_fromL1_deq", io.deq.fire() && !io.enq.bits.isBOP)
-  XSPerfAccumulate(cacheParams, "prefetch_queue_fromL2_enq", io.deq.fire() && io.enq.bits.isBOP)
-  XSPerfHistogram(cacheParams, "prefetch_queue_entry", PopCount(valids.asUInt),
+  XSPerfAccumulate("prefetch_queue_enq", io.enq.fire)
+  XSPerfAccumulate("prefetch_queue_fromL1_enq", io.enq.fire && !io.enq.bits.isBOP)
+  XSPerfAccumulate("prefetch_queue_fromL2_enq", io.enq.fire && io.enq.bits.isBOP)
+  XSPerfAccumulate("prefetch_queue_deq", io.deq.fire)
+  XSPerfAccumulate("prefetch_queue_fromL1_deq", io.deq.fire && !io.enq.bits.isBOP)
+  XSPerfAccumulate("prefetch_queue_fromL2_enq", io.deq.fire && io.enq.bits.isBOP)
+  XSPerfHistogram("prefetch_queue_entry", PopCount(valids.asUInt),
     true.B, 0, inflightEntries, 1)
 }
 
-class Prefetcher(implicit p: Parameters) extends PrefetchModule {
+class Prefetcher(implicit p: Parameters) extends PrefetchModule with HasPerfLogging{
   val io = IO(new PrefetchIO)
   val io_l2_pf_en = IO(Input(Bool()))
 
@@ -231,9 +231,9 @@ class Prefetcher(implicit p: Parameters) extends PrefetchModule {
       bop.io.req.ready := true.B
       pipe.io.in <> pftQueue.io.deq
       io.req <> pipe.io.out
-      XSPerfAccumulate(cacheParams, "prefetch_req_fromL1", l1_pf.io.req.valid)
-      XSPerfAccumulate(cacheParams, "prefetch_req_fromL2", bop_en && bop.io.req.valid)
-      XSPerfAccumulate(cacheParams, "prefetch_req_L1L2_overlapped", l1_pf.io.req.valid && bop_en && bop.io.req.valid)
+      XSPerfAccumulate("prefetch_req_fromL1", l1_pf.io.req.valid)
+      XSPerfAccumulate( "prefetch_req_fromL2", bop_en && bop.io.req.valid)
+      XSPerfAccumulate("prefetch_req_L1L2_overlapped", l1_pf.io.req.valid && bop_en && bop.io.req.valid)
     
     case hyperPf: HyperPrefetchParams => // case spp +  bop + smsReceiver
       val hybrid_pfts = Module(new HyperPrefetcher())
@@ -263,11 +263,11 @@ class Prefetcher(implicit p: Parameters) extends PrefetchModule {
       hybrid_pfts.io.db_degree.bits := pf_state
     case _ => assert(cond = false, "Unknown prefetcher")
   }
-  XSPerfAccumulate(cacheParams, "prefetch_train", io.train.fire())
-  XSPerfAccumulate(cacheParams, "prefetch_train_on_miss", io.train.fire() && io.train.bits.state === AccessState.MISS)
-  XSPerfAccumulate(cacheParams, "prefetch_train_on_pf_hit", io.train.fire() && io.train.bits.state === AccessState.PREFETCH_HIT)
-  XSPerfAccumulate(cacheParams, "prefetch_train_on_cache_hit", io.train.fire() && io.train.bits.state === AccessState.HIT)
-  XSPerfAccumulate(cacheParams, "prefetch_send2_pfq", io.req.fire())
-  XSPerfHistogram(cacheParams, "prefetch_dead_block", deadPfEviction, counterWrap, 0, 200, 5)
-  XSPerfHistogram(cacheParams, "prefetch_dead_ratio", pf_state, counterWrap, 0, 4, 1)
+  XSPerfAccumulate("prefetch_train", io.train.fire)
+  XSPerfAccumulate("prefetch_train_on_miss", io.train.fire && io.train.bits.state === AccessState.MISS)
+  XSPerfAccumulate("prefetch_train_on_pf_hit", io.train.fire && io.train.bits.state === AccessState.PREFETCH_HIT)
+  XSPerfAccumulate("prefetch_train_on_cache_hit", io.train.fire && io.train.bits.state === AccessState.HIT)
+  XSPerfAccumulate("prefetch_send2_pfq", io.req.fire)
+  XSPerfHistogram("prefetch_dead_block", deadPfEviction, counterWrap, 0, 200, 5)
+  XSPerfHistogram("prefetch_dead_ratio", pf_state, counterWrap, 0, 4, 1)
 }

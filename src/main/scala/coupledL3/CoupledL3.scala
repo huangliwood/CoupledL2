@@ -21,15 +21,16 @@ package coupledL3
 
 import chisel3._
 import chisel3.util._
-import utility.{FastArbiter, Pipeline}
+import xs.utils.{FastArbiter, Pipeline}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.util._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
+
 import scala.math.max
 import coupledL3.prefetch._
-import coupledL3.utils.XSPerfAccumulate
+import xs.utils.perf.HasPerfLogging
 
 trait HasCoupledL3Parameters {
   val p: Parameters
@@ -169,14 +170,14 @@ trait HasCoupledL3Parameters {
 }
 
 trait DontCareInnerLogic { this: Module =>
-  override def IO[T <: Data](iodef: T): T = {
-    val p = chisel3.experimental.IO.apply(iodef)
+  def IO[T <: Data](iodef: T): T = {
+    val p = chisel3.IO.apply(iodef)
     p <> DontCare
     p
   }
 }
 
-class CoupledL3(implicit p: Parameters) extends LazyModule with HasCoupledL3Parameters {
+class CoupledL3(implicit p: Parameters) extends LazyModule with HasCoupledL3Parameters{
 
   val xfer = TransferSizes(blockBytes, blockBytes)
   val atom = TransferSizes(1, cacheParams.channelBytes.d.get)
@@ -242,12 +243,9 @@ class CoupledL3(implicit p: Parameters) extends LazyModule with HasCoupledL3Para
     case _ => None
   }
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) with HasPerfLogging{
     val banks = node.in.size
     val bankBits = if (banks == 1) 0 else log2Up(banks)
-    val io = IO(new Bundle {
-      val l2_hint = Valid(UInt(32.W))
-    })
 
     // Display info
     val sizeBytes = cacheParams.toCacheParams.capacity.toDouble
@@ -332,9 +330,9 @@ class CoupledL3(implicit p: Parameters) extends LazyModule with HasCoupledL3Para
 
     val grant_fire = slices.map{ slice => {
                         val (_, _, grant_fire_last, _) = node.in.head._2.count(slice.io.in.d)
-                        slice.io.in.d.fire() && grant_fire_last && slice.io.in.d.bits.opcode === GrantData
+                        slice.io.in.d.fire && grant_fire_last && slice.io.in.d.bits.opcode === GrantData
                       }}
-    XSPerfAccumulate(cacheParams, "grant_data_fire", PopCount(VecInit(grant_fire)))
+    XSPerfAccumulate( "grant_data_fire", PopCount(VecInit(grant_fire)))
   }
 
 }
