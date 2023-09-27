@@ -51,33 +51,31 @@ class FilterV2(implicit p: Parameters) extends PrefetchBranchV2Module {
     val tag = UInt(fTagBits.W)
     val bitMap = Vec(64, Bool())
   }
-  val dupNums = 2
+  val dupNums = 4
 
   val req_dups = RegInit(VecInit(Seq.fill(dupNums)(0.U.asTypeOf(new PrefetchReq))))
-  val req_dups_valid =RegInit(VecInit(Seq.fill(dupNums)(false.B)))//WireInit(req_dups.map(_.valid).reduce(_ || _))
+  val req_dups_valid = RegInit(VecInit(Seq.fill(dupNums)(false.B)))
+  val req_hint2llc = RegNext(io.spp2llc,false.B)
   req_dups.foreach(_ := io.req.bits)
   req_dups_valid.foreach( _ := io.req.valid)
   val dupOffsetBits = log2Up(fTableEntries/dupNums)
   val dupBits = log2Up(dupNums)
   val fTable = RegInit(VecInit(Seq.fill(fTableEntries)(0.U.asTypeOf(fTableEntry()))))
-  val q = Module(new Queue(UInt(fullAddressBits.W), fTableQueueEntries, flow = true, pipe = true))
+  val q = Module(new Queue(UInt(fullAddressBits.W), fTableQueueEntries, flow = false, pipe = true))
 
   val hit = WireInit(VecInit.fill(dupNums)(false.B))
   val readResult = WireInit(VecInit.fill(dupNums)(0.U.asTypeOf(fTableEntry())))
   val hitForMap = WireInit(VecInit.fill(dupNums)(false.B))
 
-  val req_dup_c = WireInit(0.U.asTypeOf(io.req.bits.cloneType))
-
   for(i <- 0 until(dupNums)) {
-    when(req_dups(i).set(dupOffsetBits+dupBits-1,dupOffsetBits) === i.U(dupBits.W)) {
-      req_dup_c := req_dups(i)
+    when(req_dups(i).set(dupOffsetBits-1+dupBits,dupOffsetBits-1) === i.U(dupBits.W)) {
       val oldAddr = req_dups(i).addr
       val pageAddr = oldAddr(fullAddressBits - 1, pageOffsetBits)
       val blkOffset = oldAddr(pageOffsetBits - 1, offsetBits)
 
       //read fTable
       readResult(i) := fTable(idx(pageAddr))
-      hit(i) := readResult(i).valid && tag(pageAddr) === readResult(i).tag
+      hit(i) := readResult(i).valid
       hitForMap(i) := hit(i) && readResult(i).bitMap(blkOffset)
 
       val wData = WireInit(0.U.asTypeOf(fTableEntry()))
@@ -95,14 +93,14 @@ class FilterV2(implicit p: Parameters) extends PrefetchBranchV2Module {
       }
     }
   }
-  io.resp.valid := req_dups_valid.reduce(_||_) && (!hitForMap.asUInt.orR || io.from_bop)
-  io.resp.bits := req_dup_c
+  io.resp.valid := req_dups_valid(0) && (!hitForMap.asUInt.orR || io.from_bop)
+  io.resp.bits := req_dups(0)
 
-  io.hint2llc.valid := req_dups_valid.reduce(_||_) && io.spp2llc
-  io.hint2llc.bits := req_dup_c
+  io.hint2llc.valid := req_dups_valid(1) && req_hint2llc
+  io.hint2llc.bits := req_dups(1)
 
-  q.io.enq.valid := req_dups_valid.reduce(_||_) && !hitForMap.asUInt.orR && !io.spp2llc // if spp2llc , don't enq
-  q.io.enq.bits := req_dup_c.addr
+  q.io.enq.valid := req_dups_valid(2) && !hitForMap.asUInt.orR && !req_hint2llc // if spp2llc , don't enq
+  q.io.enq.bits := req_dups(2).addr
 
   val isqFull = q.io.count === fTableQueueEntries.U
   q.io.deq.ready := isqFull;dontTouch(q.io.deq.ready)
@@ -114,7 +112,7 @@ class FilterV2(implicit p: Parameters) extends PrefetchBranchV2Module {
   val readEvict = WireInit(VecInit.fill(dupNums)(0.U.asTypeOf(fTableEntry())))
   val hitEvict =  WireInit(VecInit.fill(dupNums)(false.B))
   for(i <- 0 until(dupNums)) {
-    when(req_dups(i).set(dupOffsetBits+dupBits-1,dupOffsetBits) === i.U(dupBits.W)) {
+    when(req_dups(i).set(dupOffsetBits-1+dupBits,dupOffsetBits-1) === i.U(dupBits.W)) {
       val oldAddr = req_dups(i).addr
       val blkAddr = oldAddr(fullAddressBits - 1, offsetBits)
       val conflict = req_dups_valid.reduce(_ || _) && blkAddr === evictBlkAddr

@@ -450,8 +450,11 @@ class Unpack(implicit p: Parameters) extends SPPModule with HasPerfLogging{
 
   val q = Module(new Queue(chiselTypeOf(io.req.bits), unpackQueueEntries,flow = true))
   q.io.enq <> io.req //change logic to replace the tail entry
+  val req= RegInit(0.U.asTypeOf(q.io.deq.bits.cloneType))
+  when(q.io.deq.fire){
+    req := q.io.deq.bits
+  }
 
-  val req = RegEnable(q.io.deq.bits, q.io.deq.fire)
   val req_deltas = RegInit(VecInit(Seq.fill(pTableDeltaEntries)(0.S((blkOffsetBits + 1).W))))
   val issue_finish = req_deltas.map(_ === 0.S).reduce(_ && _)
   q.io.deq.ready := !inProcess || issue_finish || endeq
