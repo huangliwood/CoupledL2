@@ -285,7 +285,7 @@ class PatternTable(implicit p: Parameters) extends SPPModule with HasPerfLogging
   pTable.io.r.req.bits.setIdx := idx(readSignature)
   readResult := pTable.io.r.resp.data(0)
   lastSignature := RegNext(readSignature,0.U)
-  lastDelta := RegNext(readDelta,0.U)
+  lastDelta := RegNext(readDelta)
   hit := readResult.valid && tag(lastSignature) === readResult.tag
   //set output
   val maxEntry = readResult.deltaEntries.reduce((a, b) => Mux(a.cDelta >= b.cDelta, a, b))
