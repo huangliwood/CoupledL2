@@ -85,12 +85,11 @@ class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging{
     mshr_task_s1.bits.opcode === HintAck && mshr_task_s1.bits.dsWen
   )
 
-    val s1_mshr_read_need_hold = WireInit(false.B)
 
   /* ======== Stage 0 ======== */
   // if mshr_task_s1 is replRead, it might stall and wait for dirRead.ready, so we block new mshrTask from entering
   // TODO: will cause msTask path vacant for one-cycle after replRead, since not use Flow so as to avoid ready propagation
-  io.mshrTask.ready := !io.fromGrantBuffer.blockMSHRReqEntrance && !s1_needs_replRead && !s1_mshr_read_need_hold
+  io.mshrTask.ready := !io.fromGrantBuffer.blockMSHRReqEntrance && !s1_needs_replRead
   mshr_task_s0.valid := io.mshrTask.fire
   mshr_task_s0.bits := io.mshrTask.bits
 
@@ -108,15 +107,9 @@ class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val B_task = io.sinkB.bits
   val C_task = io.sinkC.bits
 
-  // block req when reads_DS and writes_DS occur at the same time
-  val wen = RegInit(false.B)
-  val a_ren_block = (A_task.opcode === Get || A_task.opcode === AcquireBlock) && wen
-  val b_ren_block = wen
-  s1_mshr_read_need_hold := wen
-
   // block chnl
-  val block_A = io.fromMSHRCtl.blockA_s1 || io.fromMainPipe.blockA_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockA_s1 || a_ren_block
-  val block_B = io.fromMSHRCtl.blockB_s1 || io.fromMainPipe.blockB_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockB_s1 || b_ren_block
+  val block_A = io.fromMSHRCtl.blockA_s1 || io.fromMainPipe.blockA_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockA_s1
+  val block_B = io.fromMSHRCtl.blockB_s1 || io.fromMainPipe.blockB_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockB_s1
   val block_C = io.fromMSHRCtl.blockC_s1 || io.fromMainPipe.blockC_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockC_s1
 
   val sinkValids = VecInit(Seq(
@@ -140,10 +133,6 @@ class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging{
 
   io.taskInfo_s1 := mshr_task_s1
 
-  // recording req wen with a loose scope
-  val wen_c = !task_s1.bits.mshrTask && task_s1.bits.fromC && isParamFromT(task_s1.bits.param)
-  val wen_mshr = task_s1.bits.mshrTask && task_s1.bits.dsWen // TODO: Can be optimized
-  wen := task_s1.valid  && (wen_c || wen_mshr && !mshr_replRead_stall)
 
   /* Meta read request */
   // ^ only sinkA/B/C tasks need to read directory

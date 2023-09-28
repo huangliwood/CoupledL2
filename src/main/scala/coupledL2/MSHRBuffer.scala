@@ -105,5 +105,5 @@ class MSHRBuffer(wPorts: Int = 1)(implicit p: Parameters) extends L2Module {
   // io.r.data.data := VecInit(buffer.map {
   //   case block => VecInit(block.map(_.io.r.resp.data.asUInt)).asUInt
   // })(ridReg)
-  io.r.data.data := buffer(ridReg).asUInt
+  io.r.data.data := RegNext(buffer(io.r.id).asUInt)
 }
