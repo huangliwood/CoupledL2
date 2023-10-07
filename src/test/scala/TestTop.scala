@@ -843,6 +843,7 @@ object TestTop_fullSys extends App {
       echoField = Seq(DirtyField())
     )
     case DebugOptionsKey => DebugOptions()
+    case AXI2TLParamKey => AXI2TLParam()
   })
   val top = DisableMonitors(p => LazyModule(new TestTop_fullSys()(p)))(config)
 
