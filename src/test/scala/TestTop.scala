@@ -11,11 +11,13 @@ import xs.utils.{ChiselDB, FileRegisters}
 import axi2tl._
 import freechips.rocketchip.amba.axi4._
 import coupledL3._
+import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
+import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import chisel3.util.experimental.BoringUtils
 import scala.collection.mutable.ArrayBuffer
 import xs.utils.GTimer
 import xs.utils.perf.{DebugOptions,DebugOptionsKey}
-import huancun.{HuanCun, HCCacheParameters, HCCacheParamsKey, CacheParameters}
+import huancun.{HuanCun, HCCacheParameters, HCCacheParamsKey, CacheParameters, CacheCtrl}
 
 class TestTop_L2()(implicit p: Parameters) extends LazyModule {
 
@@ -457,9 +459,9 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
 
   /* L1D L1I L1D L1I (L1I sends Get)
    *  \  /    \  /
-   *   L2      L2      
-   *    \     /       
-   *       L3
+   *   L2      L2    DMA(AXItoTL)
+   *    \     /     /       
+   *         L3
    */
 
   val delayFactor = 0.2
@@ -556,7 +558,13 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       simulation = true,
       hasMbist = false,
       prefetch = None,
-      prefetchRecv = None
+      prefetchRecv = None,
+      tagECC = Some("secded"),
+      dataECC = Some("secded"),
+      ctrl = Some(huancun.CacheCtrl(
+//        address = 0x3900_0000
+        address = 0x390_0000
+      ))
     )
     case DebugOptionsKey => DebugOptions()
   })))
@@ -571,6 +579,21 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
 //      minLatency = 1,
 //      echoFields = Nil,
 //    )))
+  val ctrl_node = TLClientNode(Seq(TLMasterPortParameters.v2(
+      Seq(TLMasterParameters.v1(
+        name = "ctrl",
+        sourceId = IdRange(0, 16),
+        supportsProbe = TransferSizes.none
+      )),
+      channelBytes = TLChannelBeatBytes(8), // 64bits
+      minLatency = 1,
+      echoFields = Nil,
+    )))
+  val ecc_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
+  val l3_reset_sink = BundleBridgeSink(Some(() => Reset()))
+  l3.ctlnode.foreach(_ := TLBuffer() := ctrl_node)
+  l3.intnode.foreach(ecc_int_sink := _)
+  l3.rst_nodes.foreach(_.foreach(l3_reset_sink := _))
 
   val idBits = 14
   val l3FrontendAXI4Node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
@@ -596,6 +619,9 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
         node.makeIOs()(ValName(s"master_port_$i"))
     }
     l3FrontendAXI4Node.makeIOs()(ValName("dma_port"))
+    ctrl_node.makeIOs()(ValName("cmo_port"))
+    ecc_int_sink.makeIOs()(ValName("int_port"))
+    l3_reset_sink.makeIOs()(ValName("rst_port"))
 
     val io = IO(new Bundle{
       val perfClean = Input(Bool())
