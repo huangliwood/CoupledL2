@@ -164,7 +164,7 @@ trait HasCoupledL2Parameters {
   }
 }
 
-class CoupledL2(parentName:String = "Unknown")(implicit p: Parameters) extends LazyModule with HasCoupledL2Parameters {
+class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyModule with HasCoupledL2Parameters {
 
   val xfer = TransferSizes(blockBytes, blockBytes)
   val atom = TransferSizes(1, cacheParams.channelBytes.d.get)
@@ -289,7 +289,7 @@ class CoupledL2(parentName:String = "Unknown")(implicit p: Parameters) extends L
       case EdgeOutKey => node.out.head._2
       case BankBitsKey => bankBits
     }
-    val prefetcher = prefetchOpt.map(_ => Module(new Prefetcher()(pftParams)))
+    val prefetcher = prefetchOpt.map(_ => Module(new Prefetcher(parentName + "pft_")(pftParams)))
     val prefetchTrains = prefetchOpt.map(_ => Wire(Vec(banks, DecoupledIO(new PrefetchTrain()(pftParams)))))
     val prefetchResps = prefetchOpt.map(_ => Wire(Vec(banks, DecoupledIO(new PrefetchResp()(pftParams)))))
     val prefetchEvicts = prefetchOpt.map({
@@ -361,7 +361,7 @@ class CoupledL2(parentName:String = "Unknown")(implicit p: Parameters) extends L
         require(in.params.dataBits == out.params.dataBits)
         val rst_L2 = reset
         val slice = withReset(rst_L2) {
-          Module(new Slice()(p.alterPartial {
+          Module(new Slice(parentName = parentName + s"slice${i}_")(p.alterPartial {
             case EdgeInKey  => edgeIn
             case EdgeOutKey => edgeOut
             case BankBitsKey => bankBits
