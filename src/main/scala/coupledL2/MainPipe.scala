@@ -442,7 +442,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging{
     train.bits.set := req_s3.set
     train.bits.needT := Mux(req_s3.mergeA, needT(req_s3.aMergeTask.opcode, req_s3.aMergeTask.param),req_needT_s3)
     train.bits.source := Mux(req_s3.mergeA, req_s3.aMergeTask.sourceId, req_s3.sourceId)
-    train.bits.vaddr.foreach(_ := req_s3.vaddr.getOrElse(0.U))
+    train.bits.vaddr.foreach(_ := Mux(req_s3.mergeA, req_s3.aMergeTask.vaddr.getOrElse(0.U), req_s3.vaddr.getOrElse(0.U)))
     train.bits.state:= Mux(!dirResult_s3.hit, AccessState.MISS,
       Mux(!meta_s3.prefetch.get, AccessState.HIT, AccessState.PREFETCH_HIT))
   }
