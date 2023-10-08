@@ -24,6 +24,7 @@ import xs.utils.RegNextN
 import org.chipsalliance.cde.config.Parameters
 import coupledL2.utils.BankedSRAM
 import xs.utils.Code
+import xs.utils.mbist.MBISTPipeline
 
 class DSRequest(implicit p: Parameters) extends L2Bundle {
   val way = UInt(wayBits.W)
@@ -39,7 +40,7 @@ class DSBlock(implicit p: Parameters) extends L2Bundle {
   val data = UInt((blockBytes * 8).W)
 }
 
-class DataStorage(implicit p: Parameters) extends L2Module {
+class DataStorage(parentName:String = "Unknown")(implicit p: Parameters) extends L2Module {
   val io = IO(new Bundle() {
     // there is only 1 read or write request in the same cycle,
     // so only 1 req port is necessary
@@ -49,7 +50,10 @@ class DataStorage(implicit p: Parameters) extends L2Module {
     val error = Output(Bool()) // TODO: ECC
   })
 
-  val array  = Module(new BankedSRAM(new DSBlock, blocks, 1, cacheParams.dsNBanks, singlePort = true, enableClockGate = enableClockGate))
+  val array  = Module(new BankedSRAM(new DSBlock,
+    blocks, 1, cacheParams.dsNBanks, singlePort = true,
+    hasMbist = cacheParams.hasMbist, hasShareBus = cacheParams.hasShareBus,
+    enableClockGate = enableClockGate, parentName = parentName + "array_"))
 
   val arrayIdx = Cat(io.req.bits.way, io.req.bits.set)
   val wen = io.req.valid && io.req.bits.wen
@@ -70,10 +74,12 @@ class DataStorage(implicit p: Parameters) extends L2Module {
 
   val dataEccArray = if (dataEccBits > 0) {
     Some(
-      Module(new BankedSRAM(Vec(banksECC, UInt((dataEccBits).W)), blocks, 1, cacheParams.dsNBanks, singlePort = true, hasMbist = false, enableClockGate = enableClockGate))
+      Module(new BankedSRAM(Vec(banksECC,
+        UInt((dataEccBits).W)), blocks, 1, cacheParams.dsNBanks,
+        singlePort = true, hasMbist = cacheParams.hasMbist, hasShareBus = cacheParams.hasShareBus,
+        enableClockGate = enableClockGate, parentName = parentName + "eccArray_"))
     )
   } else None
-
   if (dataEccBits > 0) {
     val bankWrDataVec = io.wdata.asTypeOf(Vec(banksECC, UInt((bankBytes*8).W)))
     

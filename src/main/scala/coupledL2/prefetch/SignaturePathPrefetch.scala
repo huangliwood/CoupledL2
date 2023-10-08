@@ -108,7 +108,7 @@ class sppPrefetchReq(implicit p:Parameters) extends PrefetchReq{
   val hint2llc = Bool()
 }
 
-class SignatureTable(implicit p: Parameters) extends SPPModule with HasPerfLogging{
+class SignatureTable(parentName:String = "Unknown")(implicit p: Parameters) extends SPPModule with HasPerfLogging{
   val io = IO(new Bundle {
     val req = Flipped(DecoupledIO(new SignatureTableReq))
     val resp = DecoupledIO(new SignatureTableResp) //output old signature and delta to write PT
@@ -131,9 +131,8 @@ class SignatureTable(implicit p: Parameters) extends SPPModule with HasPerfLoggi
   println(s"pageOffsetBits: ${pageOffsetBits}")
   println(s"sTagBits: ${sTagBits}")
 
-  val sTable = Module(
-    new SRAMTemplate(sTableEntry(), set = sTableEntries, way = 1, bypassWrite = true, shouldReset = true)
-  )
+  val sTable = Module(new SRAMTemplate(sTableEntry(), set = sTableEntries, way = 1, bypassWrite = true, shouldReset = true,
+    hasMbist = cacheParams.hasShareBus, hasShareBus = cacheParams.hasShareBus, parentName = parentName))
   // --------------------------------------------------------------------------------
   // stage 0
   // --------------------------------------------------------------------------------
@@ -227,7 +226,7 @@ class SignatureTable(implicit p: Parameters) extends SPPModule with HasPerfLoggi
   XSPerfAccumulate("spp_st_bp_update",io.bp_update.valid)
 }
 
-class PatternTable(implicit p: Parameters) extends SPPModule with HasPerfLogging{
+class PatternTable(parentName:String = "Unknown")(implicit p: Parameters) extends SPPModule with HasPerfLogging{
   val io = IO(new Bundle {
     val req = Flipped(DecoupledIO(new SignatureTableResp))
     val resp = DecoupledIO(new PatternTableResp)
@@ -248,9 +247,8 @@ class PatternTable(implicit p: Parameters) extends SPPModule with HasPerfLogging
 
   val db_degree = io.db_degree
 
-  val pTable = Module(
-    new SRAMTemplate(pTableEntry(), set = pTableEntries, way = 1, bypassWrite = true, shouldReset = true)
-  )
+  val pTable = Module(new SRAMTemplate(pTableEntry(), set = pTableEntries, way = 1, bypassWrite = true, shouldReset = true,
+    hasMbist = cacheParams.hasShareBus, hasShareBus = cacheParams.hasShareBus, parentName = parentName))
 
   val q = Module(new Queue(chiselTypeOf(io.req.bits), pTableQueueEntries, flow = false, pipe = true))
   q.io.enq <> io.req
@@ -517,7 +515,7 @@ class Unpack(implicit p: Parameters) extends SPPModule with HasPerfLogging{
   }
 }
 
-class SignaturePathPrefetch(implicit p: Parameters) extends SPPModule with HasPerfLogging{
+class SignaturePathPrefetch(parentName:String = "Unknown")(implicit p: Parameters) extends SPPModule with HasPerfLogging{
   val io = IO(new Bundle() {
     val train = Flipped(DecoupledIO(new PrefetchTrain)) //from higher level cache
     val req = DecoupledIO(new sppPrefetchReq) //issue to next-level cache
@@ -526,8 +524,8 @@ class SignaturePathPrefetch(implicit p: Parameters) extends SPPModule with HasPe
     val queue_used = Input(UInt(6.W))
   })
 
-  val sTable = Module(new SignatureTable)
-  val pTable = Module(new PatternTable)
+  val sTable = Module(new SignatureTable(parentName + "st_"))
+  val pTable = Module(new PatternTable(parentName + "pt_"))
   val unpack = Module(new Unpack)
 
   val oldAddr = io.train.bits.addr //received request from L1 cache

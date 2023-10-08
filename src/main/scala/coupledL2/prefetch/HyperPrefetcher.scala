@@ -143,7 +143,7 @@ class FilterV2(implicit p: Parameters) extends PrefetchBranchV2Module {
 }
 
 //Only used for hybrid spp and bop
-class HyperPrefetcher()(implicit p: Parameters) extends PrefetchBranchV2Module with HasPerfLogging{
+class HyperPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends PrefetchBranchV2Module with HasPerfLogging{
   val io = IO(new Bundle() {
     val train = Flipped(DecoupledIO(new PrefetchTrain))
     val req = DecoupledIO(new PrefetchReq)
@@ -157,7 +157,7 @@ class HyperPrefetcher()(implicit p: Parameters) extends PrefetchBranchV2Module w
 
   val fTable = Module(new FilterV2)
 
-  val spp = Module(new SignaturePathPrefetch()(p.alterPartial({
+  val spp = Module(new SignaturePathPrefetch(parentName = parentName + "spp_")(p.alterPartial({
         case L2ParamKey => p(L2ParamKey).copy(prefetch = Some(SPPParameters()))
   })))
   val bop = Module(new BestOffsetPrefetch()(p.alterPartial({

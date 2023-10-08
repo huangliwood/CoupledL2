@@ -3,6 +3,7 @@ package coupledL2.utils
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import xs.utils.mbist.MBISTPipeline
 import xs.utils.sram._
 
 
@@ -16,7 +17,8 @@ class BankedSRAM[T <: Data]
   singlePort: Boolean = false, bypassWrite: Boolean = false,
   clk_div_by_2: Boolean = false,
   enableClockGate: Boolean = false,
-  hasMbist: Boolean = false
+  hasMbist: Boolean = false, hasShareBus: Boolean = false,
+  parentName:String = "Unknown"
 )(implicit p:Parameters) extends Module {
   val io = IO(new Bundle() {
     val r = Flipped(new SRAMReadBus(gen, sets, ways))
@@ -31,7 +33,7 @@ class BankedSRAM[T <: Data]
   val w_setIdx = io.w.req.bits.setIdx.head(innerSetBits)
   val w_bankSel = if(n == 1) 0.U else io.w.req.bits.setIdx(bankBits - 1, 0)
 
-  val banks = (0 until n).map{ i =>
+  val (banks, pls) = (0 until n).map{ i =>
     val ren = if(n == 1) true.B else i.U === r_bankSel
     val wen = if(n == 1) true.B else i.U === w_bankSel
     val sram = Module(new SRAMTemplate(
@@ -40,14 +42,21 @@ class BankedSRAM[T <: Data]
       singlePort = singlePort, bypassWrite = bypassWrite,
       clk_div_by_2 = clk_div_by_2,
       hasMbist = hasMbist,
-      hasClkGate = enableClockGate
+      hasShareBus = hasShareBus,
+      hasClkGate = enableClockGate,
+      parentName = parentName + s"bank${n}_"
     ))
+    val mbistPl = MBISTPipeline.PlaceMbistPipeline(1,
+      s"${parentName}_bank${n}_mbistPipe",
+      hasMbist && hasShareBus
+    )
     sram.io.r.req.valid := io.r.req.valid && ren
     sram.io.r.req.bits.apply(r_setIdx)
     sram.io.w.req.valid := io.w.req.valid && wen
     sram.io.w.req.bits.apply(io.w.req.bits.data, w_setIdx, io.w.req.bits.waymask.getOrElse(1.U))
-    sram
-  }
+    (sram, mbistPl)
+  }.unzip
+
 
   val ren_vec_0 = VecInit(banks.map(_.io.r.req.fire))
   val ren_vec_1 = RegNext(ren_vec_0, 0.U.asTypeOf(ren_vec_0))

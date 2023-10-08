@@ -107,6 +107,8 @@ case class L2Param
     d = BufferParams.default,
     e = BufferParams.default
   ),
+  hasMbist: Boolean = false,
+  hasShareBus: Boolean = false,
 
   hartIds: Seq[Int] = Seq[Int](),
   // Prefetch
