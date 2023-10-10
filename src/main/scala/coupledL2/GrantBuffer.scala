@@ -45,7 +45,7 @@ class TaskWithData(implicit p: Parameters) extends L2Bundle {
 // 2. Send response to Prefetcher
 // 3. Block MainPipe enterance when there is not enough space
 // 4. Generate Hint signal for L1 early wake-up
-class GrantBuffer(implicit p: Parameters) extends L2Module with HasPerfLogging{
+class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val io = IO(new Bundle() {
     // receive task from MainPipe
     val d_task = Flipped(DecoupledIO(new TaskWithData()))
@@ -108,7 +108,9 @@ class GrantBuffer(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val dtaskOpcode = io.d_task.bits.task.opcode
   // The following is organized in the order of data flow
   // =========== save d_task in queue[FIFO] ===========
-  val grantQueue = Module(new Queue(new TaskWithData(), entries = mshrsAll))
+  val grantQueue = Module(new SRAMQueue(new TaskWithData(), entries = mshrsAll,
+     hasMbist = cacheParams.hasMbist, hasShareBus = cacheParams.hasShareBus,
+     hasClkGate = enableClockGate, parentName = parentName))
   grantQueue.io.enq.valid := io.d_task.valid && dtaskOpcode =/= HintAck
   grantQueue.io.enq.bits := io.d_task.bits
   io.d_task.ready := true.B // GrantBuf should always be ready

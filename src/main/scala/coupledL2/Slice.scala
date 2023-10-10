@@ -53,7 +53,7 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
   val sinkB = Module(new SinkB)
   val sinkC = Module(new SinkC)
   val sourceC = Module(new SourceC)
-  val grantBuf = Module(new GrantBuffer)
+  val grantBuf = Module(new GrantBuffer(parentName + "grantBuf_"))
   val refillBuf = Module(new MSHRBuffer(wPorts = 3))
   val releaseBuf = Module(new MSHRBuffer(wPorts = 3))
 
