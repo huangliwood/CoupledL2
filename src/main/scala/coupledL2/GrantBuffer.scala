@@ -163,16 +163,22 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
   // WARNING: this should never overflow (extremely rare though)
   // but a second thought, pftQueue overflow results in no functional correctness bug
   prefetchOpt.map { _ =>
-    val pftRespQueue = Module(new Queue(new TaskWithData(), entries = 4, flow = true))
+    val pftRespQueue = Module(new Queue(new Bundle(){
+        val tag = UInt(tagBits.W)
+        val set = UInt(setBits.W)
+      },
+      entries = 4,
+      flow = true))
 
     pftRespQueue.io.enq.valid := io.d_task.valid && dtaskOpcode === HintAck &&
       io.d_task.bits.task.fromL2pft.getOrElse(false.B)
-    pftRespQueue.io.enq.bits := io.d_task.bits
+    pftRespQueue.io.enq.bits.tag := io.d_task.bits.task.tag
+    pftRespQueue.io.enq.bits.set := io.d_task.bits.task.set
 
     val resp = io.prefetchResp.get
     resp.valid := pftRespQueue.io.deq.valid
-    resp.bits.tag := pftRespQueue.io.deq.bits.task.tag
-    resp.bits.set := pftRespQueue.io.deq.bits.task.set
+    resp.bits.tag := pftRespQueue.io.deq.bits.tag
+    resp.bits.set := pftRespQueue.io.deq.bits.set
     pftRespQueue.io.deq.ready := resp.ready
 
     // assert(pftRespQueue.io.enq.ready, "pftRespQueue should never be full, no back pressure logic") // TODO: has bug here
