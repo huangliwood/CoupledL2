@@ -24,11 +24,6 @@ import freechips.rocketchip.tilelink.TLMessages._
 import org.chipsalliance.cde.config.Parameters
 // import coupledL2.utils.XSPerfAccumulate
 
-class grantAckQEntry(implicit p: Parameters) extends L2Bundle {
-  val source = UInt(sourceIdBits.W)
-  val sink = UInt(outerSinkBits.W)
-}
-
 // Communicate with L3
 // Receive Grant/GrantData/ReleaseAck from d and
 // Send GrantAck through e
@@ -44,14 +39,13 @@ class RefillUnit(implicit p: Parameters) extends L2Module {
   val hasData = io.sinkD.bits.opcode(0)
   val isGrant = io.sinkD.bits.opcode === Grant || io.sinkD.bits.opcode === GrantData
 
-  val grantAckQ = Module(new Queue(new grantAckQEntry, entries=mshrsAll, pipe=false, flow=false))
+  val grantAckQ = Module(new Queue(UInt(outerSinkBits.W), entries=mshrsAll, pipe=false, flow=false))
 
   grantAckQ.io.enq.valid := isGrant && io.sinkD.valid && first
-  grantAckQ.io.enq.bits.source := io.sinkD.bits.source
-  grantAckQ.io.enq.bits.sink := io.sinkD.bits.sink
+  grantAckQ.io.enq.bits := io.sinkD.bits.sink
 
   grantAckQ.io.deq.ready := io.sourceE.ready
-  io.sourceE.bits.sink := grantAckQ.io.deq.bits.sink
+  io.sourceE.bits.sink := grantAckQ.io.deq.bits
   io.sourceE.valid := grantAckQ.io.deq.valid
 
   io.refillBufWrite.valid_dups.foreach(_ := io.sinkD.valid && hasData)
