@@ -39,6 +39,11 @@ class TaskWithData(implicit p: Parameters) extends L2Bundle {
   val data = new DSBlock()
 }
 
+ class TLBundleDwithBeat1(implicit p: Parameters) extends L2Bundle {
+   val d = new TLBundleD(edgeIn.bundle)
+   val beat1 = new DSBeat()
+ }
+
 // 1. Communicate with L1
 //   1.1 Send Grant/GrantData/ReleaseAck/AccessAckData from d and
 //   1.2 Receive GrantAck through e
@@ -79,19 +84,26 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
   })
 
   // =========== functions ===========
-  def toTLBundleD(task: TaskBundle, data: UInt = 0.U) = {
-    val d = Wire(new TLBundleD(edgeIn.bundle))
-    d.opcode := task.opcode
-    d.param := task.param
-    d.size := offsetBits.U
-    d.source := task.sourceId
-    d.sink := task.mshrId
-    d.denied := false.B
-    d.data := data
-    d.corrupt := false.B
-    d.echo.lift(DirtyKey).foreach(_ := task.dirty)
-    d
-  }
+   def toTLBundleDwithBeat1(td: TaskWithData) = {
+     val data = td.data.asTypeOf(Vec(beatSize, new DSBeat))
+     val d = Wire(new TLBundleD(edgeIn.bundle))
+     val beat1 = Wire(new DSBeat())
+     d.opcode := td.task.opcode
+     d.param := td.task.param
+     d.size := offsetBits.U
+     d.source := td.task.sourceId
+     d.sink := td.task.mshrId
+     d.denied := false.B
+     d.data := data(0).asUInt
+     d.corrupt := false.B
+     d.echo.lift(DirtyKey).foreach(_ := td.task.dirty)
+     beat1 := data(1)
+
+     val output = Wire(new TLBundleDwithBeat1())
+     output.d := d
+     output.beat1 := beat1
+     output
+   }
 
 //  def getBeat(data: UInt, beatsOH: UInt): (UInt, UInt) = {
 //    // get one beat from data according to beatsOH
@@ -108,11 +120,11 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
   val dtaskOpcode = io.d_task.bits.task.opcode
   // The following is organized in the order of data flow
   // =========== save d_task in queue[FIFO] ===========
-  val grantQueue = Module(new SRAMQueue(new TaskWithData(), entries = mshrsAll,
+  val grantQueue = Module(new SRAMQueue(new TLBundleDwithBeat1(), entries = mshrsAll,
      hasMbist = cacheParams.hasMbist, hasShareBus = cacheParams.hasShareBus,
      hasClkGate = enableClockGate, parentName = parentName))
   grantQueue.io.enq.valid := io.d_task.valid && dtaskOpcode =/= HintAck
-  grantQueue.io.enq.bits := io.d_task.bits
+  grantQueue.io.enq.bits := toTLBundleDwithBeat1(io.d_task.bits)
   io.d_task.ready := true.B // GrantBuf should always be ready
 
   val grantQueueCnt = grantQueue.io.count
@@ -122,23 +134,19 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
   // =========== dequeue entry and fire ===========
   require(beatSize == 2)
   val deqValid = grantQueue.io.deq.valid
-  val deqTask = grantQueue.io.deq.bits.task
-  val deqData = grantQueue.io.deq.bits.data.asTypeOf(Vec(beatSize, new DSBeat))
+  val deq = grantQueue.io.deq.bits
 
   // grantBuf: to keep the remaining unsent beat of GrantData
   val grantBufValid = RegInit(false.B)
-  val grantBuf =  RegInit(0.U.asTypeOf(new Bundle() {
-    val task = new TaskBundle()
-    val data = new DSBeat()
-  }))
+  val grantBuf =  RegInit(0.U.asTypeOf(new TLBundleD(edgeIn.bundle)))
 
   grantQueue.io.deq.ready := io.d.ready && !grantBufValid
 
   // if deqTask has data, send the first beat directly and save the remaining beat in grantBuf
-  when(deqValid && io.d.ready && !grantBufValid && deqTask.opcode(0)) {
+  when(deqValid && io.d.ready && !grantBufValid && deq.d.opcode(0)) {
     grantBufValid := true.B
-    grantBuf.task := deqTask
-    grantBuf.data := deqData(1)
+    grantBuf := deq.d
+    grantBuf.data := deq.beat1.asUInt
   }
   when(grantBufValid && io.d.ready) {
     grantBufValid := false.B
@@ -147,8 +155,8 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
   io.d.valid := grantBufValid || deqValid
   io.d.bits := Mux(
     grantBufValid,
-    toTLBundleD(grantBuf.task, grantBuf.data.data),
-    toTLBundleD(deqTask, deqData(0).data)
+    grantBuf,
+    deq.d
   )
 
   // =========== send response to prefetcher ===========
