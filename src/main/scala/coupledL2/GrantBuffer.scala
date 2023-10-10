@@ -120,7 +120,7 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
   val dtaskOpcode = io.d_task.bits.task.opcode
   // The following is organized in the order of data flow
   // =========== save d_task in queue[FIFO] ===========
-  val grantQueue = Module(new SRAMQueue(new TLBundleDwithBeat1(), entries = mshrsAll,
+  val grantQueue = Module(new SRAMQueue(new TLBundleDwithBeat1(), entries = mshrsAll, flow = true,
      hasMbist = cacheParams.hasMbist, hasShareBus = cacheParams.hasShareBus,
      hasClkGate = enableClockGate, parentName = parentName))
   grantQueue.io.enq.valid := io.d_task.valid && dtaskOpcode =/= HintAck
