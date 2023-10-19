@@ -50,7 +50,8 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
     task.size := b.size
     task.sourceId := 0.U(sourceIdBits.W)
     task.bufIdx := 0.U(bufIdxBits.W)
-    task.needProbeAckData := b.data(0) // TODO: parameterize this
+//    task.needProbeAckData := b.data(0) // TODO: parameterize this
+    task.needProbeAckData := true.B // TODO: parameterize this
     task.mshrTask := false.B
     task.mshrId := 0.U(mshrBits.W)
     task.aliasTask.foreach(_ := false.B)
