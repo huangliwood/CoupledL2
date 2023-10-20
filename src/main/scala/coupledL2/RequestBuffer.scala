@@ -217,11 +217,26 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   // when entry.rdy is no longer true,
   // we cancel req in chosenQ, with the entry still held in buffer to issue later
 //  val cancel = (canFlow && sameSet(chosenQ.io.deq.bits.bits.task, io.in.bits)) || !buffer(chosenQ.io.deq.bits.id).rdy
-  val cancel = !buffer(chosenQ.io.deq.bits.id).rdy
+  val buffer_read_id = WireInit(0.U.asTypeOf(chosenQ.io.deq.bits.id))
+  when(chosenQ.io.deq.valid){
+    buffer_read_id := chosenQ.io.deq.bits.id
+  }otherwise{
+    buffer_read_id := 0.U
+  }
+  val cancel = !buffer(buffer_read_id).rdy
+  // val cancel = !buffer(chosenQ.io.deq.bits.id).rdy
+
+  dontTouch(cancel)
 
   chosenQ.io.deq.ready := io.out.ready || cancel
   io.out.valid := chosenQValid && !cancel || io.in.valid && canFlow
-  io.out.bits  := Mux(canFlow, io.in.bits, chosenQ.io.deq.bits.bits.task)
+  val deq_task = WireInit(0.U.asTypeOf(new TaskBundle()))
+  when(chosenQ.io.deq.valid){
+    deq_task := chosenQ.io.deq.bits.bits.task
+  }otherwise{
+    deq_task := 0.U.asTypeOf(new TaskBundle())
+  }
+  io.out.bits  := Mux(canFlow, io.in.bits, deq_task)
 
   when(chosenQ.io.deq.fire && !cancel) {
     buffer(chosenQ.io.deq.bits.id).valid := false.B

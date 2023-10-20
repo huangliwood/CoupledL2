@@ -7,6 +7,7 @@ import freechips.rocketchip.tilelink._
 import coupledL2._
 import coupledL2.HasCoupledL2Parameters
 import xs.utils.perf.HasPerfLogging
+import xs.utils.SRAMQueue
 
 case class HyperPrefetchParams(
   fTableEntries: Int = 32,
@@ -33,7 +34,7 @@ trait HasHyperPrefetcherParams extends HasCoupledL2Parameters {
 abstract class PrefetchBranchV2Module(implicit val p: Parameters) extends Module with HasHyperPrefetcherParams
 abstract class PrefetchBranchV2Bundle(implicit val p: Parameters) extends Bundle with HasHyperPrefetcherParams
 
-class FilterV2(implicit p: Parameters) extends PrefetchBranchV2Module {
+class FilterV2(parentName:String="Unkown")(implicit p: Parameters) extends PrefetchBranchV2Module {
   val io = IO(new Bundle() {
     val req = Flipped(DecoupledIO(new PrefetchReq))
     val resp = DecoupledIO(new PrefetchReq)
@@ -61,7 +62,9 @@ class FilterV2(implicit p: Parameters) extends PrefetchBranchV2Module {
   val dupOffsetBits = log2Up(fTableEntries/dupNums)
   val dupBits = log2Up(dupNums)
   val fTable = RegInit(VecInit(Seq.fill(fTableEntries)(0.U.asTypeOf(fTableEntry()))))
-  val q = Module(new Queue(UInt(fullAddressBits.W), fTableQueueEntries, flow = false, pipe = true))
+  val q = Module(new SRAMQueue(UInt(fullAddressBits.W), fTableQueueEntries, 
+    flow = true, hasMbist = cacheParams.hasMbist, hasShareBus = cacheParams.hasShareBus,
+    hasClkGate = enableClockGate, parentName = parentName))
 
   val hit = WireInit(VecInit.fill(dupNums)(false.B))
   val readResult = WireInit(VecInit.fill(dupNums)(0.U.asTypeOf(fTableEntry())))
@@ -143,7 +146,7 @@ class FilterV2(implicit p: Parameters) extends PrefetchBranchV2Module {
 }
 
 //Only used for hybrid spp and bop
-class HyperPrefetcher()(implicit p: Parameters) extends PrefetchBranchV2Module with HasPerfLogging{
+class HyperPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends PrefetchBranchV2Module with HasPerfLogging{
   val io = IO(new Bundle() {
     val train = Flipped(DecoupledIO(new PrefetchTrain))
     val req = DecoupledIO(new PrefetchReq)
@@ -157,7 +160,7 @@ class HyperPrefetcher()(implicit p: Parameters) extends PrefetchBranchV2Module w
 
   val fTable = Module(new FilterV2)
 
-  val spp = Module(new SignaturePathPrefetch()(p.alterPartial({
+  val spp = Module(new SignaturePathPrefetch(parentName = parentName + "spp_")(p.alterPartial({
         case L2ParamKey => p(L2ParamKey).copy(prefetch = Some(SPPParameters()))
   })))
   val bop = Module(new BestOffsetPrefetch()(p.alterPartial({

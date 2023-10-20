@@ -24,6 +24,7 @@ import xs.utils.RegNextN
 import org.chipsalliance.cde.config.Parameters
 import coupledL2.utils.BankedSRAM
 import xs.utils.Code
+import xs.utils.mbist.MBISTPipeline
 
 class DSRequest(implicit p: Parameters) extends L2Bundle {
   val way = UInt(wayBits.W)
@@ -39,7 +40,7 @@ class DSBlock(implicit p: Parameters) extends L2Bundle {
   val data = UInt((blockBytes * 8).W)
 }
 
-class DataStorage(implicit p: Parameters) extends L2Module {
+class DataStorage(parentName:String = "Unknown")(implicit p: Parameters) extends L2Module {
   val io = IO(new Bundle() {
     // there is only 1 read or write request in the same cycle,
     // so only 1 req port is necessary
@@ -49,23 +50,17 @@ class DataStorage(implicit p: Parameters) extends L2Module {
     val error = Output(Bool()) // TODO: ECC
   })
 
-  val array  = Module(new BankedSRAM(new DSBlock, blocks, 1, cacheParams.dsNBanks, singlePort = true, enableClockGate = enableClockGate))
+  val array  = Module(new BankedSRAM(new DSBlock,
+    blocks, 1, cacheParams.dsNBanks, singlePort = true,
+    hasMbist = cacheParams.hasMbist, hasShareBus = cacheParams.hasShareBus,
+    enableClockGate = enableClockGate, parentName = parentName + "array_"))
 
-  // read
   val arrayIdx = Cat(io.req.bits.way, io.req.bits.set)
+  val wen = io.req.valid && io.req.bits.wen
   val ren = io.req.valid && !io.req.bits.wen
+  array.io.w.apply(wen, io.wdata, arrayIdx, 1.U)
   array.io.r.apply(ren, arrayIdx)
 
-  // write
-  val wReqReg = RegNext(io.req)
-  val wDataReg = RegEnable(io.wdata, io.req.valid && io.req.bits.wen)
-  val wArrayIdx = Cat(wReqReg.bits.way, wReqReg.bits.set)
-  val wen = wReqReg.valid && wReqReg.bits.wen
-  array.io.w.apply(wen, wDataReg, wArrayIdx, 1.U)
-
-  val wrSameTime = ren && wen
-  dontTouch(wrSameTime)
-  assert(!wrSameTime, "Wraning: write and read same time, wReq_set:%d wReq_way:%d rReq_set:%d rReq_way:%d\n", wReqReg.bits.set, wReqReg.bits.way, io.req.bits.set, io.req.bits.way)
 
   // Seperate the whole block of data into several banksECC, each bank contains 8 bytes(64-bit).
   // For every bank, we attach ECC protection bits.
@@ -79,10 +74,12 @@ class DataStorage(implicit p: Parameters) extends L2Module {
 
   val dataEccArray = if (dataEccBits > 0) {
     Some(
-      Module(new BankedSRAM(Vec(banksECC, UInt((dataEccBits).W)), blocks, 1, cacheParams.dsNBanks, singlePort = true, hasMbist = false, enableClockGate = enableClockGate))
+      Module(new BankedSRAM(Vec(banksECC,
+        UInt((dataEccBits).W)), blocks, 1, cacheParams.dsNBanks,
+        singlePort = true, hasMbist = cacheParams.hasMbist, hasShareBus = cacheParams.hasShareBus,
+        enableClockGate = enableClockGate, parentName = parentName + "eccArray_"))
     )
   } else None
-
   if (dataEccBits > 0) {
     val bankWrDataVec = io.wdata.asTypeOf(Vec(banksECC, UInt((bankBytes*8).W)))
     

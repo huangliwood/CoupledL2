@@ -11,11 +11,13 @@ import xs.utils.{ChiselDB, FileRegisters}
 import axi2tl._
 import freechips.rocketchip.amba.axi4._
 import coupledL3._
+import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
+import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import chisel3.util.experimental.BoringUtils
 import scala.collection.mutable.ArrayBuffer
 import xs.utils.GTimer
 import xs.utils.perf.{DebugOptions,DebugOptionsKey}
-import huancun.{HuanCun, HCCacheParameters, HCCacheParamsKey, CacheParameters}
+import huancun.{HuanCun, HCCacheParameters, HCCacheParamsKey, CacheParameters, CacheCtrl}
 
 class TestTop_L2()(implicit p: Parameters) extends LazyModule {
 
@@ -457,9 +459,9 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
 
   /* L1D L1I L1D L1I (L1I sends Get)
    *  \  /    \  /
-   *   L2      L2      
-   *    \     /       
-   *       L3
+   *   L2      L2    DMA(AXItoTL)
+   *    \     /     /       
+   *         L3
    */
 
   val delayFactor = 0.2
@@ -489,6 +491,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
 
   val l2xbar = TLXbar()
   val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffffL), beatBytes = 32))
+  // val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffffffL), beatBytes = 32))
   var master_nodes: Seq[TLClientNode] = Seq() // TODO
   val NumCores=2
   // val nullNode = LazyModule(new SppSenderNull)
@@ -514,15 +517,15 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
         clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
         echoField = Seq(huancun.DirtyField()),
         // prefetch = Some(BOPParameters(rrTableEntries = 16,rrTagBits = 6))
-        prefetch = None,/* 
-        del L2 prefetche recv option, move into: prefetch =  PrefetchReceiverParams
+        // prefetch = Some(HyperPrefetchParams()),
+        /* del L2 prefetche recv option, move into: prefetch =  PrefetchReceiverParams
         prefetch options:
           SPPParameters          => spp only
           BOPParameters          => bop only
           PrefetchReceiverParams => sms+bop
           HyperPrefetchParams    => spp+bop+sms
         */
-        sppMultiLevelRefill = None
+        // sppMultiLevelRefill = Some(coupledL2.prefetch.PrefetchReceiverParams()),
         /*must has spp, otherwise Assert Fail
         sppMultiLevelRefill options:
         PrefetchReceiverParams() => spp has cross level refill
@@ -556,21 +559,51 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       simulation = true,
       hasMbist = false,
       prefetch = None,
-      prefetchRecv = None
+      // prefetchRecv =  Some(huancun.prefetch.PrefetchReceiverParams()),
+      tagECC = Some("secded"),
+      dataECC = Some("secded"),
+      ctrl = Some(huancun.CacheCtrl(
+//        address = 0x3900_0000
+        address = 0x390_0000
+      ))
     )
     case DebugOptionsKey => DebugOptions()
   })))
 
-//  val dma_node = TLClientNode(Seq(TLMasterPortParameters.v2(
-//      Seq(TLMasterParameters.v1(
-//        name = "dma",
-//        sourceId = IdRange(0, 16),
-//        supportsProbe = TransferSizes.none
-//      )),
-//      channelBytes = TLChannelBeatBytes(cacheParams.blockBytes),
-//      minLatency = 1,
-//      echoFields = Nil,
-//    )))
+  // println(f"pf_l3recv_node connecting to l3pf_RecvXbar out")
+  // val sppHasCrossLevelRefillOpt = p(L2ParamKey).sppMultiLevelRefill
+  // println(f"SPP cross level refill: ${sppHasCrossLevelRefillOpt} ")
+  // sppHasCrossLevelRefillOpt match{
+  //   case Some(x) =>
+  //     val l3pf_RecvXbar = LazyModule(new PrefetchReceiverXbar(NumCores))
+  //     l2List.zipWithIndex.foreach {
+  //       case (l2, i) =>
+  //         l2.spp_send_node match {
+  //           case Some(l2Send) =>
+  //             l3pf_RecvXbar.inNode(i) := l2Send
+  //             println(f"spp_send_node${i} connecting to l3pf_RecvXbar")
+  //           case None =>
+  //       }
+  //     }
+  //     println(f"pf_l3recv_node connecting to l3pf_RecvXbar out")
+  //     l3.pf_l3recv_node.map(l3_recv =>  l3_recv:= l3pf_RecvXbar.outNode.head)
+  //   case None =>
+  // }
+  val ctrl_node = TLClientNode(Seq(TLMasterPortParameters.v2(
+      Seq(TLMasterParameters.v1(
+        name = "ctrl",
+        sourceId = IdRange(0, 16),
+        supportsProbe = TransferSizes.none
+      )),
+      channelBytes = TLChannelBeatBytes(8), // 64bits
+      minLatency = 1,
+      echoFields = Nil,
+    )))
+  val ecc_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
+  val l3_reset_sink = BundleBridgeSink(Some(() => Reset()))
+  l3.ctlnode.foreach(_ := TLBuffer() := ctrl_node)
+  l3.intnode.foreach(ecc_int_sink := _)
+  l3.rst_nodes.foreach(_.foreach(l3_reset_sink := _))
 
   val idBits = 14
   val l3FrontendAXI4Node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
@@ -596,6 +629,9 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
         node.makeIOs()(ValName(s"master_port_$i"))
     }
     l3FrontendAXI4Node.makeIOs()(ValName("dma_port"))
+    ctrl_node.makeIOs()(ValName("cmo_port"))
+    ecc_int_sink.makeIOs()(ValName("int_port"))
+    l3_reset_sink.makeIOs()(ValName("rst_port"))
 
     val io = IO(new Bundle{
       val perfClean = Input(Bool())
@@ -843,6 +879,7 @@ object TestTop_fullSys extends App {
       echoField = Seq(DirtyField())
     )
     case DebugOptionsKey => DebugOptions()
+    case AXI2TLParamKey => AXI2TLParam()
   })
   val top = DisableMonitors(p => LazyModule(new TestTop_fullSys()(p)))(config)
 

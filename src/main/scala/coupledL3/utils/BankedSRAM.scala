@@ -2,6 +2,7 @@ package coupledL3.utils
 
 import chisel3._
 import chisel3.util._
+import org.chipsalliance.cde.config.Parameters
 import xs.utils.sram._
 
 // divide SRAM into n banks
@@ -14,7 +15,7 @@ class BankedSRAM[T <: Data]
   singlePort: Boolean = false, bypassWrite: Boolean = false,
   clk_div_by_2: Boolean = false, enableClockGate: Boolean = true,
   hasMbist: Boolean = false
-) extends Module {
+)(implicit p:Parameters) extends Module {
   val io = IO(new Bundle() {
     val r = Flipped(new SRAMReadBus(gen, sets, ways))
     val w = Flipped(new SRAMWriteBus(gen, sets, ways))

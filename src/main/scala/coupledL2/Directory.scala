@@ -24,6 +24,7 @@ import coupledL2.utils._
 import xs.utils.{ParallelPriorityMux, RegNextN}
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink.TLMessages._
+import xs.utils.mbist.MBISTPipeline
 import xs.utils.perf.HasPerfLogging
 import xs.utils.sram.SRAMTemplate
 
@@ -101,7 +102,7 @@ class TagWrite(implicit p: Parameters) extends L2Bundle {
   val wtag = UInt(tagBits.W)
 }
 
-class Directory(implicit p: Parameters) extends L2Module with HasPerfLogging{
+class Directory(parentName: String = "Unknown")(implicit p: Parameters) extends L2Module with HasPerfLogging{
 
   val io = IO(new Bundle() {
     val read = Flipped(DecoupledIO(new DirRead))
@@ -138,8 +139,12 @@ class Directory(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val metaWen = io.metaWReq.valid
   val replacerWen = WireInit(false.B)
 
-  val tagArray  = Module(new BankedSRAM(UInt(tagBits.W), sets, ways, banks, singlePort = true, enableClockGate = true))
-  val metaArray = Module(new SRAMTemplate(new MetaEntry, sets, ways, singlePort = true, hasClkGate = true))
+  val tagArray  = Module(new BankedSRAM(UInt(tagBits.W), sets, ways, banks, singlePort = true,
+    hasMbist = cacheParams.hasMbist, hasShareBus = cacheParams.hasShareBus,
+    enableClockGate = enableClockGate, parentName = parentName + "tag_"))
+  val metaArray = Module(new SRAMTemplate(new MetaEntry, sets, ways, singlePort = true,
+    hasMbist = cacheParams.hasMbist, hasShareBus = cacheParams.hasShareBus,
+    hasClkGate = enableClockGate, parentName = parentName + "meta_"))
   val tagRead = Wire(Vec(ways, UInt(tagBits.W)))
   val metaRead = Wire(Vec(ways, new MetaEntry()))
 
@@ -150,7 +155,15 @@ class Directory(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val repl = ReplacementPolicy.fromString(cacheParams.replacement, ways)
   val random_repl = cacheParams.replacement == "random"
   val replacer_sram_opt = if(random_repl) None else
-    Some(Module(new SRAMTemplate(UInt(repl.nBits.W), sets, 1, singlePort = true, shouldReset = true, hasClkGate = enableClockGate)))
+    Some(Module(new SRAMTemplate(UInt(repl.nBits.W), sets, 1,
+      singlePort = true, shouldReset = true,
+      hasMbist = cacheParams.hasMbist, hasShareBus = cacheParams.hasShareBus,
+      hasClkGate = enableClockGate, parentName = parentName + "repl_")))
+
+  val mbistPl = MBISTPipeline.PlaceMbistPipeline(1,
+    s"${parentName}_mbistPipe",
+    cacheParams.hasMbist && cacheParams.hasShareBus
+  )
 
   /* ====== Generate response signals ====== */
   // hit/way calculation in stage 3, Cuz SRAM latency is high under high frequency

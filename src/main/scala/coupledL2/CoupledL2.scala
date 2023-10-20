@@ -28,7 +28,9 @@ import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.util._
 import org.chipsalliance.cde.config.Parameters
 import coupledL2.prefetch._
+import xs.utils.mbist.{MBISTInterface, MBISTPipeline}
 import xs.utils.perf.HasPerfLogging
+import xs.utils.sram.SRAMTemplate
 
 trait HasCoupledL2Parameters {
   val p: Parameters
@@ -162,7 +164,7 @@ trait HasCoupledL2Parameters {
   }
 }
 
-class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Parameters {
+class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyModule with HasCoupledL2Parameters {
 
   val xfer = TransferSizes(blockBytes, blockBytes)
   val atom = TransferSizes(1, cacheParams.channelBytes.d.get)
@@ -244,7 +246,8 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
     case _ => None //Spp not exist, can not use multl-level refill
   }
 
-  lazy val module = new LazyModuleImp(this) with HasPerfLogging{
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) with HasPerfLogging{
     val banks = node.in.size
     val bankBits = if (banks == 1) 0 else log2Up(banks)
     val io = IO(new Bundle {
@@ -286,7 +289,7 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
       case EdgeOutKey => node.out.head._2
       case BankBitsKey => bankBits
     }
-    val prefetcher = prefetchOpt.map(_ => Module(new Prefetcher()(pftParams)))
+    val prefetcher = prefetchOpt.map(_ => Module(new Prefetcher(parentName + "pft_")(pftParams)))
     val prefetchTrains = prefetchOpt.map(_ => Wire(Vec(banks, DecoupledIO(new PrefetchTrain()(pftParams)))))
     val prefetchResps = prefetchOpt.map(_ => Wire(Vec(banks, DecoupledIO(new PrefetchResp()(pftParams)))))
     val prefetchEvicts = prefetchOpt.map({
@@ -357,8 +360,8 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
       case (((in, edgeIn), (out, edgeOut)), i) =>
         require(in.params.dataBits == out.params.dataBits)
         val rst_L2 = reset
-        val slice = withReset(rst_L2) { 
-          Module(new Slice()(p.alterPartial {
+        val slice = withReset(rst_L2) {
+          Module(new Slice(parentName = parentName + s"slice${i}_")(p.alterPartial {
             case EdgeInKey  => edgeIn
             case EdgeOutKey => edgeOut
             case BankBitsKey => bankBits
@@ -455,6 +458,36 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
 
     hint_chosen := l1Hint_arb.io.chosen
     hint_fire := io.l2_hint.valid
+
+    private val mbistPl = MBISTPipeline.PlaceMbistPipeline(Int.MaxValue,
+      s"${parentName}_mbistPipe",
+      cacheParams.hasMbist && cacheParams.hasShareBus
+    )
+
+    private val sigFromSrams = if (cacheParams.hasMbist) Some(SRAMTemplate.genBroadCastBundleTop()) else None
+    val dft = if (cacheParams.hasMbist) Some(IO(sigFromSrams.get.cloneType)) else None
+    if (cacheParams.hasMbist) {
+      dft.get <> sigFromSrams.get
+      dontTouch(dft.get)
+    }
+
+    private val l2MbistIntf = if (cacheParams.hasMbist && cacheParams.hasShareBus) {
+      val params = mbistPl.get.nodeParams
+      val intf = Some(Module(new MBISTInterface(
+        params = Seq(params),
+        ids = Seq(mbistPl.get.childrenIds),
+        name = s"MBIST_intf_l2",
+        pipelineNum = 1
+      )))
+      intf.get.toPipeline.head <> mbistPl.get.mbist
+      if (cacheParams.hartIds.head == 0) mbistPl.get.genCSV(intf.get.info, "MBIST_l2")
+      intf.get.mbist := DontCare
+      dontTouch(intf.get.mbist)
+      //TODO: add mbist controller connections here
+      intf
+    } else {
+      None
+    }
 
     val topDown = topDownOpt.map(_ => Module(new TopDownMonitor()(p.alterPartial {
       case EdgeInKey => node.in.head._2

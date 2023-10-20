@@ -23,6 +23,7 @@ import xs.utils._
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink._
 import coupledL2._
+import xs.utils.mbist.MBISTPipeline
 import xs.utils.perf.HasPerfLogging
 
 object AccessState {
@@ -136,7 +137,7 @@ class PrefetchQueue(implicit p: Parameters) extends PrefetchModule with HasPerfL
     true.B, 0, inflightEntries, 1)
 }
 
-class Prefetcher(implicit p: Parameters) extends PrefetchModule with HasPerfLogging{
+class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends PrefetchModule with HasPerfLogging{
   val io = IO(new PrefetchIO)
   val io_l2_pf_en = IO(Input(Bool()))
 
@@ -169,10 +170,11 @@ class Prefetcher(implicit p: Parameters) extends PrefetchModule with HasPerfLogg
       pf_state := 0.U
     }
   }
-
+  var hasSpp = false
   prefetchOpt.get match {
     case spp: SPPParameters => // case spp only
-      val pft = Module(new SignaturePathPrefetch)
+      hasSpp = true
+      val pft = Module(new SignaturePathPrefetch(parentName + "spp_"))
       val pftQueue = Module(new PrefetchQueue)
       val pipe = Module(new Pipeline(io.req.bits.cloneType, 1))
       pft.io.train <> io.train
@@ -236,7 +238,8 @@ class Prefetcher(implicit p: Parameters) extends PrefetchModule with HasPerfLogg
       XSPerfAccumulate("prefetch_req_L1L2_overlapped", l1_pf.io.req.valid && bop_en && bop.io.req.valid)
     
     case hyperPf: HyperPrefetchParams => // case spp +  bop + smsReceiver
-      val hybrid_pfts = Module(new HyperPrefetcher())
+      hasSpp = true
+      val hybrid_pfts = Module(new HyperPrefetcher(parentName + "hpft_"))
       val pftQueue = Module(new PrefetchQueue)
       val pipe = Module(new Pipeline(io.req.bits.cloneType, 1))
       hybrid_pfts.io.train <> io.train
@@ -263,6 +266,10 @@ class Prefetcher(implicit p: Parameters) extends PrefetchModule with HasPerfLogg
       hybrid_pfts.io.db_degree.bits := pf_state
     case _ => assert(cond = false, "Unknown prefetcher")
   }
+  val mbistPl = MBISTPipeline.PlaceMbistPipeline(2,
+    s"${parentName}_mbistPipe",
+    cacheParams.hasMbist && cacheParams.hasShareBus && hasSpp
+  )
   XSPerfAccumulate("prefetch_train", io.train.fire)
   XSPerfAccumulate("prefetch_train_on_miss", io.train.fire && io.train.bits.state === AccessState.MISS)
   XSPerfAccumulate("prefetch_train_on_pf_hit", io.train.fire && io.train.bits.state === AccessState.PREFETCH_HIT)
