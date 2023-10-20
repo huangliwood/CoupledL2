@@ -170,11 +170,11 @@ class HyperPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) ext
         case L2ParamKey => p(L2ParamKey).copy(prefetch = Some(PrefetchReceiverParams()))
   })))
 
-  val q_sms = Module(new Queue(chiselTypeOf(sms.io.req.bits), pTableQueueEntries, flow = true, pipe = false))
+  val q_sms = Module(new Queue(chiselTypeOf(sms.io.req.bits), pTableQueueEntries, flow = false, pipe = false))
   q_sms.io.enq <> sms.io.req
   q_sms.io.deq.ready := !bop.io.req.valid
 
-  val q_spp = Module(new Queue(chiselTypeOf(spp.io.req.bits), pTableQueueEntries, flow = true, pipe = false))
+  val q_spp = Module(new Queue(chiselTypeOf(spp.io.req.bits), pTableQueueEntries, flow = false, pipe = false))
 
   q_spp.io.enq <> spp.io.req
   q_spp.io.deq.ready := !q_sms.io.deq.fire && !bop.io.req.valid
