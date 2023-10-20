@@ -299,13 +299,12 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   val s1_valid = WireInit(false.B)
   val s0_valid = WireInit((state === s_lookahead0 || state === s_lookahead) && ~s1_valid)
   val s0_readResult = WireInit(0.U.asTypeOf(pTableEntry()))
-  val s0_readSignature = WireInit(0.U(signatureBits.W)) //rindex ,to differentiate the result from io or lookahead, set based on state
-  val s0_readDelta = WireInit(0.S((blkOffsetBits + 1).W))
-  val s0_lastSignature = WireInit(0.U(signatureBits.W))
-  val s0_current = RegInit(0.U.asTypeOf(new SignatureTableResp))
+  val s0_lastSignature = WireInit(0x1ff.U(signatureBits.W))
+  val s0_current = WireInit(0.U.asTypeOf(new SignatureTableResp))
+  //| signature | delta | block |
 
   pTable.io.r.req.valid := q.io.deq.fire || state === s_updateTable || s1_continue
-  pTable.io.r.req.bits.setIdx := idx(s0_readSignature)
+  pTable.io.r.req.bits.setIdx := idx(s0_current.signature)
   s0_readResult := pTable.io.r.resp.data(0)
 
   val enbp = WireInit(false.B)
@@ -322,8 +321,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   s1_valid := RegNext(s0_valid,false.B)
   val s1_current = RegEnable(s0_current,s0_valid)
   val s1_readResult = RegEnable(s0_readResult,s0_valid)
-  val s1_lastSignature = RegEnable(s0_readSignature,s0_valid)
-  val s1_lastDelta = RegEnable(s0_readDelta,s0_valid)
+  val s1_lastDelta = WireInit(s1_current.delta)
   val s1_wdeltaEntries = WireInit(VecInit(Seq.fill(pTableDeltaEntries)(0.U.asTypeOf(new DeltaEntry()))))
   val s1_maxEntry = s1_readResult.deltaEntries.reduce((a, b) => Mux(a.cDelta >= b.cDelta, a, b))
   //set output
@@ -331,9 +329,9 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   val s1_delta_list_nl = s1_delta_list.map(_ => 1.S((blkOffsetBits + 1).W))
 //  val s1_delta_list = s1_delta_list.map(x => RegEnable(x,s1_valid))
   val s1_delta_list_checked = s1_delta_list.map(x =>
-    Mux((s0_current.block.asSInt + x).asUInt(pageAddrBits + blkOffsetBits - 1, blkOffsetBits) === s0_current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits),
+    Mux((s1_current.block.asSInt + x).asUInt(pageAddrBits + blkOffsetBits - 1, blkOffsetBits) === s1_current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits),
       x, 0.S))
-  val s1_hit = WireInit(s1_readResult.valid && tag(s1_lastSignature) === s1_readResult.tag)
+  val s1_hit = WireInit(s1_readResult.valid && tag(s1_current.signature) === s1_readResult.tag)
 
   when(state === s_lookahead0){
     s1_first_flag := true.B
@@ -355,18 +353,20 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   //same page?
   val samePage = (testOffset(pageAddrBits + blkOffsetBits - 1, blkOffsetBits) === s1_current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits))
   enprefetch := s1_valid && s1_hit && issued =/= 0.U
-  //forward
+  //forward hold dequeue data
   when(state === s_idle){
-    s0_readSignature := q.io.deq.bits.signature
+    s0_current.signature := q.io.deq.bits.signature
   }.elsewhen(state === s_lookahead0){
-    s0_readSignature := issueReq.signature
+    s0_current.signature := issueReq.signature
   }.otherwise{
-    s0_readSignature := (s1_lastSignature << 3) ^ strideMap(s1_maxEntry.delta)
+    s0_current.signature := (s1_current.signature << 3) ^ strideMap(s1_maxEntry.delta)
   }
-  when(state === s0_lastSignature){
-    s0_readDelta := s1_maxEntry.delta
+  when(state === s_lookahead){
+    s0_current.delta := s1_maxEntry.delta
+    s0_current.block := testOffset
   }.otherwise{
-    s0_readDelta := issueReq.delta
+    s0_current.delta := issueReq.delta
+    s0_current.block := issueReq.block
   }
 
   // write
@@ -395,11 +395,11 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   //write pTable
   val enwrite = s1_valid && state === s_lookahead0
   pTable.io.w.req.valid := RegNext(enwrite,false.B) //we only modify-write on demand requests
-  pTable.io.w.req.bits.setIdx := RegEnable(idx(s1_lastSignature),enwrite)
+  pTable.io.w.req.bits.setIdx := RegEnable(idx(s1_current.signature),enwrite)
   pTable.io.w.req.bits.data(0).valid := true.B
   pTable.io.w.req.bits.data(0).deltaEntries := RegEnable(s1_wdeltaEntries,enwrite)
   pTable.io.w.req.bits.data(0).count := RegEnable(s1_count,enwrite)
-  pTable.io.w.req.bits.data(0).tag := RegEnable(tag(s1_lastSignature),enwrite)
+  pTable.io.w.req.bits.data(0).tag := RegEnable(tag(s1_current.signature),enwrite)
 
   io.resp.valid := enprefetch || enprefetchnl
   when(io.resp.valid) {
@@ -416,7 +416,6 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   switch(state) {
     is(s_idle) {
       when(q.io.deq.fire) {
-        s0_current := issueReq
         state := s_lookahead0
       }
     }
@@ -434,7 +433,6 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
           when(issued =/= 0.U) {
             when(samePage  && (s1_maxEntry.cDelta > miniCount)) {
               lookCount := lookCount + 1.U
-              s1_current.block := testOffset
             } .otherwise {
               lookCount := 0.U
               state := s_idle
