@@ -348,7 +348,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   val indexToReplace: UInt = s1_readResult.deltaEntries.indexWhere(a => a.delta === smallest)
   //predict
   val issued = s1_delta_list_checked.map(a => Mux(a =/= 0.S, 1.U, 0.U)).reduce(_ +& _)
-  val testOffset =Mux(issued =/= 0.U,(s1_current.block.asSInt + s1_maxEntry.delta).asUInt,0.U)
+  val testOffset =Mux(issued =/= 0.U,(s1_current.block.asSInt + s1_maxEntry.delta).asUInt,s1_current.block)
   // val testOffset = (current.block.asSInt + maxEntry.delta).asUInt
   //same page?
   val samePage = (testOffset(pageAddrBits + blkOffsetBits - 1, blkOffsetBits) === s1_current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits))
