@@ -280,7 +280,7 @@ class BestOffsetPrefetch(implicit p: Parameters) extends BOPModule with HasPerfL
 
   val rrTable = Module(new RecentRequestTable)
   val scoreTable = Module(new OffsetScoreTable)
-  val respQueue = Module(new Queue(new PrefetchResp, 4, flow=true))
+  val respQueue = Module(new Queue(new PrefetchResp, 16, flow=true))
   val prefetchOffset = scoreTable.io.prefetchOffset
   val oldAddr = io.train.bits.addr
   val newAddr = oldAddr + signedExtend((prefetchOffset << offsetBits), fullAddressBits)
