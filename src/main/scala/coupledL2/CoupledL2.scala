@@ -480,7 +480,7 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
         pipelineNum = 1
       )))
       intf.get.toPipeline.head <> mbistPl.get.mbist
-      if (cacheParams.hartIds.head == 0) mbistPl.get.genCSV(intf.get.info, "MBIST_l2")
+      if (cacheParams.hartIds.head == 0) mbistPl.get.genCSV(intf.get.info, "MBIST_L2")
       intf.get.mbist := DontCare
       dontTouch(intf.get.mbist)
       //TODO: add mbist controller connections here
