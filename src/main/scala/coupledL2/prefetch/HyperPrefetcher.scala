@@ -158,7 +158,7 @@ class HyperPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) ext
     val queue_used = Input(UInt(6.W))
   })
 
-  val fTable = Module(new FilterV2)
+  val fTable = Module(new FilterV2(parentName + "ftable_"))
 
   val spp = Module(new SignaturePathPrefetch(parentName = parentName + "spp_")(p.alterPartial({
         case L2ParamKey => p(L2ParamKey).copy(prefetch = Some(SPPParameters()))
