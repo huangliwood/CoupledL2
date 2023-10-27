@@ -563,8 +563,8 @@ class SignaturePathPrefetch(parentName:String="Unkown")(implicit p: Parameters) 
     val queue_used = Input(UInt(6.W))
   })
 
-  val sTable = Module(new SignatureTable)
-  val pTable = Module(new PatternTable)
+  val sTable = Module(new SignatureTable(parentName + "stable_"))
+  val pTable = Module(new PatternTable(parentName + "ptable_"))
   val unpack = Module(new Unpack)
 
   val oldAddr = io.train.bits.addr //received request from L1 cache

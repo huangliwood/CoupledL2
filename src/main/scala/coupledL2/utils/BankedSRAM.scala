@@ -44,10 +44,10 @@ class BankedSRAM[T <: Data]
       hasMbist = hasMbist,
       hasShareBus = hasShareBus,
       hasClkGate = enableClockGate,
-      parentName = parentName + s"bank${n}_"
+      parentName = parentName + s"bank${i}_"
     ))
     val mbistPl = MBISTPipeline.PlaceMbistPipeline(1,
-      s"${parentName}_bank${n}_mbistPipe",
+      s"${parentName}_bank${i}_mbistPipe",
       hasMbist && hasShareBus
     )
     sram.io.r.req.valid := io.r.req.valid && ren

@@ -6,6 +6,7 @@ import org.chipsalliance.cde.config._
 import chisel3.stage.ChiselGeneratorAnnotation
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.devices.tilelink.{TLError, DevNullParams}
 import coupledL2.prefetch._
 import xs.utils.{ChiselDB, FileRegisters}
 import axi2tl._
@@ -556,6 +557,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       clientCaches = Seq(CacheParameters(sets = 32, ways = 4, blockGranularity = log2Ceil(32), name = "L2")),
       sramClkDivBy2 = true,
       sramDepthDiv = 4,
+      dataBytes = 8,
       simulation = true,
       hasMbist = false,
       prefetch = None,
@@ -613,8 +615,19 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       maxFlight = Some(16)
     ))
   )))
-
  l2xbar := TLBuffer() := AXI2TL(16, 16) := l3FrontendAXI4Node
+  // l2xbar :=
+  // TLFIFOFixer() :=
+  // TLWidthWidget(32) :=
+  // TLBuffer() :=
+  // AXI4ToTL() :=
+  // AXI4Buffer() :=
+  // AXI4UserYanker(Some(16)) :=
+  // AXI4Fragmenter() :=
+  // AXI4Buffer() :=
+  // AXI4Buffer() :=
+  // AXI4IdIndexer(4) :=
+  // l3FrontendAXI4Node
 
   ram.node :=
     TLXbar() :=*
