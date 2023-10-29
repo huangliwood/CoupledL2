@@ -448,7 +448,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
           when(lookCount <= 1.U) {
             val testOffset = s1_current.block + 1.U
             when(testOffset(pageAddrBits + blkOffsetBits - 1, blkOffsetBits) === s1_current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits)) {
-              enprefetchnl := false.B
+              enprefetchnl := true.B
             }
           }
           lookCount := 0.U
