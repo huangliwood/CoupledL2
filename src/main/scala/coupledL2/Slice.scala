@@ -159,20 +159,27 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
   /* input & output signals */
   val inBuf = cacheParams.innerBuf
   val outBuf = cacheParams.outerBuf
-  
+
+  def connect[T <: Bundle](out: DecoupledIO[T], in: DecoupledIO[T], init: Boolean = false): Unit = {
+    out <> in
+    if (init) {
+      out.bits := Mux(in.valid, in.bits, 0.U.asTypeOf((in.bits)))
+    }
+  }
+
   /* connect upward channels */
-  sinkA.io.a <> inBuf.a(io.in.a)
-  io.in.b <> inBuf.b(mshrCtl.io.sourceB)
-  sinkC.io.c <> inBuf.c(io.in.c)
-  io.in.d <> inBuf.d(grantBuf.io.d)
-  grantBuf.io.e <> inBuf.e(io.in.e)
+  connect(sinkA.io.a, inBuf.a(io.in.a), true)
+  connect(io.in.b, inBuf.b(mshrCtl.io.sourceB), false)
+  connect(sinkC.io.c, inBuf.c(io.in.c), true)
+  connect(io.in.d, inBuf.d(grantBuf.io.d), false)
+  connect(grantBuf.io.e, inBuf.e(io.in.e), true)
 
   /* connect downward channels */
-  io.out.a <> outBuf.a(mshrCtl.io.sourceA)
-  sinkB.io.b <> outBuf.b(io.out.b)
-  io.out.c <> outBuf.c(sourceC.io.out)
-  refillUnit.io.sinkD <> outBuf.d(io.out.d)
-  io.out.e <> outBuf.e(refillUnit.io.sourceE)
+  connect(io.out.a, outBuf.a(mshrCtl.io.sourceA), false)
+  connect(sinkB.io.b, outBuf.b(io.out.b), true)
+  connect(io.out.c, outBuf.c(sourceC.io.out), false)
+  connect(refillUnit.io.sinkD, outBuf.d(io.out.d), true)
+  connect(io.out.e, outBuf.e(refillUnit.io.sourceE), false)
 
   dontTouch(io.in)
   dontTouch(io.out)
