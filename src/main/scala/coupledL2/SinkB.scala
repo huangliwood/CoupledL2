@@ -72,10 +72,7 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
     task.aMergeTask := 0.U.asTypeOf(new MergeTaskBundle)
     task
   }
-  val task = WireInit(0.U.asTypeOf(new TaskBundle))
-  when(io.b.valid){
-    task := fromTLBtoTaskBundle(io.b.bits)
-  }
+  val task = fromTLBtoTaskBundle(io.b.bits)
 
   /* ======== Merge Nested-B req ======== */
   // unable to accept incoming B req because same-addr as some MSHR REQ

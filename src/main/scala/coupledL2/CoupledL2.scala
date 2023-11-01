@@ -31,6 +31,7 @@ import coupledL2.prefetch._
 import xs.utils.mbist.{MBISTInterface, MBISTPipeline}
 import xs.utils.perf.HasPerfLogging
 import xs.utils.sram.SRAMTemplate
+import coupledL2.utils.HasPerfEvents
 
 trait HasCoupledL2Parameters {
   val p: Parameters
@@ -247,7 +248,7 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
   }
 
   lazy val module = new Impl
-  class Impl extends LazyModuleImp(this) with HasPerfLogging{
+  class Impl extends LazyModuleImp(this) with HasPerfLogging with HasPerfEvents{
     val banks = node.in.size
     val bankBits = if (banks == 1) 0 else log2Up(banks)
     val io = IO(new Bundle {
@@ -514,6 +515,10 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
                         slice.io.in.d.fire && grant_fire_last && slice.io.in.d.bits.opcode === GrantData
                       }}
     XSPerfAccumulate("grant_data_fire", PopCount(VecInit(grant_fire)))
+
+    // TODO: perfEvents
+    val perfEvents = slices.flatMap(_.getPerfEvents)
+    generatePerfEvent()
   }
 
 }
