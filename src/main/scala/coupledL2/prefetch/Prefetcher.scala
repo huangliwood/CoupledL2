@@ -221,7 +221,10 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
       l1_pf.io.train <> DontCare
       l1_pf.io.resp <> DontCare
       // l2 prefetch
-      bop.io.train <> io.train
+      bop.io.train.valid := io.train.valid
+      bop.io.train.bits := io.train.bits
+      io.train.ready := bop.io.train.ready
+
       bop.io.resp <> io.resp
       // send to prq
       pftQueue.io.enq.valid := l1_pf.io.req.valid || (bop_en && bop.io.req.valid)
@@ -234,7 +237,7 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
       pipe.io.in <> pftQueue.io.deq
       io.req <> pipe.io.out
       XSPerfAccumulate("prefetch_req_fromL1", l1_pf.io.req.valid)
-      XSPerfAccumulate( "prefetch_req_fromL2", bop_en && bop.io.req.valid)
+      XSPerfAccumulate("prefetch_req_fromL2", bop_en && bop.io.req.valid)
       XSPerfAccumulate("prefetch_req_L1L2_overlapped", l1_pf.io.req.valid && bop_en && bop.io.req.valid)
     
     case hyperPf: HyperPrefetchParams => // case spp +  bop + smsReceiver
