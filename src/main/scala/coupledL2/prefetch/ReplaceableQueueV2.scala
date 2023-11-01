@@ -88,8 +88,8 @@ class ReplaceableQueueV2[T <: Data](
     }
   }
 
-  io.enq.ready := !full
-  io.deq.valid := !empty
+  io.enq.ready := true.B
+  io.deq.valid := !empty || io.enq.valid
   io.deq.bits := Mux(empty, io.enq.bits, queue(head))
 
   //XSPerfHistogram(cacheParams, "nrWorkingPfQueueEntries", 

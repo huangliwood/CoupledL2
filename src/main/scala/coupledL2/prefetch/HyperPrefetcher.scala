@@ -34,13 +34,22 @@ trait HasHyperPrefetcherParams extends HasCoupledL2Parameters {
 abstract class PrefetchBranchV2Module(implicit val p: Parameters) extends Module with HasHyperPrefetcherParams
 abstract class PrefetchBranchV2Bundle(implicit val p: Parameters) extends Bundle with HasHyperPrefetcherParams
 
+object PrefetcherId {
+  val bits = 2
 
+  def BOP           = 0.U(bits.W)
+  def SMS           = 1.U(bits.W)
+  def SPP           = 2.U(bits.W)
+  def OHTERS        = 3.U(bits.W)
+}
 
 class FilterV2(parentName:String = "Unknown")(implicit p: Parameters) extends PrefetchBranchV2Module with HasPerfLogging{
   val io = IO(new Bundle() {
     val req = Flipped(DecoupledIO(new PrefetchReq))
     val resp = DecoupledIO(new PrefetchReq)
     val evict = Flipped(DecoupledIO(new PrefetchEvict))
+    val isForce = Input(Bool())
+    val pf_Id = Input(UInt(2.W))
   })
 
   def idx(addr:      UInt) = addr(log2Up(fTableEntries) - 1, 0)
@@ -67,7 +76,7 @@ class FilterV2(parentName:String = "Unknown")(implicit p: Parameters) extends Pr
   hit := readResult.valid && tag(pageAddr) === readResult.tag
   val hitForMap = hit && readResult.bitMap(blkOffset)
 
-  io.resp.valid := io.req.fire && !hitForMap
+  io.resp.valid := io.req.fire && (io.pf_Id =/= PrefetcherId.SPP || !hitForMap)
   io.resp.bits := io.req.bits
 
   val wData = Wire(fTableEntry())
@@ -120,6 +129,9 @@ class FilterV2(parentName:String = "Unknown")(implicit p: Parameters) extends Pr
   XSPerfAccumulate("hyper_filter_nums",io.req.fire && hitForMap)
   XSPerfAccumulate("hyper_filter_input",io.req.fire)
   XSPerfAccumulate("hyper_filter_output",io.resp.fire)
+  XSPerfAccumulate("hyper_filter_bop_req",io.resp.valid && io.pf_Id === PrefetcherId.BOP)
+  XSPerfAccumulate("hyper_filter_sms_req",io.resp.valid && io.pf_Id === PrefetcherId.SMS)
+  XSPerfAccumulate("hyper_filter_spp_req",io.resp.valid && io.pf_Id === PrefetcherId.SPP)
 }
 
 //Only used for hybrid spp and bop
@@ -148,25 +160,24 @@ class HyperPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) ext
   })))
 
   val q_sms = Module(new Queue(chiselTypeOf(sms.io.req.bits), pTableQueueEntries, flow = true, pipe = false))
+  val q_spp = Module(new Queue(chiselTypeOf(spp.io.req.bits), 32, flow = true, pipe = false))
   q_sms.io.enq <> sms.io.req
   q_sms.io.deq.ready := !bop.io.req.valid
-
-  val q_spp = Module(new Queue(chiselTypeOf(spp.io.req.bits), pTableQueueEntries, flow = true, pipe = false))
 
   q_spp.io.enq <> spp.io.req
   q_spp.io.deq.ready := !q_sms.io.deq.fire && !bop.io.req.valid
 
-  spp.io.train.valid :=io.train.valid
+  spp.io.train.valid := io.train.valid
   spp.io.train.bits := io.train.bits
 
   val train_for_bop = RegInit(0.U.asTypeOf(new PrefetchTrain))
   val train_for_bop_valid = RegInit(false.B)
   
-  when(io.train.valid && io.train.bits.state === AccessState.MISS && !bop.io.train.ready) {
+  when(io.train.valid && !bop.io.train.ready) {
     train_for_bop := io.train.bits
     train_for_bop_valid := true.B
   }
-  bop.io.train.valid := io.train.valid && io.train.bits.state === AccessState.MISS || train_for_bop_valid
+  bop.io.train.valid := io.train.valid || train_for_bop_valid
   bop.io.train.bits := Mux(io.train.valid, io.train.bits, train_for_bop)
   when(bop.io.train.fire && !io.train.valid) {
     train_for_bop_valid := false.B
@@ -183,23 +194,26 @@ class HyperPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) ext
   sms.io.recv_addr.valid := io.recv_addr.valid
   sms.io.recv_addr.bits := io.recv_addr.bits
   sms.io.req.ready := true.B
-  sms.io.resp := DontCare
-  sms.io.train := DontCare
 
   when(bop.io.req.valid) {
     fTable.io.req <> bop.io.req
+    fTable.io.pf_Id := PrefetcherId.BOP
+    fTable.io.isForce := true.B
     // fTable.io.spp2llc := false.B
   }.elsewhen(q_sms.io.deq.valid) {
     fTable.io.req <> q_sms.io.deq
+    fTable.io.pf_Id := PrefetcherId.SMS
+    fTable.io.isForce := true.B
     // fTable.io.spp2llc := false.B
   }.otherwise {
-    q_spp.io.deq.ready := fTable.io.req.ready
     fTable.io.req.valid := q_spp.io.deq.valid
     fTable.io.req.bits.tag := q_spp.io.deq.bits.tag
     fTable.io.req.bits.set := q_spp.io.deq.bits.set
     fTable.io.req.bits.isBOP := q_spp.io.deq.bits.isBOP
     fTable.io.req.bits.source := q_spp.io.deq.bits.source
     fTable.io.req.bits.needT := q_spp.io.deq.bits.needT
+    fTable.io.pf_Id := PrefetcherId.SPP
+    fTable.io.isForce := false.B
     // fTable.io.spp2llc := q_spp.io.deq.bits.hint2llc
   }
 
@@ -217,9 +231,11 @@ class HyperPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) ext
   spp.io.db_degree.bits := io.db_degree.bits
   spp.io.queue_used := io.queue_used
 
-  XSPerfAccumulate("bop_send2_queue", fTable.io.resp.fire && RegNext(bop.io.req.valid))
-  XSPerfAccumulate("sms_send2_queue", fTable.io.resp.fire && RegNext(q_sms.io.deq.fire))
-  XSPerfAccumulate("spp_send2_queue", fTable.io.resp.fire && RegNext(q_spp.io.deq.fire))
-  XSPerfAccumulate("hyper_overlapped", bop.io.req.valid || q_spp.io.deq.valid || q_sms.io.deq.valid)
+  XSPerfAccumulate("bop_send2_queue", bop.io.req.valid)
+  XSPerfAccumulate("sms_send2_queue", q_sms.io.enq.fire)
+  XSPerfAccumulate("spp_send2_queue", q_spp.io.enq.fire)
+  XSPerfAccumulate("sms_q_deq", q_sms.io.deq.fire)
+  XSPerfAccumulate("spp_q_deq", q_spp.io.deq.fire)
+  XSPerfAccumulate("hyper_overlapped", (bop.io.req.valid || q_spp.io.deq.valid || q_sms.io.deq.valid) && fTable.io.req.ready)
   XSPerfAccumulate("prefetcher_has_evict", io.evict.fire)
 }

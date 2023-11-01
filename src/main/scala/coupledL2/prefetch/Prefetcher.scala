@@ -221,7 +221,7 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
       l1_pf.io.train <> DontCare
       l1_pf.io.resp <> DontCare
       // l2 prefetch
-      bop.io.train.valid := io.train.valid && io.train.bits.state === AccessState.MISS
+      bop.io.train.valid := io.train.valid
       bop.io.train.bits := io.train.bits
       io.train.ready := bop.io.train.ready
 

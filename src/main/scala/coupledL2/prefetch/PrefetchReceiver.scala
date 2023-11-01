@@ -37,14 +37,11 @@ case class PrefetchReceiverParams(n: Int = 32) extends PrefetchParameters {
 }
 
 class PrefetchReceiver()(implicit p: Parameters) extends PrefetchModule {
-  val io = IO(new PrefetchIO())
-  // just ignore train reqs
-  io.train.ready := true.B
-  io.resp.ready := true.B
-  io.hint2llc match{
-    case Some(x) => x := DontCare
-    case _ => None
-  }
+  val io = IO(new Bundle() {
+    val req = DecoupledIO(new PrefetchReq)
+    val recv_addr = Flipped(ValidIO(UInt(64.W)))
+  })
+
   io.req.bits.tag := parseFullAddress(io.recv_addr.bits)._1
   io.req.bits.set := parseFullAddress(io.recv_addr.bits)._2
   io.req.bits.needT := false.B
