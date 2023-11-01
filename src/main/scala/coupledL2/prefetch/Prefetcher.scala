@@ -218,8 +218,6 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
       val bop_en = RegNextN(io_l2_pf_en, 2, Some(true.B))
       // l1 prefetch
       l1_pf.io.recv_addr := ValidIODelay(io.recv_addr, 2)
-      l1_pf.io.train <> DontCare
-      l1_pf.io.resp <> DontCare
       // l2 prefetch
       bop.io.train.valid := io.train.valid
       bop.io.train.bits := io.train.bits
