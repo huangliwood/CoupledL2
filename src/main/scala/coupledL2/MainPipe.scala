@@ -30,7 +30,7 @@ import coupledL2.debug._
 import coupledL2.prefetch.{AccessState, HyperPrefetchParams, PrefetchEvict, PrefetchTrain}
 import xs.utils.perf.HasPerfLogging
 
-class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging{
+class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with HasPerfEvents{
   val io = IO(new Bundle() {
     /* receive task from arbiter at stage 2 */
     val taskFromArb_s2 = Flipped(ValidIO(new TaskBundle()))
@@ -744,4 +744,20 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging{
   io.toMonitor.allocMSHR_s3.valid := io.toMSHRCtl.mshr_alloc_s3.valid
   io.toMonitor.allocMSHR_s3.bits  := io.fromMSHRCtl.mshr_alloc_ptr
   io.toMonitor.metaW_s3 := io.metaWReq
+
+  // TODO: perfEvents
+  val perfEvents = Seq(
+    (cacheParams.name+"_a_req_hit",  hit_s3 && req_s3.fromA), 
+    (cacheParams.name+"_a_req_miss", miss_s3 && req_s3.fromA),
+    (cacheParams.name+"_b_req_hit", hit_s3 && req_s3.fromB),
+    (cacheParams.name+"_b_req_miss", miss_s3 && req_s3.fromB),
+    (cacheParams.name + "_c_req_miss", miss_s3 && req_s3.fromC),
+    (cacheParams.name + "_c_req_hit", hit_s3 && req_s3.fromC),
+    (cacheParams.name+"_acquire_hit", hit_s3 && req_s3.fromA && (req_s3.opcode === AcquireBlock || req_s3.opcode === AcquirePerm)),
+    (cacheParams.name+"_acquire_miss", miss_s3 && req_s3.fromA && (req_s3.opcode === AcquireBlock || req_s3.opcode === AcquirePerm)),
+    (cacheParams.name+"_get_hit", hit_s3 && req_s3.fromA && req_s3.opcode === Get),
+    (cacheParams.name+"_get_miss", miss_s3 && req_s3.fromA && req_s3.opcode === Get),
+    (cacheParams.name+"_retry", mshr_refill_s3 && retry)
+  )
+  generatePerfEvent()
 }

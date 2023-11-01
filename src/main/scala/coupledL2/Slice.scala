@@ -30,7 +30,7 @@ import xs.utils.RegNextN
 import xs.utils.mbist.MBISTPipeline
 import xs.utils.perf.HasPerfLogging
 
-class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Module with HasPerfLogging{
+class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Module with HasPerfLogging with HasPerfEvents{
   val io = IO(new Bundle {
     val in = Flipped(TLBundle(edgeIn.bundle))
     val out = TLBundle(edgeOut.bundle)
@@ -220,4 +220,8 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
   } else {
     mainPipe.io.toMonitor <> DontCare
   }
+
+  // TODO: perfEvents
+  val perfEvents = (Seq(mainPipe, reqArb)).flatMap(_.getPerfEvents)
+  generatePerfEvent()
 }
