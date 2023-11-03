@@ -60,8 +60,9 @@ class SinkC(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val dataValids = VecInit(beatValids.map(_.asUInt.orR)).asUInt
   val taskBuf = Reg(Vec(bufBlocks, new TaskBundle))
   val taskValids = RegInit(VecInit(Seq.fill(bufBlocks)(false.B)))
+  val taskRegValids = RegInit(VecInit(Seq.fill(bufBlocks)(false.B)))
   val taskArb = Module(new RRArbiter(new TaskBundle, bufBlocks))
-  val bufValids = taskValids.asUInt | dataValids
+  val bufValids = taskValids.asUInt | dataValids | taskRegValids.asUInt
 
   val full = bufValids.andR
   val noSpace = full && hasData
@@ -126,7 +127,6 @@ class SinkC(implicit p: Parameters) extends L2Module with HasPerfLogging{
     }
   }
 
-  taskArb.io.out.ready := io.task.ready
   taskArb.io.in.zipWithIndex.foreach {
     case (in, i) =>
       in.valid := taskValids(i)
@@ -140,10 +140,29 @@ class SinkC(implicit p: Parameters) extends L2Module with HasPerfLogging{
     beatValids(io.bufRead.bits.bufIdx).foreach(_ := false.B)
   }
 
-  val cValid = io.c.valid && isRelease && last
-  io.task.valid := cValid || taskArb.io.out.valid
-  io.task.bits := Mux(taskArb.io.out.valid, taskArb.io.out.bits, toTaskBundle(io.c.bits))
-  io.task.bits.bufIdx := Mux(taskArb.io.out.valid, taskArb.io.out.bits.bufIdx, nextPtrReg)
+  // buf taskArb for timing, RRArbiter logic is too long
+  val taskArb_reg = RegEnable(taskArb.io.out.bits, 0.U.asTypeOf(taskArb.io.out.bits), taskArb.io.out.fire)
+  val taskArbValid = RegInit(false.B)
+  when(taskArb.io.out.fire){
+    taskArbValid := true.B
+  }.elsewhen(io.task.fire){
+    taskArbValid := false.B
+  }
+  taskArb.io.out.ready := !taskArbValid || (taskArbValid && io.task.fire)
+  when(taskArb.io.out.fire){
+    taskRegValids.foreach(_ := false.B)
+    taskRegValids(taskArb.io.out.bits.bufIdx) := true.B
+  }
+
+  val cValid = io.c.valid && isRelease && last && !taskArb.io.out.valid
+  io.task.valid := cValid || taskArbValid
+  io.task.bits := Mux(taskArbValid, taskArb_reg, toTaskBundle(io.c.bits))
+  io.task.bits.bufIdx := Mux(taskArbValid, taskArb_reg.bufIdx, nextPtrReg)
+
+//  val cValid = io.c.valid && isRelease && last
+//  io.task.valid := cValid || taskArb.io.out.valid
+//  io.task.bits := Mux(taskArb.io.out.valid, taskArb.io.out.bits, toTaskBundle(io.c.bits))
+//  io.task.bits.bufIdx := Mux(taskArb.io.out.valid, taskArb.io.out.bits.bufIdx, nextPtrReg)
 
   io.resp.valid := io.c.valid && (first || last) && !isRelease
   io.resp.mshrId := 0.U // DontCare
@@ -177,7 +196,7 @@ class SinkC(implicit p: Parameters) extends L2Module with HasPerfLogging{
   io.refillBufWrite.id := RegNext(OHToUInt(newdataMask))
   io.refillBufWrite.data.data := dataBuf(RegNext(io.task.bits.bufIdx)).asUInt
 
-  io.c.ready := !isRelease || !first || !full || !hasData && io.task.ready && !taskArb.io.out.valid
+  io.c.ready := !isRelease || !first || !full || !hasData && io.task.ready && !taskArb.io.out.valid && !taskArbValid
 
   io.bufResp.data := dataBuf(io.bufRead.bits.bufIdx)
 
