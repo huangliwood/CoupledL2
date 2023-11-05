@@ -45,7 +45,7 @@ class TestTop_L2()(implicit p: Parameters) extends LazyModule {
         minLatency = 1,
         echoFields = Nil,
         requestFields = Seq(AliasField(2)),
-        responseKeys = cacheParams.respKey
+        responseKeys = cacheParams.respKey,
       )
     ))
     masterNode
@@ -484,7 +484,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
         channelBytes = TLChannelBeatBytes(cacheParams.blockBytes),
         minLatency = 1,
         echoFields = Nil,
-        requestFields = Seq(AliasField(2)),
+        requestFields = Seq(AliasField(2),PrefetchField()),
         responseKeys = cacheParams.respKey
       )
     ))
@@ -528,6 +528,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
           HyperPrefetchParams    => spp+bop+sms
         */
         sppMultiLevelRefill = Some(coupledL2.prefetch.PrefetchReceiverParams()),
+        respKey =  Seq(PrefetchKey)
         /*must has spp, otherwise Assert Fail
         sppMultiLevelRefill options:
         PrefetchReceiverParams() => spp has cross level refill
@@ -558,7 +559,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       clientCaches = Seq(CacheParameters(sets = 32, ways = 4, blockGranularity = log2Ceil(32), name = "L2")),
       sramClkDivBy2 = true,
       sramDepthDiv = 4,
-      dataBytes = 8,
+      // dataBytes = 8,
       simulation = true,
       hasMbist = false,
       prefetch = None,

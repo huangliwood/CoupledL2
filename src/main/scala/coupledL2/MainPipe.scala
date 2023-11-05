@@ -387,6 +387,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     ),
     MetaEntry()
   )
+  io.metaWReq.bits.channel := task_s3.bits.channel
 
   io.tagWReq.valid     := task_s3.valid && req_s3.tagWen && mshr_refill_s3 && !retry
   io.tagWReq.bits.set  := req_s3.set
@@ -431,7 +432,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
 
   if(io.prefetchTrain.isDefined){
     val train = io.prefetchTrain.get
-    train.valid := task_s3.valid && (req_acquire_s3 || req_get_s3) && req_s3.needHint.getOrElse(false.B)
+    train.valid := task_s3.valid && (req_acquire_s3 || req_get_s3) //&& req_s3.needHint.getOrElse(false.B)
     train.bits.tag := req_s3.tag
     train.bits.set := req_s3.set
     train.bits.needT := req_needT_s3
@@ -674,7 +675,10 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   // directory access result
   val hit_s3 = task_s3.valid && !mshr_req_s3 && dirResult_s3.hit
   val miss_s3 = task_s3.valid && !mshr_req_s3 && !dirResult_s3.hit
-  XSPerfAccumulate(cacheParams.name+"_a_req_hit", hit_s3 && req_s3.fromA)
+  XSPerfAccumulate(cacheParams.name+"_a_req_hit", hit_s3)
+  XSPerfAccumulate(cacheParams.name+"_a_normalReq_hit", hit_s3 && req_s3.fromA && !req_s3.fromL2pft.getOrElse(false.B))
+  XSPerfAccumulate(cacheParams.name+"_a_pfReq_hit", hit_s3 && req_s3.fromA && req_s3.fromL2pft.getOrElse(false.B))
+  XSPerfAccumulate(cacheParams.name+"_a_pfReq_miss", miss_s3 && req_s3.fromA && req_s3.fromL2pft.getOrElse(false.B))
   XSPerfAccumulate(cacheParams.name+"_acquire_hit", hit_s3 && req_s3.fromA &&
     (req_s3.opcode === AcquireBlock || req_s3.opcode === AcquirePerm))
   XSPerfAccumulate(cacheParams.name+"_get_hit", hit_s3 && req_s3.fromA && req_s3.opcode === Get)
@@ -690,6 +694,8 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
 
   XSPerfAccumulate(cacheParams.name + "_a_req_need_replacement",
     task_s3.valid && req_s3.mshrTask && a_need_replacement)
+  XSPerfAccumulate(cacheParams.name + "_a_req_need_replacement_pf",
+    task_s3.valid && req_s3.mshrTask && a_need_replacement && meta_s3.prefetch.get)
   XSPerfAccumulate(cacheParams.name + "_c_req_need_replacement",
     false.B)
 

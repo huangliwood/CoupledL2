@@ -128,11 +128,12 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
     val resp = DecoupledIO(new SignatureTableResp) //output old signature and delta to write PT
     val bp_update = Flipped(ValidIO(new BreakPointReq))
   })
-  assert(pageAddrBits>=(2 * log2Up(sTableEntries)),s"pageAddrBits as least 20 bits to use hash")
+  override val sTableEntries = 64
+  assert(pageAddrBits>=(2 * log2Up(sTableEntries)),s"pageAddrBits ${pageAddrBits} ,it as least ${2 * log2Up(sTableEntries)} bits to use hash")
   def hash1(addr:    UInt) = addr(log2Up(sTableEntries) - 1, 0)
   def hash2(addr:    UInt) = addr(2 * log2Up(sTableEntries) - 1, log2Up(sTableEntries))
   def idx(addr:      UInt) = hash1(addr) ^ hash2(addr)
-  def tag(addr:      UInt) = addr(sTagBits + log2Up(sTableEntries) - 1, log2Up(sTableEntries))
+  def tag(addr:      UInt) = addr(11, 0)
   def sTableEntry() = new Bundle {
     val valid = Bool()
     val tag = UInt(sTagBits.W)
@@ -499,7 +500,7 @@ class PatternTableTiming(parentName:String="Unkown")(implicit p: Parameters) ext
   pTable.io.r.req.bits.setIdx := idx(s0_current.signature)
   s0_readResult := pTable.io.r.resp.data(0)
 
-  val enbp = WireInit(false.B)
+  val enbp = WireInit(true.B)
   val bp_update = WireInit(false.B)
   io.pt2st_bp.valid := enbp && bp_update
   io.pt2st_bp.bits.pageAddr := s0_current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits)
