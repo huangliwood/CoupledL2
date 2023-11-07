@@ -160,14 +160,14 @@ class HyperPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) ext
   })))
 
   val q_sms = Module(new Queue(chiselTypeOf(sms.io.req.bits), pTableQueueEntries, flow = true, pipe = false))
-  val q_spp = Module(new Queue(chiselTypeOf(spp.io.req.bits), pTableQueueEntries, flow = true, pipe = false))
+  val q_spp = Module(new Queue(chiselTypeOf(spp.io.req.bits), pTableQueueEntries, flow = false, pipe = false))
   q_sms.io.enq <> sms.io.req
   q_sms.io.deq.ready := !bop.io.req.valid
 
   q_spp.io.enq <> spp.io.req
   q_spp.io.deq.ready := !q_sms.io.deq.fire && !bop.io.req.valid
 
-  spp.io.train.valid := io.train.valid
+  spp.io.train.valid := io.train.valid && io.train.bits.state === AccessState.MISS
   spp.io.train.bits := io.train.bits
 
   val train_for_bop = RegInit(0.U.asTypeOf(new PrefetchTrain))
