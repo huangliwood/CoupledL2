@@ -96,11 +96,10 @@ class MSHRCtl(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val mshrs = Seq.fill(mshrsAll) { Module(new MSHR()) }
   val mshrValids = VecInit(mshrs.map(m => m.io.status.valid))
 
-  val latency = 1.U // stall latency cycle for timing
   val pipeReqCount = PopCount(Cat(io.pipeStatusVec.map(_.valid))) // TODO: consider add !mshrTask to optimize
   val mshrCount = PopCount(Cat(mshrs.map(_.io.status.valid)))
-  val mshrFull = pipeReqCount + mshrCount >= mshrsAll.U - latency
-  val a_mshrFull = pipeReqCount + mshrCount >= (mshrsAll-1).U - latency // the last idle mshr should not be allocated for channel A req
+  val mshrFull = pipeReqCount + mshrCount >= mshrsAll.U
+  val a_mshrFull = pipeReqCount + mshrCount >= (mshrsAll-1).U // the last idle mshr should not be allocated for channel A req
   val mshrSelector = Module(new MSHRSelector())
   mshrSelector.io.idle := mshrs.map(m => !m.io.status.valid)
   val selectedMSHROH = mshrSelector.io.out.bits
@@ -135,13 +134,10 @@ class MSHRCtl(implicit p: Parameters) extends L2Module with HasPerfLogging{
       m.io.bMergeTask.bits := io.bMergeTask.bits
   }
 
-  val toReqArb = WireInit(0.U.asTypeOf((io.toReqArb)))
-  toReqArb.blockC_s1 := false.B
-  toReqArb.blockB_s1 := mshrFull   // conflict logic in SinkB
-  toReqArb.blockA_s1 := a_mshrFull // conflict logic in ReqBuf
-  toReqArb.blockG_s1 := false.B
-  io.toReqArb := RegNext(toReqArb)
-
+  io.toReqArb.blockC_s1 := false.B
+  io.toReqArb.blockB_s1 := mshrFull   // conflict logic in SinkB
+  io.toReqArb.blockA_s1 := a_mshrFull // conflict logic in ReqBuf
+  io.toReqArb.blockG_s1 := false.B
 
   /* Acquire downwards */
   val acquireUnit = Module(new AcquireUnit())
