@@ -235,6 +235,9 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
   // count the number of valid blocks + those in pipe that might use GrantBuf
   // so that GrantBuffer will not exceed capacity
   // TODO: we can still allow pft_resps (HintAck) to enter mainpipe
+  val toReqArb = WireInit(0.U.asTypeOf((io.toReqArb)))
+  val latency = 1.U
+
   val noSpaceForSinkReq = PopCount(VecInit(io.pipeStatusVec.tail.map { case s =>
     s.valid && (s.bits.fromA || s.bits.fromC)
   }).asUInt) + grantQueueCnt >= mshrsAll.U
