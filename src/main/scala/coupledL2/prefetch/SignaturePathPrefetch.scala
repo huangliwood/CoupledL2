@@ -162,7 +162,7 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
   // --------------------------------------------------------------------------------
   // read sTable
   val rAddr_s0  = io.req.bits.pageAddr
-  val rValid_s0 = io.req.fire
+  val rValid_s0 = io.req.valid
   sTable.io.r.req.valid       := rValid_s0
   sTable.io.r.req.bits.setIdx := idx(rAddr_s0)
   val accessedPage_s1  = RegEnable(io.req.bits.pageAddr,  0.U(pageAddrBits.W),    rValid_s0)
@@ -769,7 +769,7 @@ class SignaturePathPrefetch(parentName:String="Unkown")(implicit p: Parameters) 
 
   sTable.io.req.bits.pageAddr := pageAddr
   sTable.io.req.bits.blkOffset := blkOffset
-  sTable.io.req.valid := io.train.fire
+  sTable.io.req.valid := io.train.valid && (io.train.bits.state === AccessState.MISS)
 
   pTable.io.req <> sTable.io.resp //to detail
   pTable.io.pt2st_bp <> sTable.io.bp_update
@@ -789,6 +789,7 @@ class SignaturePathPrefetch(parentName:String="Unkown")(implicit p: Parameters) 
   io.req.bits.needT := unpack.io.resp.bits.needT
   io.req.bits.source := unpack.io.resp.bits.source
   io.req.bits.isBOP := false.B
+  io.req.bits.prefetchSrc.foreach(_ := PfSource.SPP.id.U)
   io.req.bits.hint2llc := unpack.io.resp.valid && send2Llc
 
 

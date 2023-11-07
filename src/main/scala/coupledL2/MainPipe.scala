@@ -440,6 +440,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     train.bits.vaddr.foreach(_ := req_s3.vaddr.getOrElse(0.U))
     train.bits.state:= Mux(!dirResult_s3.hit, AccessState.MISS,
       Mux(!meta_s3.prefetch.get, AccessState.HIT, AccessState.PREFETCH_HIT))
+    train.bits.prefetchSrc.foreach(_ := Mux(dirResult_s3.hit,meta_s3.prefetchSrc.get,0.U))
   }
   if(io.prefetchEvict.isDefined){
     val evict = io.prefetchEvict.get

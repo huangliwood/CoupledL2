@@ -16,6 +16,7 @@ case class HyperPrefetchParams(
 )
     extends PrefetchParameters {
   override val hasPrefetchBit:  Boolean = true
+  override val hasPrefetchSrc:  Boolean = true
   override val inflightEntries: Int = 32
 }
 
@@ -33,15 +34,6 @@ trait HasHyperPrefetcherParams extends HasCoupledL2Parameters {
 
 abstract class PrefetchBranchV2Module(implicit val p: Parameters) extends Module with HasHyperPrefetcherParams
 abstract class PrefetchBranchV2Bundle(implicit val p: Parameters) extends Bundle with HasHyperPrefetcherParams
-
-object PrefetcherId {
-  val bits = 2
-
-  def BOP           = 0.U(bits.W)
-  def SMS           = 1.U(bits.W)
-  def SPP           = 2.U(bits.W)
-  def OHTERS        = 3.U(bits.W)
-}
 
 class FilterV2(parentName:String = "Unknown")(implicit p: Parameters) extends PrefetchBranchV2Module with HasPerfLogging{
   val io = IO(new Bundle() {
@@ -76,7 +68,7 @@ class FilterV2(parentName:String = "Unknown")(implicit p: Parameters) extends Pr
   hit := readResult.valid && tag(pageAddr) === readResult.tag
   val hitForMap = hit && readResult.bitMap(blkOffset)
 
-  io.resp.valid := io.req.fire && (io.pf_Id =/= PrefetcherId.SPP || !hitForMap)
+  io.resp.valid := io.req.fire && (io.pf_Id =/= PfSource.SPP.id.U || !hitForMap)
   io.resp.bits := io.req.bits
 
   val wData = Wire(fTableEntry())
@@ -129,9 +121,9 @@ class FilterV2(parentName:String = "Unknown")(implicit p: Parameters) extends Pr
   XSPerfAccumulate("hyper_filter_nums",io.req.fire && hitForMap)
   XSPerfAccumulate("hyper_filter_input",io.req.fire)
   XSPerfAccumulate("hyper_filter_output",io.resp.fire)
-  XSPerfAccumulate("hyper_filter_bop_req",io.resp.valid && io.pf_Id === PrefetcherId.BOP)
-  XSPerfAccumulate("hyper_filter_sms_req",io.resp.valid && io.pf_Id === PrefetcherId.SMS)
-  XSPerfAccumulate("hyper_filter_spp_req",io.resp.valid && io.pf_Id === PrefetcherId.SPP)
+  XSPerfAccumulate("hyper_filter_bop_req",io.resp.valid && io.pf_Id === PfSource.BOP.id.U)
+  XSPerfAccumulate("hyper_filter_sms_req",io.resp.valid && io.pf_Id === PfSource.SMS.id.U)
+  XSPerfAccumulate("hyper_filter_spp_req",io.resp.valid && io.pf_Id === PfSource.SPP.id.U)
 }
 
 //Only used for hybrid spp and bop
@@ -160,14 +152,14 @@ class HyperPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) ext
   })))
 
   val q_sms = Module(new Queue(chiselTypeOf(sms.io.req.bits), pTableQueueEntries, flow = true, pipe = false))
-  val q_spp = Module(new Queue(chiselTypeOf(spp.io.req.bits), pTableQueueEntries, flow = true, pipe = false))
+  val q_spp = Module(new Queue(chiselTypeOf(spp.io.req.bits), pTableQueueEntries, flow = false, pipe = false))
   q_sms.io.enq <> sms.io.req
   q_sms.io.deq.ready := !bop.io.req.valid
 
   q_spp.io.enq <> spp.io.req
   q_spp.io.deq.ready := !q_sms.io.deq.fire && !bop.io.req.valid
 
-  spp.io.train.valid := io.train.valid
+  spp.io.train.valid := io.train.valid  && (io.train.bits.state === AccessState.MISS)
   spp.io.train.bits := io.train.bits
 
   val train_for_bop = RegInit(0.U.asTypeOf(new PrefetchTrain))
@@ -177,7 +169,8 @@ class HyperPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) ext
     train_for_bop := io.train.bits
     train_for_bop_valid := true.B
   }
-  bop.io.train.valid := io.train.valid || train_for_bop_valid
+  val bop_valid = io.train.valid && (io.train.bits.prefetchSrc.getOrElse(PfSource.BOP.id.U) =/= PfSource.SPP.id.U)
+  bop.io.train.valid := bop_valid || train_for_bop_valid
   bop.io.train.bits := Mux(io.train.valid, io.train.bits, train_for_bop)
   when(bop.io.train.fire && !io.train.valid) {
     train_for_bop_valid := false.B
@@ -197,12 +190,12 @@ class HyperPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) ext
 
   when(bop.io.req.valid) {
     fTable.io.req <> bop.io.req
-    fTable.io.pf_Id := PrefetcherId.BOP
+    fTable.io.pf_Id := PfSource.BOP.id.U
     fTable.io.isForce := true.B
     // fTable.io.spp2llc := false.B
   }.elsewhen(q_sms.io.deq.valid) {
     fTable.io.req <> q_sms.io.deq
-    fTable.io.pf_Id := PrefetcherId.SMS
+    fTable.io.pf_Id := PfSource.SMS.id.U
     fTable.io.isForce := true.B
     // fTable.io.spp2llc := false.B
   }.otherwise {
@@ -212,7 +205,8 @@ class HyperPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) ext
     fTable.io.req.bits.isBOP := q_spp.io.deq.bits.isBOP
     fTable.io.req.bits.source := q_spp.io.deq.bits.source
     fTable.io.req.bits.needT := q_spp.io.deq.bits.needT
-    fTable.io.pf_Id := PrefetcherId.SPP
+    fTable.io.pf_Id := PfSource.SPP.id.U
+    fTable.io.req.bits.prefetchSrc.foreach(_ :=  q_spp.io.deq.bits.prefetchSrc.get)
     fTable.io.isForce := false.B
     // fTable.io.spp2llc := q_spp.io.deq.bits.hint2llc
   }

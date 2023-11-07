@@ -27,7 +27,7 @@ import freechips.rocketchip.tilelink.TLMessages._
 import xs.utils.mbist.MBISTPipeline
 import xs.utils.perf.HasPerfLogging
 import xs.utils.sram.SRAMTemplate
-
+import prefetch.PfSource
 class MetaEntry(implicit p: Parameters) extends L2Bundle {
   val dirty = Bool()
   val state = UInt(stateBits.W)
@@ -35,6 +35,7 @@ class MetaEntry(implicit p: Parameters) extends L2Bundle {
   // TODO: record specific state of clients instead of just 1-bit
   val alias = aliasBitsOpt.map(width => UInt(width.W)) // alias bits of client
   val prefetch = if (hasPrefetchBit) Some(Bool()) else None // whether block is prefetched
+  val prefetchSrc = if (hasPrefetchSrc) Some(UInt(PfSource.pfSourceBits.W)) else None // prefetch source
   val accessed = Bool()
 
   def =/=(entry: MetaEntry): Bool = {
@@ -48,13 +49,14 @@ object MetaEntry {
     init
   }
   def apply(dirty: Bool, state: UInt, clients: UInt, alias: Option[UInt],
-            prefetch: Bool = false.B, accessed: Bool = false.B)(implicit p: Parameters) = {
+            prefetch: Bool = false.B,pfsrc: UInt = PfSource.NoWhere.id.U, accessed: Bool = false.B)(implicit p: Parameters) = {
     val entry = Wire(new MetaEntry)
     entry.dirty := dirty
     entry.state := state
     entry.clients := clients
     entry.alias.foreach(_ := alias.getOrElse(0.U))
     entry.prefetch.foreach(_ := prefetch)
+    entry.prefetchSrc.foreach(_ := pfsrc)
     entry.accessed := accessed
     entry
   }

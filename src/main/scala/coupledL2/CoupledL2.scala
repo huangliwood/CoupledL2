@@ -70,6 +70,7 @@ trait HasCoupledL2Parameters {
   val prefetchOpt = cacheParams.prefetch
   val sppMultiLevelRefillOpt = cacheParams.sppMultiLevelRefill
   val hasPrefetchBit = prefetchOpt.nonEmpty && prefetchOpt.get.hasPrefetchBit
+  val hasPrefetchSrc = prefetchOpt.nonEmpty && prefetchOpt.get.hasPrefetchSrc
   val topDownOpt = if(cacheParams.elaboratedTopDown) Some(true) else None
 
   val enableHintGuidedGrant = true

@@ -34,6 +34,15 @@ object AccessState {
   def PREFETCH_HIT  = 2.U(bits.W)
   def LATE_HIT      = 3.U(bits.W)
 }
+object PfSource extends Enumeration {
+  val BOP     = Value("BOP")
+  val SMS     = Value("SMS")
+  val SPP      = Value("SPP")
+  val NoWhere = Value("NoWhere")
+
+  val PfSourceCount = Value("PfSourceCount")
+  val pfSourceBits = log2Ceil(PfSourceCount.id)
+}
 
 class PrefetchReq(implicit p: Parameters) extends PrefetchBundle {
   val tag = UInt(fullTagBits.W)
@@ -41,6 +50,7 @@ class PrefetchReq(implicit p: Parameters) extends PrefetchBundle {
   val needT = Bool()
   val source = UInt(sourceIdBits.W)
   val isBOP = Bool()
+  val prefetchSrc = if (hasPrefetchSrc) Some(UInt(PfSource.pfSourceBits.W)) else None
   def addr = Cat(tag, set, 0.U(offsetBits.W))
 }
 
@@ -62,6 +72,7 @@ class PrefetchTrain(implicit p: Parameters) extends PrefetchBundle {
   // val miss = Bool()
   // val prefetched = Bool()
   val state = UInt(AccessState.bits.W)
+  val prefetchSrc = if (hasPrefetchSrc) Some(UInt(PfSource.pfSourceBits.W)) else None // prefetch source
   def addr = Cat(tag, set, 0.U(offsetBits.W))
 }
 
