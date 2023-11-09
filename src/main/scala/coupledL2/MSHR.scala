@@ -200,6 +200,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
     mp_release.useProbeData := false.B
     mp_release.way := dirResult.way
     mp_release.fromL2pft.foreach(_ := false.B)
+    mp_release.pfId.foreach(_ := PfSource.NONE.id.U)
     mp_release.needHint.foreach(_ := false.B)
     mp_release.dirty := meta.dirty && meta.state =/= INVALID || probeDirty
     mp_release.metaWen := false.B
@@ -243,6 +244,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
     mp_probeack.useProbeData := true.B // write [probeAckData] to DS, if not probed toN
     mp_probeack.way := dirResult.way
     mp_probeack.fromL2pft.foreach(_ := false.B)
+    mp_probeack.pfId.foreach(_ := PfSource.NONE.id.U)
     mp_probeack.needHint.foreach(_ := false.B)
     mp_probeack.dirty := meta.dirty && meta.state =/= INVALID || probeDirty
     mp_probeack.meta := MetaEntry(
@@ -326,6 +328,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
     mp_merge_probeack.bufIdx := 0.U
     mp_merge_probeack.needProbeAckData := false.B
     mp_merge_probeack.fromL2pft.foreach(_ := false.B)
+    mp_merge_probeack.pfId.foreach(_ := PfSource.NONE.id.U)
     mp_merge_probeack.needHint.foreach(_ := false.B)
     mp_merge_probeack.wayMask := Fill(cacheParams.ways, "b1".U)
     mp_merge_probeack.replTask := true.B
@@ -393,12 +396,14 @@ class MSHR(implicit p: Parameters) extends L2Module {
       ),
       alias = Some(aliasFinal),
       prefetch = req_prefetch || dirResult.hit && meta_pft,
+      pfId = req.pfId.get,
       accessed = req_acquire || req_get
     )
     mp_grant.metaWen := true.B
     mp_grant.tagWen := !dirResult.hit
     mp_grant.dsWen := (!dirResult.hit || gotDirty) && gotGrantData || probeDirty && (req_get || req.aliasTask.getOrElse(false.B))
     mp_grant.fromL2pft.foreach(_ := req.fromL2pft.get)
+    mp_grant.pfId.foreach(_ := req.pfId.get)
     mp_grant.needHint.foreach(_ := false.B)
     mp_grant.replTask := !dirResult.hit // Get and Alias are hit that does not need replacement
     mp_grant.mergeTask := false.B

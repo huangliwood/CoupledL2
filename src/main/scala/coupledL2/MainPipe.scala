@@ -226,6 +226,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   ms_task.aliasTask.foreach(_ := cache_alias)
   ms_task.useProbeData     := false.B
   ms_task.fromL2pft.foreach(_ := req_s3.fromL2pft.get)
+  ms_task.pfId.foreach(_ := req_s3.pfId.get)
   ms_task.needHint.foreach(_  := req_s3.needHint.get)
   ms_task.dirty            := false.B
   ms_task.way              := req_s3.way
@@ -352,7 +353,9 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
       Mux(meta_s3.prefetch.get && dirResult_s3.hit, false.B, meta_s3.prefetch.get)
     } else {
       false.B
-    }
+    },
+    //should set NONE
+    pfId = PfSource.NONE.id.U 
   )
   val metaW_s3_b = Mux(req_s3.param === toN, MetaEntry(),
     MetaEntry(
@@ -432,7 +435,9 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
 
   if(io.prefetchTrain.isDefined){
     val train = io.prefetchTrain.get
+    //only for verification test
     train.valid := task_s3.valid && (req_acquire_s3 || req_get_s3) //&& req_s3.needHint.getOrElse(false.B)
+    // train.valid := task_s3.valid && (req_acquire_s3 || req_get_s3) && req_s3.needHint.getOrElse(false.B)
     train.bits.tag := req_s3.tag
     train.bits.set := req_s3.set
     train.bits.needT := req_needT_s3
@@ -440,7 +445,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     train.bits.vaddr.foreach(_ := req_s3.vaddr.getOrElse(0.U))
     train.bits.state:= Mux(!dirResult_s3.hit, AccessState.MISS,
       Mux(!meta_s3.prefetch.get, AccessState.HIT, AccessState.PREFETCH_HIT))
-    train.bits.prefetchSrc.foreach(_ := Mux(dirResult_s3.hit,meta_s3.prefetchSrc.get,0.U))
+    train.bits.pfId := meta_s3.pfId.getOrElse(PfSource.NONE.id.U)
   }
   if(io.prefetchEvict.isDefined){
     val evict = io.prefetchEvict.get
@@ -676,19 +681,23 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   // directory access result
   val hit_s3 = task_s3.valid && !mshr_req_s3 && dirResult_s3.hit
   val miss_s3 = task_s3.valid && !mshr_req_s3 && !dirResult_s3.hit
-  XSPerfAccumulate(cacheParams.name+"_a_req_hit", hit_s3)
-  XSPerfAccumulate(cacheParams.name+"_a_normalReq_hit", hit_s3 && req_s3.fromA && !req_s3.fromL2pft.getOrElse(false.B))
+  XSPerfAccumulate(cacheParams.name+"_req_hit", hit_s3)
+  XSPerfAccumulate(cacheParams.name+"_a_req_hit", hit_s3 && req_s3.fromA)
+  XSPerfAccumulate(cacheParams.name+"_a_normalAcquire_miss", miss_s3 && req_s3.fromA && 
+    (req_s3.opcode === AcquireBlock || req_s3.opcode === AcquirePerm) && !req_s3.fromL2pft.getOrElse(true.B))
+  XSPerfAccumulate(cacheParams.name+"_a_normalAcquire_hit", hit_s3 && req_s3.fromA && 
+    (req_s3.opcode === AcquireBlock || req_s3.opcode === AcquirePerm) && !req_s3.fromL2pft.getOrElse(true.B))
   XSPerfAccumulate(cacheParams.name+"_a_pfReq_hit", hit_s3 && req_s3.fromA && req_s3.fromL2pft.getOrElse(false.B))
   XSPerfAccumulate(cacheParams.name+"_a_pfReq_miss", miss_s3 && req_s3.fromA && req_s3.fromL2pft.getOrElse(false.B))
-  XSPerfAccumulate(cacheParams.name+"_acquire_hit", hit_s3 && req_s3.fromA &&
+  XSPerfAccumulate(cacheParams.name+"_a_acquire_hit", hit_s3 && req_s3.fromA &&
     (req_s3.opcode === AcquireBlock || req_s3.opcode === AcquirePerm))
-  XSPerfAccumulate(cacheParams.name+"_get_hit", hit_s3 && req_s3.fromA && req_s3.opcode === Get)
+  XSPerfAccumulate(cacheParams.name+"_a_get_hit", hit_s3 && req_s3.fromA && req_s3.opcode === Get)
   XSPerfAccumulate(cacheParams.name+"_retry", mshr_refill_s3 && retry)
 
   XSPerfAccumulate(cacheParams.name+"_a_req_miss", miss_s3 && req_s3.fromA)
   XSPerfAccumulate(cacheParams.name+"_acquire_miss", miss_s3 && req_s3.fromA &&
     (req_s3.opcode === AcquireBlock || req_s3.opcode === AcquirePerm))
-  XSPerfAccumulate(cacheParams.name+"_get_miss", miss_s3 && req_s3.fromA && req_s3.opcode === Get)
+  XSPerfAccumulate(cacheParams.name+"_a_get_miss", miss_s3 && req_s3.fromA && req_s3.opcode === Get)
 
   XSPerfAccumulate(cacheParams.name + "_c_req_miss", miss_s3 && req_s3.fromC)
   XSPerfAccumulate(cacheParams.name + "_c_req_hit", hit_s3 && req_s3.fromC)
@@ -754,16 +763,22 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
 
   // TODO: perfEvents
   val perfEvents = Seq(
+    (cacheParams.name+"_req_hit", hit_s3),
     (cacheParams.name+"_a_req_hit",  hit_s3 && req_s3.fromA), 
     (cacheParams.name+"_a_req_miss", miss_s3 && req_s3.fromA),
+    (cacheParams.name+"_a_acquire_hit", hit_s3 && req_s3.fromA && (req_s3.opcode === AcquireBlock || req_s3.opcode === AcquirePerm)),
+    (cacheParams.name+"_a_acquire_miss", miss_s3 && req_s3.fromA && (req_s3.opcode === AcquireBlock || req_s3.opcode === AcquirePerm)),
+    (cacheParams.name+"_a_get_hit", hit_s3 && req_s3.fromA && req_s3.opcode === Get),
+    (cacheParams.name+"_a_get_miss", miss_s3 && req_s3.fromA && req_s3.opcode === Get),
+    (cacheParams.name+"_a_normalAcquire_hit", hit_s3 && req_s3.fromA && 
+    (req_s3.opcode === AcquireBlock || req_s3.opcode === AcquirePerm)&& !req_s3.fromL2pft.getOrElse(false.B)),
+    (cacheParams.name+"_a_pfReq_hit", hit_s3 && req_s3.fromA && req_s3.fromL2pft.getOrElse(false.B)),
+    (cacheParams.name+"_a_pfReq_miss", miss_s3 && req_s3.fromA && req_s3.fromL2pft.getOrElse(false.B)),
+
     (cacheParams.name+"_b_req_hit", hit_s3 && req_s3.fromB),
     (cacheParams.name+"_b_req_miss", miss_s3 && req_s3.fromB),
-    (cacheParams.name + "_c_req_miss", miss_s3 && req_s3.fromC),
-    (cacheParams.name + "_c_req_hit", hit_s3 && req_s3.fromC),
-    (cacheParams.name+"_acquire_hit", hit_s3 && req_s3.fromA && (req_s3.opcode === AcquireBlock || req_s3.opcode === AcquirePerm)),
-    (cacheParams.name+"_acquire_miss", miss_s3 && req_s3.fromA && (req_s3.opcode === AcquireBlock || req_s3.opcode === AcquirePerm)),
-    (cacheParams.name+"_get_hit", hit_s3 && req_s3.fromA && req_s3.opcode === Get),
-    (cacheParams.name+"_get_miss", miss_s3 && req_s3.fromA && req_s3.opcode === Get),
+    (cacheParams.name+"_c_req_miss", miss_s3 && req_s3.fromC),
+    (cacheParams.name+"_c_req_hit", hit_s3 && req_s3.fromC),
     (cacheParams.name+"_retry", mshr_refill_s3 && retry)
   )
   generatePerfEvent()

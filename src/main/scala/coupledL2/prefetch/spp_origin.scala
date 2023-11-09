@@ -1,5 +1,5 @@
+package coupledL2.prefetch.spp_origin
 // error when 000 signature occurs in pTable
-package coupledL2.prefetch
 
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
@@ -8,7 +8,11 @@ import coupledL2.HasCoupledL2Parameters
 import xs.utils.CircularShift
 import xs.utils.perf.HasPerfLogging
 import xs.utils.sram.SRAMTemplate
-import coupledL2.PfSource
+import coupledL2.{PfSource,L2ParamKey}
+import coupledL2.prefetch.{PrefetchParameters,PrefetchReq,PrefetchTrain,PrefetchResp,PrefetchEvict}
+import coupledL2.prefetch.HasPrefetchParameters
+import coupledL2.prefetch.ReplaceableQueueV2
+
 case class SPPParameters(
   sTableEntries: Int = 256,
   sTagBits: Int = 12,
@@ -129,8 +133,7 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
     val resp = DecoupledIO(new SignatureTableResp) //output old signature and delta to write PT
     val bp_update = Flipped(ValidIO(new BreakPointReq))
   })
-  // override val sTableEntries = 64
-  assert(pageAddrBits>=(2 * log2Up(sTableEntries)),s"pageAddrBits ${pageAddrBits} ,it as least ${2 * log2Up(sTableEntries)} bits to use hash")
+  assert(pageAddrBits>=(2 * log2Up(sTableEntries)),s"pageAddrBits as least 20 bits to use hash")
   def hash1(addr:    UInt) = addr(log2Up(sTableEntries) - 1, 0)
   def hash2(addr:    UInt) = addr(2 * log2Up(sTableEntries) - 1, log2Up(sTableEntries))
   def idx(addr:      UInt) = hash1(addr) ^ hash2(addr)
@@ -163,7 +166,7 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
   // --------------------------------------------------------------------------------
   // read sTable
   val rAddr_s0  = io.req.bits.pageAddr
-  val rValid_s0 = io.req.valid
+  val rValid_s0 = io.req.fire
   sTable.io.r.req.valid       := rValid_s0
   sTable.io.r.req.bits.setIdx := idx(rAddr_s0)
   val accessedPage_s1  = RegEnable(io.req.bits.pageAddr,  0.U(pageAddrBits.W),    rValid_s0)
@@ -217,7 +220,7 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
   for (i <- 0 until (4)) {
     rotate_sig(i) := CircularShift(bpTable(s2_bp_access_index).parent_sig.head).left(3 * i)
   }
-  val bp_en = WireInit(false.B)
+  val bp_en = WireInit(true.B)
   bp_hit := bp_en && rValid_s2 && bpTable(s2_bp_access_index).tag === accessedPage_s2 && rotate_sig.map(_ === oldSignature_s2).reduce(_ || _)
   bp_prePredicted_blkOff := bpTable(s2_bp_access_index).prePredicted_blkOffset
   val bp_matched_index = WireInit(0.U(2.W))
@@ -323,13 +326,11 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   val enbp = WireInit(true.B)
   val bp_update = WireInit(false.B)
   io.pt2st_bp.valid := enbp && bp_update
-  when(io.pt2st_bp.valid){
-    io.pt2st_bp.bits.pageAddr := current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits)
-    io.pt2st_bp.bits.parent_sig(0) := lastSignature
-    io.pt2st_bp.bits.offset := current.block(blkOffsetBits - 1, 0)
-  }.otherwise{
-    io.pt2st_bp.bits := 0.U.asTypeOf(io.pt2st_bp.bits.cloneType)
-  }
+  io.pt2st_bp.bits.pageAddr := current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits)
+  io.pt2st_bp.bits.parent_sig(0) := lastSignature
+  io.pt2st_bp.bits.offset := current.block(blkOffsetBits - 1, 0)
+  io.pt2st_bp.bits := 0.U.asTypeOf(io.pt2st_bp.bits.cloneType)
+
 
 
 
@@ -374,7 +375,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   pTable.io.w.req.bits.data(0).deltaEntries := deltaEntries
   pTable.io.w.req.bits.data(0).count := count
   pTable.io.w.req.bits.data(0).tag := tag(lastSignature)
-
+  val samePage = WireInit(false.B)
   //FSM
   switch(state) {
     is(s_idle) {
@@ -399,7 +400,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
           when(issued =/= 0.U) {
             enprefetch := true.B
             //same page?
-            val samePage = (testOffset(pageAddrBits + blkOffsetBits - 1, blkOffsetBits) ===
+            samePage := (testOffset(pageAddrBits + blkOffsetBits - 1, blkOffsetBits) ===
               current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits))
             when(samePage && (maxEntry.cDelta > miniCount)) {
               lookCount := lookCount + 1.U
@@ -434,6 +435,10 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   q.io.deq.ready := state === s_idle
 
   //perf
+  XSPerfAccumulate("spp_pt_bp_nums",io.pt2st_bp.valid)
+  XSPerfAccumulate("spp_pt_cross_page",state === s_lookahead && samePage)
+  XSPerfAccumulate("spp_pt_nextLine",state === s_lookahead && enprefetchnl)
+  XSPerfAccumulate("spp_pt_lookahead2",state === s_lookahead && (lookCount =/= 0.U) && enprefetch)
   // XSPerfAccumulate( s"spp_pt_do_nextline", enprefetchnl)
   // for (i <- 0 until pTableEntries) {
   //   XSPerfAccumulate( s"spp_pt_touched_entry_onlyset_${i.toString}", pTable.io.r.req.bits.setIdx === i.U(log2Up(pTableEntries).W)
@@ -508,7 +513,6 @@ class PatternTableTiming(parentName:String="Unkown")(implicit p: Parameters) ext
   io.pt2st_bp.bits.parent_sig(0) := s0_lastSignature
   io.pt2st_bp.bits.offset := s0_current.block(blkOffsetBits - 1, 0)
   q.io.deq.ready := ~s0_valid
-
   // --------------------------------------------------------------------------------
   // stage 1
   // -------------------------------------------------------------------------------
@@ -654,10 +658,6 @@ class PatternTableTiming(parentName:String="Unkown")(implicit p: Parameters) ext
   }
 
   //perf
-  XSPerfAccumulate("spp_pt_bp_nums",io.pt2st_bp.valid)
-  XSPerfAccumulate("spp_pt_lookahead2",state === s_lookahead && s1_valid && s1_continue)
-  XSPerfAccumulate("spp_pt_nextLine",state === s_lookahead && enprefetchnl)
-  XSPerfAccumulate("spp_pt_cross_page",state === s_lookahead && s1_valid && samePage)
 //  XSPerfAccumulate(s"spp_pt_do_nextline", enprefetchnl)
 //  for (i <- 0 until pTableEntries) {
 //    XSPerfAccumulate(s"spp_pt_touched_entry_onlyset_${i.toString}", pTable.io.r.req.bits.setIdx === i.U(log2Up(pTableEntries).W)
@@ -763,7 +763,6 @@ class SignaturePathPrefetch(parentName:String="Unkown")(implicit p: Parameters) 
   })
 
   val sTable = Module(new SignatureTable(parentName + "stable_"))
-  // val pTable = Module(new PatternTable(parentName + "ptable_"))
   val pTable = Module(new PatternTable(parentName + "ptable_"))
   val unpack = Module(new Unpack)
 
@@ -776,7 +775,7 @@ class SignaturePathPrefetch(parentName:String="Unkown")(implicit p: Parameters) 
 
   sTable.io.req.bits.pageAddr := pageAddr
   sTable.io.req.bits.blkOffset := blkOffset
-  sTable.io.req.valid := io.train.valid && (io.train.bits.state === AccessState.MISS)
+  sTable.io.req.valid := io.train.fire
 
   pTable.io.req <> sTable.io.resp //to detail
   pTable.io.pt2st_bp <> sTable.io.bp_update
@@ -807,3 +806,5 @@ class SignaturePathPrefetch(parentName:String="Unkown")(implicit p: Parameters) 
   XSPerfAccumulate( "spp_recv_pt", Mux(pTable.io.resp.fire, pTable.io.resp.bits.deltas.map(a => Mux(a =/= 0.S, 1.U, 0.U)).reduce(_ +& _), 0.U))
   XSPerfAccumulate( "spp_hintReq", io.req.bits.hint2llc)
 }
+
+

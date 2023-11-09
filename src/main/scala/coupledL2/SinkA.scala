@@ -24,7 +24,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink.TLHints._
 import coupledL2.prefetch.PrefetchReq
-import xs.utils.Pipeline
+import xs.utils.{Pipeline,ParallelPriorityMux}
 import xs.utils.perf.HasPerfLogging
 import xs.utils.tl.MemReqSource
 
@@ -59,6 +59,7 @@ class SinkA(implicit p: Parameters) extends L2Module with HasPerfLogging{
     task.aliasTask.foreach(_ := false.B)
     task.useProbeData := false.B
     task.fromL2pft.foreach(_ := false.B)
+    task.pfId.foreach(_ := PfSource.NONE.id.U)
     task.needHint.foreach(_ := a.data(0))
     task.dirty := false.B
     task.way := 0.U(wayBits.W)
@@ -92,7 +93,8 @@ class SinkA(implicit p: Parameters) extends L2Module with HasPerfLogging{
     task.mshrId := 0.U(mshrBits.W)
     task.aliasTask.foreach(_ := false.B)
     task.useProbeData := false.B
-    task.fromL2pft.foreach(_ := req.isBOP)
+    task.fromL2pft.foreach(_ := req.is_l2pf)
+    task.pfId.foreach(_ := req.pfId)
     task.needHint.foreach(_ := false.B)
     task.dirty := false.B
     task.way := 0.U(wayBits.W)
@@ -117,6 +119,12 @@ class SinkA(implicit p: Parameters) extends L2Module with HasPerfLogging{
     prefetchReq.get.bits := fromPrefetchReqtoTaskBundle(pipe.io.out.bits)
     pipe.io.out.ready := prefetchReq.get.ready
     fastArb(Seq(commonReq, prefetchReq.get), io.task)
+    io.task.bits := ParallelPriorityMux(
+      Seq(commonReq.valid, prefetchReq.get.valid),
+      Seq(commonReq.bits, prefetchReq.get.bits)
+    )
+    commonReq.ready := io.task.ready
+    prefetchReq.get.ready := !commonReq.valid && io.task.ready
   } else {
     io.task <> commonReq
   }
@@ -133,8 +141,8 @@ class SinkA(implicit p: Parameters) extends L2Module with HasPerfLogging{
   prefetchOpt.foreach {
     _ =>
       XSPerfAccumulate("sinkA_prefetch_req", io.prefetchReq.get.fire)
-      XSPerfAccumulate("sinkA_prefetch_from_l2", io.prefetchReq.get.bits.isBOP && io.prefetchReq.get.fire)
-      XSPerfAccumulate("sinkA_prefetch_from_l1", !io.prefetchReq.get.bits.isBOP && io.prefetchReq.get.fire)
+      XSPerfAccumulate("sinkA_prefetch_from_l2", io.prefetchReq.get.bits.is_l2pf && io.prefetchReq.get.fire)
+      XSPerfAccumulate("sinkA_prefetch_from_l1", !io.prefetchReq.get.bits.is_l1pf && io.prefetchReq.get.fire)
   }
 
   // cycels stalled by mainpipe

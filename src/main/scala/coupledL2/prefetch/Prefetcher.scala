@@ -34,15 +34,7 @@ object AccessState {
   def PREFETCH_HIT  = 2.U(bits.W)
   def LATE_HIT      = 3.U(bits.W)
 }
-object PfSource extends Enumeration {
-  val BOP     = Value("BOP")
-  val SMS     = Value("SMS")
-  val SPP      = Value("SPP")
-  val NoWhere = Value("NoWhere")
 
-  val PfSourceCount = Value("PfSourceCount")
-  val pfSourceBits = log2Ceil(PfSourceCount.id)
-}
 
 class PrefetchReq(implicit p: Parameters) extends PrefetchBundle {
   val tag = UInt(fullTagBits.W)
@@ -50,14 +42,17 @@ class PrefetchReq(implicit p: Parameters) extends PrefetchBundle {
   val needT = Bool()
   val source = UInt(sourceIdBits.W)
   val isBOP = Bool()
-  val prefetchSrc = if (hasPrefetchSrc) Some(UInt(PfSource.pfSourceBits.W)) else None
+  val pfId = UInt(PfSource.pfSourceBits.W)
   def addr = Cat(tag, set, 0.U(offsetBits.W))
+  def is_l1pf = pfId === PfSource.SMS.id.U
+  def is_l2pf = pfId === PfSource.BOP.id.U || pfId === PfSource.SPP.id.U
 }
 
 class PrefetchResp(implicit p: Parameters) extends PrefetchBundle {
   // val id = UInt(sourceIdBits.W)
   val tag = UInt(fullTagBits.W)
   val set = UInt(setBits.W)
+  val pfId = UInt(PfSource.pfSourceBits.W)
   def addr = Cat(tag, set, 0.U(offsetBits.W))
 }
 
@@ -72,7 +67,7 @@ class PrefetchTrain(implicit p: Parameters) extends PrefetchBundle {
   // val miss = Bool()
   // val prefetched = Bool()
   val state = UInt(AccessState.bits.W)
-  val prefetchSrc = if (hasPrefetchSrc) Some(UInt(PfSource.pfSourceBits.W)) else None // prefetch source
+  val pfId = UInt(PfSource.pfSourceBits.W)
   def addr = Cat(tag, set, 0.U(offsetBits.W))
 }
 
@@ -246,6 +241,7 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
       pipe.io.in <> pftQueue.io.deq
       io.req <> pipe.io.out
       XSPerfAccumulate("prefetch_req_fromL1", l1_pf.io.req.valid)
+      XSPerfAccumulate("bop_send2_queue", bop.io.req.valid)
       XSPerfAccumulate("prefetch_req_fromL2", bop_en && bop.io.req.valid)
       XSPerfAccumulate("prefetch_req_L1L2_overlapped", l1_pf.io.req.valid && bop_en && bop.io.req.valid)
     

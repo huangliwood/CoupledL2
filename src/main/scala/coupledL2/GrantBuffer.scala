@@ -166,6 +166,7 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
     val pftRespQueue = Module(new Queue(new Bundle(){
         val tag = UInt(tagBits.W)
         val set = UInt(setBits.W)
+        val pfId = UInt(PfSource.pfSourceBits.W)
       },
       entries = 4,
       flow = true))
@@ -174,11 +175,13 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
       io.d_task.bits.task.fromL2pft.getOrElse(false.B)
     pftRespQueue.io.enq.bits.tag := io.d_task.bits.task.tag
     pftRespQueue.io.enq.bits.set := io.d_task.bits.task.set
+    pftRespQueue.io.enq.bits.pfId := io.d_task.bits.task.pfId.getOrElse(PfSource.BOP.id.U)
 
     val resp = io.prefetchResp.get
     resp.valid := pftRespQueue.io.deq.valid
     resp.bits.tag := pftRespQueue.io.deq.bits.tag
     resp.bits.set := pftRespQueue.io.deq.bits.set
+    resp.bits.pfId := pftRespQueue.io.deq.bits.pfId
     pftRespQueue.io.deq.ready := resp.ready
 
     // assert(pftRespQueue.io.enq.ready, "pftRespQueue should never be full, no back pressure logic") // TODO: has bug here

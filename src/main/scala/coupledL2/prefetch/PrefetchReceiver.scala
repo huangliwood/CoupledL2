@@ -46,7 +46,7 @@ class PrefetchReceiver()(implicit p: Parameters) extends PrefetchModule {
   io.req.bits.set := parseFullAddress(io.recv_addr.bits)._2
   io.req.bits.needT := false.B
   io.req.bits.isBOP := false.B
-  io.req.bits.prefetchSrc.foreach(_ := PfSource.SMS.id.U)
+  io.req.bits.pfId := PfSource.SMS.id.U
   io.req.bits.source := 0.U // TODO: ensure source 0 is dcache
   io.req.valid := io.recv_addr.valid
 

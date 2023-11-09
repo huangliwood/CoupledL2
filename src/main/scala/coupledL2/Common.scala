@@ -22,6 +22,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink.TLPermissions._
 import xs.utils.tl.MemReqSource
+import freechips.rocketchip.rocket.PRV
 
 abstract class L2Module(implicit val p: Parameters) extends Module with HasCoupledL2Parameters
 abstract class L2Bundle(implicit val p: Parameters) extends Bundle with HasCoupledL2Parameters
@@ -31,7 +32,15 @@ class ReplacerInfo(implicit p: Parameters) extends L2Bundle {
   val opcode = UInt(3.W)
   val reqSource = UInt(MemReqSource.reqSourceBits.W)
 }
+object PfSource extends Enumeration {
+  val NONE = Value("NONE")
+  val BOP     = Value("BOP")
+  val SMS     = Value("SMS")
+  val SPP      = Value("SPP")
 
+  val PfSourceCount = Value("PfSourceCount")
+  val pfSourceBits = log2Ceil(PfSourceCount.id)
+}
 trait HasChannelBits { this: Bundle =>
   val channel = UInt(3.W)
   def fromA = channel(0).asBool
@@ -63,6 +72,7 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle with HasChannelBits {
   // For Intent
   val fromL2pft = prefetchOpt.map(_ => Bool()) // Is the prefetch req from L2(BOP) or from L1 prefetch?
                                           // If true, MSHR should send an ack to L2 prefetcher.
+  val pfId = prefetchOpt.map(_ => UInt(PfSource.pfSourceBits.W))
   val needHint = prefetchOpt.map(_ => Bool())
 
   // For DirtyKey in Release
