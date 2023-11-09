@@ -518,7 +518,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
         sets = 32,
         clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
         echoField = Seq(huancun.DirtyField()),
-        // prefetch = Some(BOPParameters()),
+        // prefetch = Some(PrefetchReceiverParams()),
         prefetch = Some(HyperPrefetchParams()),
         /* del L2 prefetche recv option, move into: prefetch =  PrefetchReceiverParams
         prefetch options:

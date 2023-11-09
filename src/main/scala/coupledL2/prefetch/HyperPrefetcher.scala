@@ -17,7 +17,7 @@ case class HyperPrefetchParams(
     extends PrefetchParameters {
   override val hasPrefetchBit:  Boolean = true
   override val hasPrefetchSrc:  Boolean = true
-  override val inflightEntries: Int = 32
+  override val inflightEntries: Int = 512
 }
 
 trait HasHyperPrefetcherParams extends HasCoupledL2Parameters {
@@ -140,7 +140,7 @@ class HyperPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) ext
   dontTouch(io.resp.bits)
   val fTable = Module(new FilterV2(parentName + "ftable_"))
 
-  val spp = Module(new prefetch.spp_origin.SignaturePathPrefetch(parentName = parentName + "spp_")(p.alterPartial({
+  val spp = Module(new prefetch.SignaturePathPrefetch(parentName = parentName + "spp_")(p.alterPartial({
         case L2ParamKey => p(L2ParamKey).copy(prefetch = Some(SPPParameters()))
   })))
   val bop = Module(new BestOffsetPrefetch()(p.alterPartial({
