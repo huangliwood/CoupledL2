@@ -21,7 +21,7 @@ package coupledL2
 
 import chisel3._
 import chisel3.util._
-import xs.utils.{FastArbiter, Pipeline}
+import xs.utils.{DFTResetSignals, FastArbiter, ModuleNode, Pipeline, ResetGen, ResetGenNode}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
@@ -29,7 +29,7 @@ import freechips.rocketchip.util._
 import org.chipsalliance.cde.config.Parameters
 import coupledL2.prefetch._
 import xs.utils.mbist.{MBISTInterface, MBISTPipeline}
-import xs.utils.perf.HasPerfLogging
+import xs.utils.perf.{DebugOptionsKey, HasPerfLogging}
 import xs.utils.sram.SRAMTemplate
 import coupledL2.utils.HasPerfEvents
 
@@ -253,6 +253,7 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
     val bankBits = if (banks == 1) 0 else log2Up(banks)
     val io = IO(new Bundle {
       val l2_hint = Valid(UInt(32.W))
+      val dfx_reset = Input(new DFTResetSignals())
     })
 
     // Display info
@@ -360,15 +361,12 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
     val slices = node.in.zip(node.out).zipWithIndex.map {
       case (((in, edgeIn), (out, edgeOut)), i) =>
         require(in.params.dataBits == out.params.dataBits)
-        val rst_L2 = reset
-        val slice = withReset(rst_L2) {
-          Module(new Slice(parentName = parentName + s"slice${i}_")(p.alterPartial {
-            case EdgeInKey  => edgeIn
-            case EdgeOutKey => edgeOut
-            case BankBitsKey => bankBits
-            case SliceIdKey => i
-          })) 
-        }
+        val slice = Module(new Slice(parentName = parentName + s"slice${i}_")(p.alterPartial {
+          case EdgeInKey  => edgeIn
+          case EdgeOutKey => edgeOut
+          case BankBitsKey => bankBits
+          case SliceIdKey => i
+        }))
         val sourceD_can_go = RegNextN(!hint_fire || i.U === OHToUInt(hint_chosen), hintCycleAhead - 1)
         release_sourceD_condition(i) := sourceD_can_go && !slice.io.in.d.valid
         slice.io.in <> in
@@ -521,6 +519,12 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
     println(cacheParams.name+" perfEvents All: "+cacheParams.getPCntAll)
     val perfEvents = allPerfEvents
     generatePerfEvent()
-  }
 
+    val prefetcherSeq = if(prefetcher.isDefined) Seq(ModuleNode(prefetcher.get)) else Seq()
+    val mbistSeq = if(mbistPl.isDefined) Seq(ModuleNode(mbistPl.get)) else Seq()
+    private val resetTree = ResetGenNode(
+      slices.map(s => ResetGenNode(Seq(ModuleNode(s)))) ++ prefetcherSeq ++ mbistSeq
+    )
+    ResetGen(resetTree, reset, Some(io.dfx_reset), !p(DebugOptionsKey).FPGAPlatform)
+  }
 }
