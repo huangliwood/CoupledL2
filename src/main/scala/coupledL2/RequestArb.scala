@@ -136,7 +136,6 @@ class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging wi
 
 
   /* Meta read request */
-  // ^ only sinkA/B/C tasks need to read directory
   io.dirRead_s1.valid := chnl_task_s1.valid && !mshr_task_s1.valid || s1_needs_replRead && !io.fromMainPipe.blockG_s1
   io.dirRead_s1.bits.set := task_s1.bits.set
   io.dirRead_s1.bits.tag := task_s1.bits.tag
