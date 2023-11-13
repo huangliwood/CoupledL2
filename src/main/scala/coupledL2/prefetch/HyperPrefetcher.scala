@@ -16,7 +16,7 @@ case class HyperPrefetchParams(
 )
     extends PrefetchParameters {
   override val hasPrefetchBit:  Boolean = true
-  override val inflightEntries: Int = 32
+  override val inflightEntries: Int = 64
 }
 
 trait HasHyperPrefetcherParams extends HasCoupledL2Parameters {

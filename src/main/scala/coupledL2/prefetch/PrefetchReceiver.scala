@@ -27,6 +27,7 @@ import xs.utils.Pipeline
 import huancun.PrefetchRecv
 import xs.utils.RegNextN
 import xs.utils.ValidIODelay
+import xs.utils.RRArbiterInit
 
 // TODO: PrefetchReceiver is temporarily used since L1&L2 do not support Hint.
 // TODO: Delete this after Hint is accomplished.
@@ -80,7 +81,7 @@ class SppSenderNull(val clientNum:Int=2)(implicit p: Parameters) extends LazyMod
    val inNode = Seq.fill(clientNum)(BundleBridgeSink(Some(() => new coupledL2.LlcPrefetchRecv)))
    val outNode = Seq.fill(1)(BundleBridgeSource(Some(() => new huancun.LlcPrefetchRecv)))
    lazy val module = new LazyModuleImp(this){
-     val arbiter = Module(new RRArbiter(new LlcPrefetchRecv, clientNum))
+     val arbiter = Module(new RRArbiterInit(new LlcPrefetchRecv, clientNum))
      arbiter.suggestName(s"pf_l3recv_node_arb")
      for (i <- 0 until clientNum) {
       val s0_valid = inNode(i).in.head._1.addr_valid

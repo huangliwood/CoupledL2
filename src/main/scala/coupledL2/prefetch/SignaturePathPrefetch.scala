@@ -226,7 +226,7 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
   sTable.io.w.req.bits.setIdx := idx(accessedPage_s2)
   sTable.io.w.req.bits.data(0).valid := true.B
   sTable.io.w.req.bits.data(0).tag := tag(accessedPage_s2)
-  sTable.io.w.req.bits.data(0).signature := (oldSignature_s2 << 3) ^ strideMap(newDelta_s2)
+  sTable.io.w.req.bits.data(0).signature := (oldSignature_s2 << 3) ^ newDelta_s2.asUInt
   sTable.io.w.req.bits.data(0).lastBlock := accessedBlock_s2
 
   io.resp.valid := stableWriteValid_s2
@@ -242,6 +242,8 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
 
   io.req.ready := sTable.io.r.req.ready
 
+  XSPerfAccumulate("spp_st_req_nums",io.resp.valid)
+  XSPerfAccumulate("spp_st_reqfire_nums",io.resp.fire)
   XSPerfAccumulate("spp_st_bp_req", bp_hit)
   XSPerfAccumulate("spp_st_bp_update",io.bp_update.valid)
 }
@@ -291,7 +293,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   val current = RegInit(0.U.asTypeOf(new SignatureTableResp))
   val lookCount = RegInit(0.U(lookCountBits.W))
   val miniCount = lookCount
-
+  val samePage = WireInit(false.B)
   //read pTable
   pTable.io.r.req.valid := enread
   pTable.io.r.req.bits.setIdx := idx(readSignature)
@@ -321,14 +323,9 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   val enbp = WireInit(true.B)
   val bp_update = WireInit(false.B)
   io.pt2st_bp.valid := enbp && bp_update
-  when(io.pt2st_bp.valid){
-    io.pt2st_bp.bits.pageAddr := current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits)
-    io.pt2st_bp.bits.parent_sig(0) := lastSignature
-    io.pt2st_bp.bits.offset := current.block(blkOffsetBits - 1, 0)
-  }.otherwise{
-    io.pt2st_bp.bits := 0.U.asTypeOf(io.pt2st_bp.bits.cloneType)
-  }
-
+  io.pt2st_bp.bits.pageAddr := current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits)
+  io.pt2st_bp.bits.parent_sig(0) := lastSignature
+  io.pt2st_bp.bits.offset := current.block(blkOffsetBits - 1, 0)
 
 
   //modify table
@@ -397,7 +394,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
           when(issued =/= 0.U) {
             enprefetch := true.B
             //same page?
-            val samePage = (testOffset(pageAddrBits + blkOffsetBits - 1, blkOffsetBits) ===
+            samePage := (testOffset(pageAddrBits + blkOffsetBits - 1, blkOffsetBits) ===
               current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits))
             when(samePage && (maxEntry.cDelta > miniCount)) {
               lookCount := lookCount + 1.U
@@ -432,6 +429,10 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   q.io.deq.ready := state === s_idle
 
   //perf
+  XSPerfAccumulate("spp_pt_bp_nums",io.pt2st_bp.valid)
+  XSPerfAccumulate("spp_pt_cross_page",state === s_lookahead && samePage)
+  XSPerfAccumulate("spp_pt_nextLine",state === s_lookahead && enprefetchnl)
+  XSPerfAccumulate("spp_pt_lookahead2",state === s_lookahead && (lookCount =/= 0.U) && enprefetch)
   // XSPerfAccumulate( s"spp_pt_do_nextline", enprefetchnl)
   // for (i <- 0 until pTableEntries) {
   //   XSPerfAccumulate( s"spp_pt_touched_entry_onlyset_${i.toString}", pTable.io.r.req.bits.setIdx === i.U(log2Up(pTableEntries).W)
@@ -499,7 +500,7 @@ class PatternTableTiming(parentName:String="Unkown")(implicit p: Parameters) ext
   pTable.io.r.req.bits.setIdx := idx(s0_current.signature)
   s0_readResult := pTable.io.r.resp.data(0)
 
-  val enbp = WireInit(false.B)
+  val enbp = WireInit(true.B)
   val bp_update = WireInit(false.B)
   io.pt2st_bp.valid := enbp && bp_update
   io.pt2st_bp.bits.pageAddr := s0_current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits)
@@ -551,7 +552,8 @@ class PatternTableTiming(parentName:String="Unkown")(implicit p: Parameters) ext
   }.elsewhen(state === s_lookahead0){
     s0_current.signature := issueReq.signature
   }.otherwise{
-    s0_current.signature := (s1_current.signature << 3) ^ strideMap(s1_maxEntry.delta)
+    // s0_current.signature := (s1_current.signature << 3) ^ strideMap(s1_maxEntry.delta)
+    s0_current.signature := (s1_current.signature << 3) ^ s1_maxEntry.delta.asUInt
   }
   when(state === s_lookahead){
     s0_current.delta := s1_maxEntry.delta
@@ -651,6 +653,10 @@ class PatternTableTiming(parentName:String="Unkown")(implicit p: Parameters) ext
   }
 
   //perf
+  XSPerfAccumulate("spp_pt_bp_nums",io.pt2st_bp.valid)
+  XSPerfAccumulate("spp_pt_lookahead2",state === s_lookahead && s1_valid && s1_continue)
+  XSPerfAccumulate("spp_pt_nextLine",state === s_lookahead && enprefetchnl)
+  XSPerfAccumulate("spp_pt_cross_page",state === s_lookahead && s1_valid && samePage)
 //  XSPerfAccumulate(s"spp_pt_do_nextline", enprefetchnl)
 //  for (i <- 0 until pTableEntries) {
 //    XSPerfAccumulate(s"spp_pt_touched_entry_onlyset_${i.toString}", pTable.io.r.req.bits.setIdx === i.U(log2Up(pTableEntries).W)
