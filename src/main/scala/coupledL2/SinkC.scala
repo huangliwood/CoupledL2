@@ -24,6 +24,7 @@ import freechips.rocketchip.tilelink.TLMessages._
 import org.chipsalliance.cde.config.Parameters
 import xs.utils.perf.HasPerfLogging
 import xs.utils.tl.MemReqSource
+import xs.utils.RRArbiterInit
 
 class PipeBufferRead(implicit p: Parameters) extends L2Bundle {
   val bufIdx = UInt(bufIdxBits.W)
@@ -60,7 +61,7 @@ class SinkC(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val dataValids = VecInit(beatValids.map(_.asUInt.orR)).asUInt
   val taskBuf = Reg(Vec(bufBlocks, new TaskBundle))
   val taskValids = RegInit(VecInit(Seq.fill(bufBlocks)(false.B)))
-  val taskArb = Module(new RRArbiter(new TaskBundle, bufBlocks))
+  val taskArb = Module(new RRArbiterInit(new TaskBundle, bufBlocks))
   val outPipe = Queue(taskArb.io.out, entries = 1, pipe = true, flow = false) // for timing: taskArb <> outPipe
   val outPipeValids = UIntToOH(outPipe.bits.bufIdx)
   val bufValids = taskValids.asUInt | dataValids | Mux(outPipe.valid ,outPipeValids, 0.U)
