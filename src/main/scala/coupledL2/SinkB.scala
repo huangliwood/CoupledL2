@@ -121,6 +121,36 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
   io.bMergeTask.bits := bMergeTaskOutPipe.bits
   bMergeTaskOutPipe.ready := true.B
 
+  //--------------------------------- assert ----------------------------------------//
+  // unable to accept incoming B req because same-addr as some MSHR REQ
+  val addrConflict_s = VecInit(io.msInfo.map(s =>
+    s.valid && s.bits.set === io.task.bits.set && s.bits.reqTag === io.task.bits.tag && !s.bits.willFree && !s.bits.nestB
+  )).asUInt.orR
+
+  // unable to accept incoming B req because same-addr as some MSHR replaced block and cannot nest
+  val replaceConflictMask_s = VecInit(io.msInfo.map(s =>
+    s.valid && s.bits.set === io.task.bits.set && s.bits.metaTag === io.task.bits.tag && s.bits.releaseNotSent && !s.bits.mergeB
+  )).asUInt
+  val replaceConflict_s = replaceConflictMask_s.orR
+
+  // incoming B can be merged with some MSHR replaced block and able to be accepted
+  val mergeBMask_s = VecInit(io.msInfo.map(s =>
+    s.valid && s.bits.set === io.task.bits.set && s.bits.metaTag === io.task.bits.tag && s.bits.mergeB
+  )).asUInt
+
+  val mergeB_s = mergeBMask_s.orR
+
+  val io_task_can_valid = !addrConflict_s && !replaceConflict_s && !mergeB_s
+  val io_bMergeTask_can_valid = mergeB_s
+  when(io.task.valid){
+    assert(io_task_can_valid, "io_task cant valid")
+  }
+  when(io.bMergeTask.valid){
+    assert(io_bMergeTask_can_valid, "io_bMergeTask cant valid")
+  }
+
+
+
   XSPerfAccumulate("mergeBTask", io.bMergeTask.valid)
   XSPerfAccumulate("mp_s3_block_sinkB", io.b.valid && !addrConflict && !replaceConflict && !mergeB && s3AddrConflict)
   //!!WARNING: TODO: if this is zero, that means fucntion [Probe merge into MSHR-Release] is never tested, and may have flaws
