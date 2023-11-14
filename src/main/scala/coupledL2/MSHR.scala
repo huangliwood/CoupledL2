@@ -120,7 +120,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
   val will_mp_release_valid = !state.s_release && state.w_rprobeacklast && !io.bMergeTask.valid &&
     state.w_grantlast &&
     state.w_replResp // release after Grant to L1 sent and replRead returns
-  val mp_release_valid = RegNext(will_mp_release_valid) && !io.bMergeTask.valid // add reg because sinkB bMergeTask out add pipe
+  val mp_release_valid = RegNext(will_mp_release_valid) && !io.bMergeTask.valid && will_mp_release_valid // add reg because sinkB bMergeTask out add pipe
 
   val mp_probeack_valid = !state.s_probeack && state.w_pprobeacklast
   val mp_merge_probeack_valid = !state.s_merge_probeack && state.w_rprobeacklast
