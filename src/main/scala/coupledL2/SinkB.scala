@@ -18,7 +18,7 @@
 package coupledL2
 
 import chisel3._
-import chisel3.util._
+import chisel3.util.{DecoupledIO, _}
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink._
 import xs.utils.perf.HasPerfLogging
@@ -109,14 +109,17 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
   task_temp.valid := io.b.valid && !addrConflict && !replaceConflict && !mergeB && !s3AddrConflict
   task_temp.bits := task
   io.b.ready :=  mergeB || (task_temp.ready && !addrConflict && !replaceConflict && !s3AddrConflict)
-  val taskOutPipe = Queue(task_temp, entries = 1, pipe = true, flow = false) // for timing: taskArb <> outPipe
-  io.task.valid := taskOutPipe.valid
-  io.task.bits  := taskOutPipe.bits
-  taskOutPipe.ready := io.task.ready
+  val taskOutPipe = Queue(task_temp, entries = 1, pipe = true, flow = false) // for timing: mshrCtl <> sinkB <> reqArb
+  io.task <> taskOutPipe
 
-  io.bMergeTask.valid := io.b.valid && mergeB
-  io.bMergeTask.bits.id := mergeBId
-  io.bMergeTask.bits.task := task
+  val bMergeTask = Wire(Decoupled(new BMergeTask))
+  bMergeTask.valid := io.b.valid && mergeB && !s3AddrConflict
+  bMergeTask.bits.id := mergeBId
+  bMergeTask.bits.task := task
+  val bMergeTaskOutPipe = Queue(bMergeTask, entries = 1, pipe = true, flow = false) // for timing: mshrCtl <> sinkB <> mshrCtl
+  io.bMergeTask.valid := bMergeTaskOutPipe.valid
+  io.bMergeTask.bits := bMergeTaskOutPipe.bits
+  bMergeTaskOutPipe.ready := true.B
 
   XSPerfAccumulate("mergeBTask", io.bMergeTask.valid)
   XSPerfAccumulate("mp_s3_block_sinkB", io.b.valid && !addrConflict && !replaceConflict && !mergeB && s3AddrConflict)
