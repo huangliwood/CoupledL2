@@ -50,6 +50,13 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     /* handle capacity conflict of GrantBuffer */
     val status_vec = Vec(3, ValidIO(new PipeStatus))
 
+    /* block sinkB */
+    val toSinkB = ValidIO(new Bundle() {
+      val tag = UInt(tagBits.W)
+      val set = UInt(setBits.W)
+      val willAllocMshr = Bool()
+    })
+
     /* get dir result at stage 3 */
     val dirResp_s3 = Input(new DirResult)
     val replResp = Flipped(ValidIO(new ReplacerResult))
@@ -612,6 +619,11 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   io.status_vec(1).bits.channel := task_s4.bits.channel
   io.status_vec(2).valid        := d_s5.valid
   io.status_vec(2).bits.channel := task_s5.bits.channel
+
+  io.toSinkB.valid := task_s3.valid
+  io.toSinkB.bits.tag := task_s3.bits.tag
+  io.toSinkB.bits.set := task_s3.bits.set
+  io.toSinkB.bits.willAllocMshr := io.toMSHRCtl.mshr_alloc_s3.valid
 
   /* ======== Other Signals Assignment ======== */
   // Initial state assignment

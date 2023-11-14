@@ -34,6 +34,11 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
     val b = Flipped(DecoupledIO(new TLBundleB(edgeIn.bundle)))
     val task = DecoupledIO(new TaskBundle)
     val msInfo = Vec(mshrsAll, Flipped(ValidIO(new MSHRInfo)))
+    val s3Info = Flipped(ValidIO(new Bundle() {
+      val tag = UInt(tagBits.W)
+      val set = UInt(setBits.W)
+      val willAllocMshr = Bool()
+    }))
     val bMergeTask = ValidIO(new BMergeTask)
   })
 
@@ -89,6 +94,9 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
     s.valid && s.bits.set === task.set && s.bits.metaTag === task.tag && s.bits.mergeB
   )).asUInt
 
+  // unable to accept incoming B req because same-addr as mainpipe S3
+  val s3AddrConflict = io.s3Info.valid && io.s3Info.bits.set === task.set && io.s3Info.bits.tag === task.tag && io.s3Info.bits.willAllocMshr
+
   assert(PopCount(replaceConflictMask) <= 1.U)
   assert(PopCount(mergeBMask) <= 1.U)
 
@@ -97,14 +105,20 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
 
   // when conflict, we block B req from entering SinkB
   // when !conflict and mergeB , we merge B req to MSHR
-  io.task.valid := io.b.valid && !addrConflict && !replaceConflict && !mergeB
-  io.task.bits  := task
-  io.b.ready :=  mergeB || (io.task.ready && !addrConflict && !replaceConflict)
+  val task_temp = WireInit(0.U.asTypeOf(io.task))
+  task_temp.valid := io.b.valid && !addrConflict && !replaceConflict && !mergeB && !s3AddrConflict
+  task_temp.bits := task
+  io.b.ready :=  mergeB || (task_temp.ready && !addrConflict && !replaceConflict && !s3AddrConflict)
+  val taskOutPipe = Queue(task_temp, entries = 1, pipe = true, flow = false) // for timing: taskArb <> outPipe
+  io.task.valid := taskOutPipe.valid
+  io.task.bits  := taskOutPipe.bits
+  taskOutPipe.ready := io.task.ready
 
   io.bMergeTask.valid := io.b.valid && mergeB
   io.bMergeTask.bits.id := mergeBId
   io.bMergeTask.bits.task := task
 
   XSPerfAccumulate("mergeBTask", io.bMergeTask.valid)
+  XSPerfAccumulate("mp_s3_block_sinkB", io.b.valid && !addrConflict && !replaceConflict && !mergeB && s3AddrConflict)
   //!!WARNING: TODO: if this is zero, that means fucntion [Probe merge into MSHR-Release] is never tested, and may have flaws
 }
