@@ -73,19 +73,21 @@ class MSHR(implicit p: Parameters) extends L2Module {
   val timer = RegInit(0.U(64.W)) // for performance analysis
 
   /* MSHR Allocation */
-  val req_valid = RegInit(false.B)
+//  val req_valid = RegInit(false.B)
   val req       = RegInit(0.U.asTypeOf(new TaskBundle()))
   val dirResult = RegInit(0.U.asTypeOf(new DirResult()))
   val meta      = dirResult.meta
   val initState = Wire(new FSMState())
   initState.elements.foreach(_._2 := true.B)
 //  val state     = RegInit(new FSMState(), initState)
+  val req_valid_dups = RegInit(VecInit(Seq.fill(6)(false.B)))
   val state_dups = RegInit(VecInit(Seq.fill(4)(initState)))
+  val req_set_dups = RegInit(VecInit(Seq.fill(7)(0.U.asTypeOf(req.set))))
+  val dirResult_tag_dups = RegInit(VecInit(Seq.fill(5)(0.U.asTypeOf(dirResult.tag))))
 
   when(io.alloc.valid) {
-    req_valid := true.B
+//    req_valid := true.B
 //    state     := io.alloc.bits.state
-    state_dups.foreach(_ := io.alloc.bits.state)
     dirResult := io.alloc.bits.dirResult
     req       := io.alloc.bits.task
     gotT        := false.B
@@ -97,6 +99,11 @@ class MSHR(implicit p: Parameters) extends L2Module {
     alreadySendProbe := false.B
     alreadySRefill   := false.B
     AneedReplMergeB  := false.B
+
+    req_valid_dups.foreach(_ := true.B)
+    state_dups.foreach(_ := io.alloc.bits.state)
+    req_set_dups.foreach(_ := io.alloc.bits.task.set)
+    dirResult_tag_dups.foreach(_ := io.alloc.bits.dirResult.tag)
   }
 
   /* ======== Enchantment ======== */
@@ -134,7 +141,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
   val a_task = {
     val oa = io.tasks.source_a.bits
     oa.tag := req.tag
-    oa.set := req.set
+    oa.set := req_set_dups(0)
     oa.off := req.off
     oa.source := io.id
     oa.opcode := Mux(
@@ -155,7 +162,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
 
   val b_task = {
     val ob = io.tasks.source_b.bits
-    ob.tag := dirResult.tag
+    ob.tag := dirResult_tag_dups(0)
     ob.set := dirResult.set
     ob.off := 0.U
     ob.opcode := Probe
@@ -174,8 +181,8 @@ class MSHR(implicit p: Parameters) extends L2Module {
   val mp_release, mp_probeack, mp_merge_probeack, mp_grant = Wire(new TaskBundle)
   val mp_release_task = {
     mp_release.channel := req.channel
-    mp_release.tag := dirResult.tag
-    mp_release.set := req.set
+    mp_release.tag := dirResult_tag_dups(1)
+    mp_release.set := req_set_dups(1)
     mp_release.off := 0.U
     mp_release.alias.foreach(_ := 0.U)
     mp_release.vaddr.foreach(_ := 0.U)
@@ -219,7 +226,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
   val mp_probeack_task = {
     mp_probeack.channel := req.channel
     mp_probeack.tag := req.tag
-    mp_probeack.set := req.set
+    mp_probeack.set := req_set_dups(2)
     mp_probeack.off := req.off
     mp_probeack.alias.foreach(_ := 0.U)
     mp_probeack.vaddr.foreach(_ := 0.U)
@@ -338,7 +345,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
   val mp_grant_task    = {
     mp_grant.channel := req.channel
     mp_grant.tag := req.tag
-    mp_grant.set := req.set
+    mp_grant.set := req_set_dups(3)
     mp_grant.off := req.off
     mp_grant.sourceId := req.sourceId
     mp_grant.alias.foreach(_ := 0.U)
@@ -422,7 +429,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
   // io.tasks.prefetchTrain.foreach {
   //   train =>
   //     train.bits.tag := req.tag
-  //     train.bits.set := req.set
+  //     train.bits.set := req_set_dups(0)
   //     train.bits.needT := req_needT
   //     train.bits.source := req.source
   // }
@@ -506,7 +513,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
     state_dups.foreach(_.w_replResp := true.B)
 
     // update meta (no need to update hit/set/error/replacerInfo of dirResult)
-    dirResult.tag := replResp.tag
+    dirResult_tag_dups.foreach(_ := replResp.tag)
     dirResult.way := replResp.way
     dirResult.meta := replResp.meta
 
@@ -528,15 +535,15 @@ class MSHR(implicit p: Parameters) extends L2Module {
     }
   }
 
-  when (req_valid) {
+  when (req_valid_dups(0)) {
     timer := timer + 1.U
   }
   
   val no_schedule = state_dups(0).s_refill && state_dups(0).s_probeack && state_dups(1).s_merge_probeack && state_dups(1).s_release // && state.s_triggerprefetch.getOrElse(true.B)
   val no_wait = state_dups(2).w_rprobeacklast && state_dups(2).w_pprobeacklast && state_dups(0).w_grantlast && state_dups(0).w_releaseack && state_dups(0).w_grantack && state_dups(1).w_replResp
   val will_free = no_schedule && no_wait
-  when (will_free && req_valid) {
-    req_valid := false.B
+  when (will_free && req_valid_dups(1)) {
+    req_valid_dups.foreach(_ := false.B)
     timer := 0.U
   }
 
@@ -548,11 +555,11 @@ class MSHR(implicit p: Parameters) extends L2Module {
   val mergeB = !state_dups(2).s_release
   // alias: should protect meta from being accessed or occupied
   val releaseNotSent = !state_dups(3).s_release || !state_dups(2).s_merge_probeack || io.bMergeTask.valid
-  io.status.valid := req_valid
+  io.status.valid := req_valid_dups(2)
   io.status.bits.channel := req.channel
-  io.status.bits.set := req.set
+  io.status.bits.set := req_set_dups(4)
   io.status.bits.reqTag := req.tag
-  io.status.bits.metaTag := dirResult.tag
+  io.status.bits.metaTag := dirResult_tag_dups(2)
   io.status.bits.needsRepl := releaseNotSent
   // wait for resps, high as valid
   io.status.bits.w_c_resp := !state_dups(3).w_rprobeacklast || !state_dups(3).w_pprobeacklast || !state_dups(0).w_pprobeack
@@ -563,14 +570,14 @@ class MSHR(implicit p: Parameters) extends L2Module {
   io.status.bits.is_prefetch := req_prefetch
   io.status.bits.reqSource := req.reqSource
 
-  io.msInfo.valid := req_valid
-  io.msInfo.bits.set := req.set
+  io.msInfo.valid := req_valid_dups(3)
+  io.msInfo.bits.set := req_set_dups(5)
   io.msInfo.bits.way := dirResult.way
   io.msInfo.bits.reqTag := req.tag
   io.msInfo.bits.needRelease := !state_dups(0).w_releaseack
   io.msInfo.bits.releaseNotSent := releaseNotSent
   io.msInfo.bits.dirHit := dirResult.hit
-  io.msInfo.bits.metaTag := dirResult.tag
+  io.msInfo.bits.metaTag := dirResult_tag_dups(3)
   io.msInfo.bits.willFree := will_free
   io.msInfo.bits.nestB := nestB
   io.msInfo.bits.mergeB := mergeB
@@ -595,7 +602,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
   }
 
   // for A miss, meta == BRANCH, B nest A
-  val nestedwb_match_b = req_valid && req.set === io.nestedwb.set && req.tag === io.nestedwb.tag
+  val nestedwb_match_b = req_valid_dups(4) && req_set_dups(6) === io.nestedwb.set && req.tag === io.nestedwb.tag
   when(nestedwb_match_b){
     when(io.nestedwb.b_set_meta_N && dirResult.hit && meta.state =/= INVALID){
       dirResult.hit := false.B
@@ -607,9 +614,9 @@ class MSHR(implicit p: Parameters) extends L2Module {
   /* ======== Handling Nested C ======== */
   // for A miss, only when replResp do we finally choose a way, allowing nested C
   // for A-alias, always allowing nested C (state.w_replResp === true.B)
-  val nestedwb_match = req_valid && meta.state =/= INVALID &&
+  val nestedwb_match = req_valid_dups(5) && meta.state =/= INVALID &&
     dirResult.set === io.nestedwb.set &&
-    dirResult.tag === io.nestedwb.tag &&
+    dirResult_tag_dups(4) === io.nestedwb.tag &&
     state_dups(2).w_replResp
 
   when (nestedwb_match) {
@@ -617,7 +624,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
       meta.dirty := true.B
     }
 //    TODO: wait to test
-//    when(req_valid && req.fromB){
+//    when(req_valid_dups(5) && req.fromB){
 //      when(state_dups(0).s_pprobe === false.B && !alreadySendProbe){
 //        state_dups(0).s_pprobe := true.B
 //        state_dups(0).w_pprobeack := true.B
