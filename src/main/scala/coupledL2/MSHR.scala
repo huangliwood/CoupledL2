@@ -79,11 +79,13 @@ class MSHR(implicit p: Parameters) extends L2Module {
   val meta      = dirResult.meta
   val initState = Wire(new FSMState())
   initState.elements.foreach(_._2 := true.B)
-  val state     = RegInit(new FSMState(), initState)
+//  val state     = RegInit(new FSMState(), initState)
+  val state_dups = RegInit(VecInit(Seq.fill(4)(initState)))
 
   when(io.alloc.valid) {
     req_valid := true.B
-    state     := io.alloc.bits.state
+//    state     := io.alloc.bits.state
+    state_dups.foreach(_ := io.alloc.bits.state)
     dirResult := io.alloc.bits.dirResult
     req       := io.alloc.bits.task
     gotT        := false.B
@@ -115,18 +117,18 @@ class MSHR(implicit p: Parameters) extends L2Module {
 
   /* ======== Task allocation ======== */
   // Theoretically, data to be released is saved in ReleaseBuffer, so Acquire can be sent as soon as req enters mshr
-  io.tasks.source_a.valid := !state.s_acquire
-  io.tasks.source_b.valid := !state.s_pprobe || !state.s_rprobe
-  val will_mp_release_valid = !state.s_release && state.w_rprobeacklast && !io.bMergeTask.valid &&
-    state.w_grantlast &&
-    state.w_replResp // release after Grant to L1 sent and replRead returns
+  io.tasks.source_a.valid := !state_dups(0).s_acquire
+  io.tasks.source_b.valid := !state_dups(0).s_pprobe || !state_dups(0).s_rprobe
+  val will_mp_release_valid = !state_dups(0).s_release && state_dups(0).w_rprobeacklast && !io.bMergeTask.valid &&
+    state_dups(0).w_grantlast &&
+    state_dups(0).w_replResp // release after Grant to L1 sent and replRead returns
   val mp_release_valid = RegNext(will_mp_release_valid) && !io.bMergeTask.valid && will_mp_release_valid // add reg because sinkB bMergeTask out add pipe
 
-  val mp_probeack_valid = !state.s_probeack && state.w_pprobeacklast
-  val mp_merge_probeack_valid = !state.s_merge_probeack && state.w_rprobeacklast
-  val mp_grant_valid = !state.s_refill && state.w_grantlast && state.w_rprobeacklast // [Alias] grant after rprobe done
+  val mp_probeack_valid = !state_dups(0).s_probeack && state_dups(0).w_pprobeacklast
+  val mp_merge_probeack_valid = !state_dups(0).s_merge_probeack && state_dups(1).w_rprobeacklast 
+  val mp_grant_valid = !state_dups(0).s_refill && state_dups(0).w_grantlast && state_dups(1).w_rprobeacklast // [Alias] grant after rprobe done
   io.tasks.mainpipe.valid := mp_release_valid || mp_probeack_valid || mp_merge_probeack_valid || mp_grant_valid
-  // io.tasks.prefetchTrain.foreach(t => t.valid := !state.s_triggerprefetch.getOrElse(true.B))
+  // io.tasks.prefetchTrain.foreach(t => t.valid := !state_dups(0).s_triggerprefetch.getOrElse(true.B))
 
 
   val a_task = {
@@ -158,7 +160,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
     ob.off := 0.U
     ob.opcode := Probe
     ob.param := Mux(
-      !state.s_pprobe,
+      !state_dups(0).s_pprobe,
       req.param,
       Mux(
         req_get && dirResult.hit && meta.state === TRUNK,
@@ -427,24 +429,24 @@ class MSHR(implicit p: Parameters) extends L2Module {
 
   /* ======== Task update ======== */
   when (io.tasks.source_a.fire) {
-    state.s_acquire := true.B
+    state_dups.foreach(_.s_acquire := true.B)
   }
   when (io.tasks.source_b.fire) {
-    state.s_pprobe := true.B
-    state.s_rprobe := true.B
+    state_dups.foreach(_.s_pprobe := true.B)
+    state_dups.foreach(_.s_rprobe := true.B)
     alreadySendProbe := true.B
   }
   when (io.tasks.mainpipe.ready) {
     when (mp_merge_probeack_valid) {
-      state.s_merge_probeack := true.B
+      state_dups.foreach(_.s_merge_probeack := true.B)
     }.elsewhen (mp_grant_valid) {
-      state.s_refill := true.B
+      state_dups.foreach(_.s_refill := true.B)
       alreadySRefill := true.B
     }.elsewhen (mp_release_valid) {
-      state.s_release := true.B
+      state_dups.foreach(_.s_release := true.B)
       meta.state := INVALID
     }.elsewhen (mp_probeack_valid) {
-      state.s_probeack := true.B
+      state_dups.foreach(_.s_probeack := true.B)
     }
   }
   // prefetchOpt.foreach {
@@ -460,11 +462,11 @@ class MSHR(implicit p: Parameters) extends L2Module {
   val e_resp = io.resps.sink_e
   when (c_resp.valid) {
     when (c_resp.bits.opcode === ProbeAck || c_resp.bits.opcode === ProbeAckData) {
-      state.w_rprobeackfirst := true.B
-      state.w_rprobeacklast := state.w_rprobeacklast || c_resp.bits.last
-      state.w_pprobeackfirst := true.B
-      state.w_pprobeacklast := state.w_pprobeacklast || c_resp.bits.last
-      state.w_pprobeack := state.w_pprobeack || req.off === 0.U || c_resp.bits.last
+      state_dups.foreach(_.w_rprobeackfirst := true.B)
+      state_dups.foreach(_.w_rprobeacklast := state_dups(1).w_rprobeacklast || c_resp.bits.last)
+      state_dups.foreach(_.w_pprobeackfirst := true.B)
+      state_dups.foreach(_.w_pprobeacklast := state_dups(1).w_pprobeacklast || c_resp.bits.last)
+      state_dups.foreach(_.w_pprobeack := state_dups(0).w_pprobeack || req.off === 0.U || c_resp.bits.last)
     }
     when (c_resp.bits.opcode === ProbeAckData) {
       probeDirty := true.B
@@ -476,9 +478,9 @@ class MSHR(implicit p: Parameters) extends L2Module {
 
   when (d_resp.valid) {
     when(d_resp.bits.opcode === Grant || d_resp.bits.opcode === GrantData || d_resp.bits.opcode === AccessAck) {
-      state.w_grantfirst := true.B
-      state.w_grantlast := d_resp.bits.last
-      state.w_grant := req.off === 0.U || d_resp.bits.last  // TODO? why offset?
+      state_dups.foreach(_.w_grantfirst := true.B)
+      state_dups.foreach(_.w_grantlast := d_resp.bits.last)
+      state_dups.foreach(_.w_grant := req.off === 0.U || d_resp.bits.last)  // TODO? why offset?
     }
     when(d_resp.bits.opcode === Grant || d_resp.bits.opcode === GrantData) {
       gotT := d_resp.bits.param === toT
@@ -488,20 +490,20 @@ class MSHR(implicit p: Parameters) extends L2Module {
       gotGrantData := true.B
     }
     when(d_resp.bits.opcode === ReleaseAck) {
-      state.w_releaseack := true.B
+      state_dups.foreach(_.w_releaseack := true.B)
     }
   }
 
   when (e_resp.valid) {
-    state.w_grantack := true.B
+    state_dups.foreach(_.w_grantack := true.B)
   }
 
   val replResp = io.replResp.bits
   when (io.replResp.valid && replResp.retry) {
-    state.s_refill := false.B
+    state_dups.foreach(_.s_refill := false.B)
   }
   when (io.replResp.valid && !replResp.retry) {
-    state.w_replResp := true.B
+    state_dups.foreach(_.w_replResp := true.B)
 
     // update meta (no need to update hit/set/error/replacerInfo of dirResult)
     dirResult.tag := replResp.tag
@@ -515,13 +517,13 @@ class MSHR(implicit p: Parameters) extends L2Module {
     // if meta has client, rprobe client
     when (replResp.meta.state =/= INVALID) {
       // set release flags
-      state.s_release := false.B
-      state.w_releaseack := false.B
+      state_dups.foreach(_.s_release := false.B)
+      state_dups.foreach(_.w_releaseack := false.B)
       // rprobe clients if any
       when(replResp.meta.clients.orR) {
-        state.s_rprobe := false.B
-        state.w_rprobeackfirst := false.B
-        state.w_rprobeacklast := false.B
+        state_dups.foreach(_.s_rprobe := false.B)
+        state_dups.foreach(_.w_rprobeackfirst := false.B)
+        state_dups.foreach(_.w_rprobeacklast := false.B)
       }
     }
   }
@@ -530,8 +532,8 @@ class MSHR(implicit p: Parameters) extends L2Module {
     timer := timer + 1.U
   }
   
-  val no_schedule = state.s_refill && state.s_probeack && state.s_merge_probeack && state.s_release // && state.s_triggerprefetch.getOrElse(true.B)
-  val no_wait = state.w_rprobeacklast && state.w_pprobeacklast && state.w_grantlast && state.w_releaseack && state.w_grantack && state.w_replResp
+  val no_schedule = state_dups(0).s_refill && state_dups(0).s_probeack && state_dups(1).s_merge_probeack && state_dups(1).s_release // && state.s_triggerprefetch.getOrElse(true.B)
+  val no_wait = state_dups(2).w_rprobeacklast && state_dups(2).w_pprobeacklast && state_dups(0).w_grantlast && state_dups(0).w_releaseack && state_dups(0).w_grantack && state_dups(1).w_replResp
   val will_free = no_schedule && no_wait
   when (will_free && req_valid) {
     req_valid := false.B
@@ -539,13 +541,13 @@ class MSHR(implicit p: Parameters) extends L2Module {
   }
 
   // when grant not received, B can nest A
-  val nestB = !state.w_grantfirst
+  val nestB = !state_dups(0).w_grantfirst
 
   // mergeB is only allowed when release not sent
   //(TODO: or we could just blockB, since Release will be sent to MP very shortly and have no deadlock problem)
-  val mergeB = !state.s_release
+  val mergeB = !state_dups(2).s_release
   // alias: should protect meta from being accessed or occupied
-  val releaseNotSent = !state.s_release || !state.s_merge_probeack || io.bMergeTask.valid
+  val releaseNotSent = !state_dups(3).s_release || !state_dups(2).s_merge_probeack || io.bMergeTask.valid
   io.status.valid := req_valid
   io.status.bits.channel := req.channel
   io.status.bits.set := req.set
@@ -553,9 +555,9 @@ class MSHR(implicit p: Parameters) extends L2Module {
   io.status.bits.metaTag := dirResult.tag
   io.status.bits.needsRepl := releaseNotSent
   // wait for resps, high as valid
-  io.status.bits.w_c_resp := !state.w_rprobeacklast || !state.w_pprobeacklast || !state.w_pprobeack
-  io.status.bits.w_d_resp := !state.w_grantlast || !state.w_grant || !state.w_releaseack
-  io.status.bits.w_e_resp := !state.w_grantack
+  io.status.bits.w_c_resp := !state_dups(3).w_rprobeacklast || !state_dups(3).w_pprobeacklast || !state_dups(0).w_pprobeack
+  io.status.bits.w_d_resp := !state_dups(0).w_grantlast || !state_dups(0).w_grant || !state_dups(0).w_releaseack
+  io.status.bits.w_e_resp := !state_dups(0).w_grantack
   io.status.bits.will_free := will_free
   io.status.bits.is_miss := !dirResult.hit
   io.status.bits.is_prefetch := req_prefetch
@@ -565,7 +567,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
   io.msInfo.bits.set := req.set
   io.msInfo.bits.way := dirResult.way
   io.msInfo.bits.reqTag := req.tag
-  io.msInfo.bits.needRelease := !state.w_releaseack
+  io.msInfo.bits.needRelease := !state_dups(0).w_releaseack
   io.msInfo.bits.releaseNotSent := releaseNotSent
   io.msInfo.bits.dirHit := dirResult.hit
   io.msInfo.bits.metaTag := dirResult.tag
@@ -582,13 +584,13 @@ class MSHR(implicit p: Parameters) extends L2Module {
   /* ======== Handling Nested B ======== */
   when (io.bMergeTask.valid) {
     AneedReplMergeB := true.B
-    state.s_merge_probeack := false.B
-    state.s_release := true.B
-    state.w_releaseack := true.B
-    when (meta.clients.orR && !alreadySendProbe && state.s_rprobe =/= false.B) {
-      state.s_rprobe := false.B
-      state.w_rprobeackfirst := false.B
-      state.w_rprobeacklast := false.B
+    state_dups.foreach(_.s_merge_probeack := false.B)
+    state_dups.foreach(_.s_release := true.B)
+    state_dups.foreach(_.w_releaseack := true.B)
+    when (meta.clients.orR && !alreadySendProbe && state_dups(0).s_rprobe =/= false.B) {
+      state_dups.foreach(_.s_rprobe := false.B)
+      state_dups.foreach(_.w_rprobeackfirst := false.B)
+      state_dups.foreach(_.w_rprobeacklast := false.B)
     }
   }
 
@@ -597,7 +599,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
   when(nestedwb_match_b){
     when(io.nestedwb.b_set_meta_N && dirResult.hit && meta.state =/= INVALID){
       dirResult.hit := false.B
-      state.w_replResp := false.B
+      state_dups.foreach(_.w_replResp := false.B)
       assert(meta.state =/= TIP)
     }
   }
@@ -608,7 +610,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
   val nestedwb_match = req_valid && meta.state =/= INVALID &&
     dirResult.set === io.nestedwb.set &&
     dirResult.tag === io.nestedwb.tag &&
-    state.w_replResp
+    state_dups(2).w_replResp
 
   when (nestedwb_match) {
     when (io.nestedwb.c_set_dirty) {
@@ -616,11 +618,11 @@ class MSHR(implicit p: Parameters) extends L2Module {
     }
 //    TODO: wait to test
 //    when(req_valid && req.fromB){
-//      when(state.s_pprobe === false.B && !alreadySendProbe){
-//        state.s_pprobe := true.B
-//        state.w_pprobeack := true.B
-//        state.w_pprobeackfirst := true.B
-//        state.w_pprobeacklast := true.B
+//      when(state_dups(0).s_pprobe === false.B && !alreadySendProbe){
+//        state_dups(0).s_pprobe := true.B
+//        state_dups(0).w_pprobeack := true.B
+//        state_dups(0).w_pprobeackfirst := true.B
+//        state_dups(0).w_pprobeacklast := true.B
 //      }
 //    }
   }
@@ -628,7 +630,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
   // This is the VALID signal for releaseBuf.io.w(2)
   io.nestedwbData := nestedwb_match && io.nestedwb.c_set_dirty
 
-  dontTouch(state)
+  dontTouch(state_dups)
 
   /* ======== Performance counters ======== */
   // time stamp
