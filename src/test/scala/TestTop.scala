@@ -17,6 +17,7 @@ import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import chisel3.util.experimental.BoringUtils
 import scala.collection.mutable.ArrayBuffer
 import xs.utils.GTimer
+import xs.utils.DFTResetSignals
 import xs.utils.perf.{DebugOptions,DebugOptionsKey}
 import huancun.{HuanCun, HCCacheParameters, HCCacheParamsKey, CacheParameters, CacheCtrl}
 import coupledL2.utils.HasPerfEvents
@@ -492,8 +493,8 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
   }
 
   val l2xbar = TLXbar()
-  // val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffffL), beatBytes = 32))
-  val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffffffL), beatBytes = 32))
+  val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffffL), beatBytes = 32))
+  // val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffffffL), beatBytes = 32))
   var master_nodes: Seq[TLClientNode] = Seq() // TODO
   val NumCores=2
   // val nullNode = LazyModule(new SppSenderNull)
@@ -652,6 +653,10 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       val perfDump = Input(Bool())
     })
 
+    l2List.foreach(_.module.io.dfx_reset.scan_mode := false.B)
+    l2List.foreach(_.module.io.dfx_reset.lgc_rst_n := true.B.asAsyncReset)
+    l2List.foreach(_.module.io.dfx_reset.mode := false.B)
+    
     val logTimestamp = WireInit(0.U(64.W))
     val perfClean = WireInit(false.B)
     val perfDump = WireInit(false.B)
