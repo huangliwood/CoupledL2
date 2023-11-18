@@ -9,6 +9,7 @@ import xs.utils.CircularShift
 import xs.utils.perf.HasPerfLogging
 import xs.utils.sram.SRAMTemplate
 import coupledL2.PfSource
+
 case class SPPParameters(
   sTableEntries: Int = 512,
   sTagBits: Int = 12,
@@ -44,6 +45,9 @@ trait HasSPPParams extends HasPrefetchParameters {
   val blkOffsetBits = pageOffsetBits - offsetBits
   val pTagBits = signatureBits - log2Up(pTableEntries)
   val fTagBits = fullAddressBits - offsetBits - log2Up(fTableEntries)
+
+  val ENABLE_BP = true
+  val ENABLE_NL = false
 
   def strideMap(a: SInt) : UInt = {
     val out = WireInit(0.U(3.W))
@@ -125,65 +129,252 @@ class DeltaEntry(implicit p: Parameters) extends SPPBundle {
   }
 }
 
-class sppPrefetchReq(implicit p:Parameters) extends PrefetchReq{
-  val hint2llc = Bool()
-}
-class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) extends SPPModule {
-  val io = IO(new Bundle {
-    val req = Flipped(DecoupledIO(new SignatureTableReq))
-    val resp = DecoupledIO(new SignatureTableResp) //output old signature and delta to write PT
-  })
-  def hash1(addr:    UInt) = addr(log2Up(sTableEntries) - 1, 0)
-  def hash2(addr:    UInt) = addr(2 * log2Up(sTableEntries) - 1, log2Up(sTableEntries))
-  def idx(addr:      UInt) = hash1(addr) ^ hash2(addr)
-  def tag(addr:      UInt) = addr(pageAddrBits - 1, log2Up(sTableEntries))
-  def sTableEntry() = new Bundle {
-    val valid = Bool()
-    val tag = UInt(sTagBits.W)
-    val signature = UInt(signatureBits.W)
-    val lastBlock = UInt(blkOffsetBits.W)
-  }
+// class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) extends SPPModule {
+//   val io = IO(new Bundle {
+//     val req = Flipped(DecoupledIO(new SignatureTableReq))
+//     val resp = DecoupledIO(new SignatureTableResp) //output old signature and delta to write PT
+//   })
+//   def hash1(addr:    UInt) = addr(log2Up(sTableEntries) - 1, 0)
+//   def hash2(addr:    UInt) = addr(2 * log2Up(sTableEntries) - 1, log2Up(sTableEntries))
+//   def idx(addr:      UInt) = hash1(addr) ^ hash2(addr)
+//   def tag(addr:      UInt) = addr(pageAddrBits - 1, log2Up(sTableEntries))
+//   def sTableEntry() = new Bundle {
+//     val valid = Bool()
+//     val tag = UInt(sTagBits.W)
+//     val signature = UInt(signatureBits.W)
+//     val lastBlock = UInt(blkOffsetBits.W)
+//   }
 
-  println(s"fullAddressBits: ${fullAddressBits}")
-  println(s"pageOffsetBits: ${pageOffsetBits}")
-  println(s"sTagBits: ${sTagBits}")
+//   println(s"fullAddressBits: ${fullAddressBits}")
+//   println(s"pageOffsetBits: ${pageOffsetBits}")
+//   println(s"sTagBits: ${sTagBits}")
   
-  val sTable = Module(
-    new SRAMTemplate(sTableEntry(), set = sTableEntries, way = 1, bypassWrite = true, shouldReset = true)
-  )
+//   val sTable = Module(
+//     new SRAMTemplate(sTableEntry(), set = sTableEntries, way = 1, bypassWrite = true, shouldReset = true)
+//   )
 
-  val rAddr = io.req.bits.pageAddr
-  val rData = Wire(sTableEntry())
-  val lastAccessedPage = RegNext(io.req.bits.pageAddr)
-  val lastAccessedBlock = RegNext(io.req.bits.blkOffset)
+//   val rAddr = io.req.bits.pageAddr
+//   val rData = Wire(sTableEntry())
+//   val lastAccessedPage = RegNext(io.req.bits.pageAddr)
+//   val lastAccessedBlock = RegNext(io.req.bits.blkOffset)
 
-  sTable.io.r.req.valid := io.req.fire
-  sTable.io.r.req.bits.setIdx := idx(rAddr)
-  rData := sTable.io.r.resp.data(0)
+//   sTable.io.r.req.valid := io.req.fire
+//   sTable.io.r.req.bits.setIdx := idx(rAddr)
+//   rData := sTable.io.r.resp.data(0)
 
-  val hit = rData.valid && rData.tag === tag(lastAccessedPage)
-  val oldSignature = Mux(hit, rData.signature, 0.U)
-  val newDelta = Mux(hit, lastAccessedBlock.asSInt - rData.lastBlock.asSInt, lastAccessedBlock.asSInt)
+//   val hit = rData.valid && rData.tag === tag(lastAccessedPage)
+//   val oldSignature = Mux(hit, rData.signature, 0.U)
+//   val newDelta = Mux(hit, lastAccessedBlock.asSInt - rData.lastBlock.asSInt, lastAccessedBlock.asSInt)
 
-  sTable.io.w.req.valid := RegNext(sTable.io.r.req.fire) && newDelta =/= 0.S
-  sTable.io.w.req.bits.setIdx := idx(lastAccessedPage)
-  sTable.io.w.req.bits.data(0).valid := true.B
-  sTable.io.w.req.bits.data(0).tag := tag(lastAccessedPage)
-  sTable.io.w.req.bits.data(0).signature := (oldSignature << 3) ^ newDelta.asUInt
-  sTable.io.w.req.bits.data(0).lastBlock := lastAccessedBlock
+//   sTable.io.w.req.valid := RegNext(sTable.io.r.req.fire) && newDelta =/= 0.S
+//   sTable.io.w.req.bits.setIdx := idx(lastAccessedPage)
+//   sTable.io.w.req.bits.data(0).valid := true.B
+//   sTable.io.w.req.bits.data(0).tag := tag(lastAccessedPage)
+//   sTable.io.w.req.bits.data(0).signature := (oldSignature << 3) ^ newDelta.asUInt
+//   sTable.io.w.req.bits.data(0).lastBlock := lastAccessedBlock
 
-  io.resp.valid := RegNext(sTable.io.r.req.fire) && newDelta =/= 0.S
-  io.resp.bits.signature := oldSignature
-  io.resp.bits.delta := newDelta
-  io.resp.bits.block := RegNext(Cat(io.req.bits.pageAddr, io.req.bits.blkOffset))
-  io.resp.bits.needT := RegNext(io.req.bits.needT)
-  io.resp.bits.source := RegNext(io.req.bits.source)
+//   io.resp.valid := RegNext(sTable.io.r.req.fire) && newDelta =/= 0.S
+//   io.resp.bits.signature := oldSignature
+//   io.resp.bits.delta := newDelta
+//   io.resp.bits.block := RegNext(Cat(io.req.bits.pageAddr, io.req.bits.blkOffset))
+//   io.resp.bits.needT := RegNext(io.req.bits.needT)
+//   io.resp.bits.source := RegNext(io.req.bits.source)
 
-  io.req.ready := sTable.io.r.req.ready
-  XSPerfAccumulate("spp_st_req_nums",io.resp.valid)
-  XSPerfAccumulate("spp_st_reqfire_nums",io.resp.fire)
-}
-class SignatureTableTiming(parentName: String = "Unknown")(implicit p: Parameters) extends SPPModule {
+//   io.req.ready := sTable.io.r.req.ready
+//   XSPerfAccumulate("spp_st_req_nums",io.resp.valid)
+//   XSPerfAccumulate("spp_st_reqfire_nums",io.resp.fire)
+// }
+
+// class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends SPPModule {
+//   val io = IO(new Bundle {
+//     val req = Flipped(DecoupledIO(new SignatureTableResp))
+//     val resp = DecoupledIO(new PatternTableResp)
+//     val db_degree = Input(UInt(2.W))
+//     val queue_used_degree = Input(UInt(2.W))
+//     val pt2st_bp = ValidIO(new BreakPointReq)
+//   })
+
+//   def idx(addr:      UInt) = addr(log2Up(pTableEntries) - 1, 0)
+//   def tag(addr:      UInt) = addr(signatureBits - 1, log2Up(pTableEntries))
+//   def pTableEntry() = new Bundle {
+//     val valid = Bool()
+//     val tag = UInt(pTagBits.W)
+//     val deltaEntries = Vec(pTableDeltaEntries, new DeltaEntry())
+//     val count = UInt(4.W)
+//   }
+
+//   val db_degree = io.db_degree
+
+//   val pTable = Module(
+//     new SRAMTemplate(pTableEntry(), set = pTableEntries, way = 1, bypassWrite = true, shouldReset = true)
+//   )
+
+//   val q = Module(new ReplaceableQueueV2(chiselTypeOf(io.req.bits), pTableQueueEntries))
+//   q.io.enq <> io.req
+//   val req = q.io.deq.bits
+
+//   val s_idle :: s_lookahead0 :: s_lookahead :: Nil = Enum(3)
+//   val state = RegInit(s_idle)
+//   val readResult = WireInit(0.U.asTypeOf(pTableEntry()))
+//   val readResult_reg = RegEnable(readResult, RegNext(pTable.io.r.req.fire))
+//   val readSignature = WireInit(0.U(signatureBits.W)) //to differentiate the result from io or lookahead, set based on state
+//   val readDelta = WireInit(0.S((blkOffsetBits + 1).W))
+//   val lastSignature = RegEnable(readSignature, pTable.io.r.req.fire)
+//   val lastDelta = RegEnable(readDelta, pTable.io.r.req.fire)
+//   val hit = WireInit(false.B)
+//   val hit_reg = RegEnable(hit, RegNext(pTable.io.r.req.fire))
+//   val enread = WireInit(false.B)
+//   val enprefetch = WireInit(false.B)
+//   val enprefetchnl = WireInit(false.B)
+//   val enwrite = RegNext(q.io.deq.fire && pTable.io.r.req.fire,0.U) //we only modify-write on demand requests
+//   val current = RegInit(0.U.asTypeOf(new SignatureTableResp))
+//   val lookCount = RegInit(0.U(lookCountBits.W))
+//   val miniCount = lookCount
+
+//   //read pTable
+//   pTable.io.r.req.valid := enread
+//   pTable.io.r.req.bits.setIdx := idx(readSignature)
+//   readResult := pTable.io.r.resp.data(0)
+//   hit := readResult.valid && tag(lastSignature) === readResult.tag
+//   //set output
+//   val maxEntry = readResult_reg.deltaEntries.reduce((a, b) => Mux(a.cDelta >= b.cDelta, a, b))
+//   val delta_list = readResult_reg.deltaEntries.map(x => Mux(x.cDelta > miniCount, x.delta, 0.S))
+//   val delta_list_checked = delta_list.map(x =>
+//             Mux((current.block.asSInt + x).asUInt(pageAddrBits + blkOffsetBits - 1, blkOffsetBits)
+//             === current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits), x, 0.S))
+//   val delta_list_nl = delta_list.map(_ => 1.S((blkOffsetBits + 1).W))
+
+//   io.resp.valid := enprefetch || enprefetchnl
+//   io.resp.bits.block := current.block
+//   io.resp.bits.deltas := delta_list_checked
+//   io.resp.bits.degree := lookCount
+//   io.resp.bits.needT := current.needT
+//   io.resp.bits.source := current.source 
+//   when(enprefetchnl) {
+//     io.resp.bits.deltas := delta_list_nl
+//   }
+
+//   //bp update operation
+//   val enbp = WireInit(true.B)
+//   val bp_update = WireInit(false.B)
+//   io.pt2st_bp.valid := enbp && bp_update
+//   io.pt2st_bp.bits.pageAddr := current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits)
+//   io.pt2st_bp.bits.parent_sig(0) := lastSignature
+//   io.pt2st_bp.bits.offset := current.block(blkOffsetBits - 1, 0)
+//   io.pt2st_bp.bits := 0.U.asTypeOf(io.pt2st_bp.bits.cloneType)
+
+//   //modify table
+//   val deltaEntries = WireInit(VecInit(Seq.fill(pTableDeltaEntries)(0.U.asTypeOf(new DeltaEntry()))))
+//   val count = WireInit(0.U(4.W))
+//   when(hit) {
+//     val exist = readResult.deltaEntries.map(_.delta === lastDelta).reduce(_ || _)
+//     when(exist) {
+//       val temp = readResult.deltaEntries.map(x =>
+//         Mux(x.delta === lastDelta, (new DeltaEntry).apply(lastDelta, x.cDelta + 1.U), x))
+//       //counter overflow
+//       when(readResult.count + 1.U === ((1.U << count.getWidth) - 1.U)) {
+//         deltaEntries := temp.map(x => (new DeltaEntry).apply(x.delta, x.cDelta >> 1))
+//       } .otherwise {
+//         deltaEntries := temp
+//       }
+//       count := deltaEntries.map(_.cDelta).reduce(_ + _)
+//     } .otherwise {
+//       //to do replacement
+//       val smallest: SInt = readResult.deltaEntries.reduce((a, b) => {
+//         Mux(a.cDelta < b.cDelta, a, b)
+//       }).delta
+//       val indexToReplace : UInt = readResult.deltaEntries.indexWhere(a => a.delta === smallest)
+//       deltaEntries := VecInit.tabulate(readResult.deltaEntries.length) { i =>
+//         Mux((i.U === indexToReplace), (new DeltaEntry).apply(lastDelta, 1.U),
+//         readResult.deltaEntries(i))
+//       }
+//       count := deltaEntries.map(_.cDelta).reduce(_ + _)
+//     }
+//     //to consider saturate here
+//   } .otherwise {
+//     deltaEntries := VecInit(Seq.fill(pTableDeltaEntries)((new DeltaEntry).apply(0.S, 0.U)))
+//     deltaEntries(0).delta := lastDelta
+//     deltaEntries(0).cDelta := 1.U
+//     count := 1.U
+//   }
+//   //write pTable
+//   pTable.io.w.req.valid := enwrite
+//   pTable.io.w.req.bits.setIdx := idx(lastSignature)
+//   pTable.io.w.req.bits.data(0).valid := true.B
+//   pTable.io.w.req.bits.data(0).deltaEntries := deltaEntries
+//   pTable.io.w.req.bits.data(0).count := count
+//   pTable.io.w.req.bits.data(0).tag := tag(lastSignature)
+//   val samePage = WireInit(false.B)
+//   //FSM
+//   switch(state) {
+//     is(s_idle) {
+//       when(q.io.deq.fire) {
+//         readSignature := req.signature
+//         readDelta := req.delta
+//         state := s_lookahead0
+//         current := req
+//         enread := true.B
+//       }
+//     }
+//     is(s_lookahead0) {
+//       enread := true.B
+//       readSignature := (lastSignature << 3) ^ strideMap(lastDelta)
+//       state := s_lookahead
+//     }
+//     is(s_lookahead) {
+//       when(RegNext(RegNext(pTable.io.r.req.fire))) {
+//         when(hit_reg) {
+//           val issued = delta_list_checked.map(a => Mux(a =/= 0.S, 1.U, 0.U)).reduce(_ +& _)
+//           val testOffset = (current.block.asSInt + maxEntry.delta.asSInt).asUInt
+//           when(issued =/= 0.U) {
+//             enprefetch := true.B
+//             //same page?
+//             samePage := (testOffset(pageAddrBits + blkOffsetBits - 1, blkOffsetBits) ===
+//               current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits))
+//             when(samePage && (maxEntry.cDelta > miniCount)) {
+//               lookCount := lookCount + 1.U
+//               readSignature := (lastSignature << 3) ^ strideMap(maxEntry.delta)
+//               current.block := testOffset
+// 			        enread := true.B
+//             } .otherwise {
+//               lookCount := 0.U
+//               state := s_idle
+//             }
+//           }.otherwise {
+//             when(lookCount >= 4.U){
+//               bp_update := true.B
+//             }
+//             lookCount := 0.U
+//             state := s_idle
+//           }
+//         } .otherwise {
+//           when(lookCount <= 1.U) {
+//             val testOffset = current.block + 1.U
+//             when(testOffset(pageAddrBits + blkOffsetBits - 1, blkOffsetBits) === current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits)) {
+//               enprefetchnl := false.B
+//             }
+//           }
+//           lookCount := 0.U
+//           state := s_idle
+//         }
+//       }
+//     }
+//   }
+
+//   q.io.deq.ready := state === s_idle
+
+//   //perf
+//   XSPerfAccumulate("spp_pt_bp_nums",io.pt2st_bp.valid)
+//   XSPerfAccumulate("spp_pt_cross_page",state === s_lookahead && samePage)
+//   XSPerfAccumulate("spp_pt_nextLine",state === s_lookahead && enprefetchnl)
+//   XSPerfAccumulate("spp_pt_lookahead2",state === s_lookahead && (lookCount =/= 0.U) && enprefetch)
+//   // XSPerfAccumulate( s"spp_pt_do_nextline", enprefetchnl)
+//   // for (i <- 0 until pTableEntries) {
+//   //   XSPerfAccumulate( s"spp_pt_touched_entry_onlyset_${i.toString}", pTable.io.r.req.bits.setIdx === i.U(log2Up(pTableEntries).W)
+//   //   )
+//   // }
+// }
+class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) extends SPPModule {
   val io = IO(new Bundle {
     val req = Flipped(DecoupledIO(new SignatureTableReq))
     val resp = DecoupledIO(new SignatureTableResp) //output old signature and delta to write PT
@@ -271,8 +462,7 @@ class SignatureTableTiming(parentName: String = "Unknown")(implicit p: Parameter
   val rValid_s2 = RegNext(rValid_s1,false.B)
   val hit_s2 = rData_s2.tag === tag(accessedPage_s2) && rData_s2.valid
   val oldSignature_s2 = Mux(hit_s2, rData_s2.signature, 0.U)
-  val newDelta_s2     = Mux(hit_s2, accessedBlock_s2.asSInt - rData_s2.lastBlock.asSInt, accessedBlock_s2.asSInt)
-  val stableWriteValid_s2 = newDelta_s2 =/= 0.S && rValid_s2
+  val newDelta_s2     = Mux(hit_s2, accessedBlock_s2.asSInt - rData_s2.lastBlock.asSInt, 0.S) // should hold 0 when miss
 
   // bp read
   val s2_bp_access_index = idx(accessedPage_s2)(4, 0)
@@ -281,21 +471,20 @@ class SignatureTableTiming(parentName: String = "Unknown")(implicit p: Parameter
   for (i <- 0 until (4)) {
     rotate_sig(i) := CircularShift(bpTable(s2_bp_access_index).parent_sig.head).left(3 * i)
   }
-  val bp_en = WireInit(false.B)
-  bp_hit := bp_en && rValid_s2 && bpTable(s2_bp_access_index).tag === accessedPage_s2 && rotate_sig.map(_ === oldSignature_s2).reduce(_ || _)
+ 
+  bp_hit := ENABLE_BP.asBool && rValid_s2 && bpTable(s2_bp_access_index).tag === accessedPage_s2 && rotate_sig.map(_ === oldSignature_s2).reduce(_ || _)
   bp_prePredicted_blkOff := bpTable(s2_bp_access_index).prePredicted_blkOffset
   val bp_matched_index = WireInit(0.U(2.W))
   bp_matched_sig := rotate_sig(bp_matched_index)
 
-
-  sTable.io.w.req.valid := stableWriteValid_s2
+  sTable.io.w.req.valid := rValid_s2
   sTable.io.w.req.bits.setIdx := idx(accessedPage_s2)
   sTable.io.w.req.bits.data(0).valid := true.B
   sTable.io.w.req.bits.data(0).tag := tag(accessedPage_s2)
   sTable.io.w.req.bits.data(0).signature := (oldSignature_s2 << 3) ^ newDelta_s2.asUInt //todo: there should hold origin delta signal!!
   sTable.io.w.req.bits.data(0).lastBlock := accessedBlock_s2
 
-  io.resp.valid := stableWriteValid_s2
+  io.resp.valid := newDelta_s2 =/= 0.S && rValid_s2
   io.resp.bits.delta  := newDelta_s2
   io.resp.bits.source := s2_req.source
   io.resp.bits.needT := s2_req.needT
@@ -316,195 +505,6 @@ class SignatureTableTiming(parentName: String = "Unknown")(implicit p: Parameter
 }
 
 class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends SPPModule {
-  val io = IO(new Bundle {
-    val req = Flipped(DecoupledIO(new SignatureTableResp))
-    val resp = DecoupledIO(new PatternTableResp)
-    val db_degree = Input(UInt(2.W))
-    val queue_used_degree = Input(UInt(2.W))
-    val pt2st_bp = ValidIO(new BreakPointReq)
-  })
-
-  def idx(addr:      UInt) = addr(log2Up(pTableEntries) - 1, 0)
-  def tag(addr:      UInt) = addr(signatureBits - 1, log2Up(pTableEntries))
-  def pTableEntry() = new Bundle {
-    val valid = Bool()
-    val tag = UInt(pTagBits.W)
-    val deltaEntries = Vec(pTableDeltaEntries, new DeltaEntry())
-    val count = UInt(4.W)
-  }
-
-  val db_degree = io.db_degree
-
-  val pTable = Module(
-    new SRAMTemplate(pTableEntry(), set = pTableEntries, way = 1, bypassWrite = true, shouldReset = true)
-  )
-
-  val q = Module(new ReplaceableQueueV2(chiselTypeOf(io.req.bits), pTableQueueEntries))
-  q.io.enq <> io.req
-  val req = q.io.deq.bits
-
-  val s_idle :: s_lookahead0 :: s_lookahead :: Nil = Enum(3)
-  val state = RegInit(s_idle)
-  val readResult = WireInit(0.U.asTypeOf(pTableEntry()))
-  val readResult_reg = RegEnable(readResult, RegNext(pTable.io.r.req.fire))
-  val readSignature = WireInit(0.U(signatureBits.W)) //to differentiate the result from io or lookahead, set based on state
-  val readDelta = WireInit(0.S((blkOffsetBits + 1).W))
-  val lastSignature = RegEnable(readSignature, pTable.io.r.req.fire)
-  val lastDelta = RegEnable(readDelta, pTable.io.r.req.fire)
-  val hit = WireInit(false.B)
-  val hit_reg = RegEnable(hit, RegNext(pTable.io.r.req.fire))
-  val enread = WireInit(false.B)
-  val enprefetch = WireInit(false.B)
-  val enprefetchnl = WireInit(false.B)
-  val enwrite = RegNext(q.io.deq.fire && pTable.io.r.req.fire,0.U) //we only modify-write on demand requests
-  val current = RegInit(0.U.asTypeOf(new SignatureTableResp))
-  val lookCount = RegInit(0.U(lookCountBits.W))
-  val miniCount = lookCount
-
-  //read pTable
-  pTable.io.r.req.valid := enread
-  pTable.io.r.req.bits.setIdx := idx(readSignature)
-  readResult := pTable.io.r.resp.data(0)
-  hit := readResult.valid && tag(lastSignature) === readResult.tag
-  //set output
-  val maxEntry = readResult_reg.deltaEntries.reduce((a, b) => Mux(a.cDelta >= b.cDelta, a, b))
-  val delta_list = readResult_reg.deltaEntries.map(x => Mux(x.cDelta > miniCount, x.delta, 0.S))
-  val delta_list_checked = delta_list.map(x =>
-            Mux((current.block.asSInt + x).asUInt(pageAddrBits + blkOffsetBits - 1, blkOffsetBits)
-            === current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits), x, 0.S))
-  val delta_list_nl = delta_list.map(_ => 1.S((blkOffsetBits + 1).W))
-
-  io.resp.valid := enprefetch || enprefetchnl
-  io.resp.bits.block := current.block
-  io.resp.bits.deltas := delta_list_checked
-  io.resp.bits.degree := lookCount
-  io.resp.bits.needT := current.needT
-  io.resp.bits.source := current.source 
-  when(enprefetchnl) {
-    io.resp.bits.deltas := delta_list_nl
-  }
-
-  //bp update operation
-  val enbp = WireInit(true.B)
-  val bp_update = WireInit(false.B)
-  io.pt2st_bp.valid := enbp && bp_update
-  io.pt2st_bp.bits.pageAddr := current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits)
-  io.pt2st_bp.bits.parent_sig(0) := lastSignature
-  io.pt2st_bp.bits.offset := current.block(blkOffsetBits - 1, 0)
-  io.pt2st_bp.bits := 0.U.asTypeOf(io.pt2st_bp.bits.cloneType)
-
-  //modify table
-  val deltaEntries = WireInit(VecInit(Seq.fill(pTableDeltaEntries)(0.U.asTypeOf(new DeltaEntry()))))
-  val count = WireInit(0.U(4.W))
-  when(hit) {
-    val exist = readResult.deltaEntries.map(_.delta === lastDelta).reduce(_ || _)
-    when(exist) {
-      val temp = readResult.deltaEntries.map(x =>
-        Mux(x.delta === lastDelta, (new DeltaEntry).apply(lastDelta, x.cDelta + 1.U), x))
-      //counter overflow
-      when(readResult.count + 1.U === ((1.U << count.getWidth) - 1.U)) {
-        deltaEntries := temp.map(x => (new DeltaEntry).apply(x.delta, x.cDelta >> 1))
-      } .otherwise {
-        deltaEntries := temp
-      }
-      count := deltaEntries.map(_.cDelta).reduce(_ + _)
-    } .otherwise {
-      //to do replacement
-      val smallest: SInt = readResult.deltaEntries.reduce((a, b) => {
-        Mux(a.cDelta < b.cDelta, a, b)
-      }).delta
-      val indexToReplace : UInt = readResult.deltaEntries.indexWhere(a => a.delta === smallest)
-      deltaEntries := VecInit.tabulate(readResult.deltaEntries.length) { i =>
-        Mux((i.U === indexToReplace), (new DeltaEntry).apply(lastDelta, 1.U),
-        readResult.deltaEntries(i))
-      }
-      count := deltaEntries.map(_.cDelta).reduce(_ + _)
-    }
-    //to consider saturate here
-  } .otherwise {
-    deltaEntries := VecInit(Seq.fill(pTableDeltaEntries)((new DeltaEntry).apply(0.S, 0.U)))
-    deltaEntries(0).delta := lastDelta
-    deltaEntries(0).cDelta := 1.U
-    count := 1.U
-  }
-  //write pTable
-  pTable.io.w.req.valid := enwrite
-  pTable.io.w.req.bits.setIdx := idx(lastSignature)
-  pTable.io.w.req.bits.data(0).valid := true.B
-  pTable.io.w.req.bits.data(0).deltaEntries := deltaEntries
-  pTable.io.w.req.bits.data(0).count := count
-  pTable.io.w.req.bits.data(0).tag := tag(lastSignature)
-  val samePage = WireInit(false.B)
-  //FSM
-  switch(state) {
-    is(s_idle) {
-      when(q.io.deq.fire) {
-        readSignature := req.signature
-        readDelta := req.delta
-        state := s_lookahead0
-        current := req
-        enread := true.B
-      }
-    }
-    is(s_lookahead0) {
-      enread := true.B
-      readSignature := (lastSignature << 3) ^ strideMap(lastDelta)
-      state := s_lookahead
-    }
-    is(s_lookahead) {
-      when(RegNext(RegNext(pTable.io.r.req.fire))) {
-        when(hit_reg) {
-          val issued = delta_list_checked.map(a => Mux(a =/= 0.S, 1.U, 0.U)).reduce(_ +& _)
-          val testOffset = (current.block.asSInt + maxEntry.delta.asSInt).asUInt
-          when(issued =/= 0.U) {
-            enprefetch := true.B
-            //same page?
-            samePage := (testOffset(pageAddrBits + blkOffsetBits - 1, blkOffsetBits) ===
-              current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits))
-            when(samePage && (maxEntry.cDelta > miniCount)) {
-              lookCount := lookCount + 1.U
-              readSignature := (lastSignature << 3) ^ strideMap(maxEntry.delta)
-              current.block := testOffset
-			        enread := true.B
-            } .otherwise {
-              lookCount := 0.U
-              state := s_idle
-            }
-          }.otherwise {
-            when(lookCount >= 4.U){
-              bp_update := true.B
-            }
-            lookCount := 0.U
-            state := s_idle
-          }
-        } .otherwise {
-          when(lookCount <= 1.U) {
-            val testOffset = current.block + 1.U
-            when(testOffset(pageAddrBits + blkOffsetBits - 1, blkOffsetBits) === current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits)) {
-              enprefetchnl := false.B
-            }
-          }
-          lookCount := 0.U
-          state := s_idle
-        }
-      }
-    }
-  }
-
-  q.io.deq.ready := state === s_idle
-
-  //perf
-  XSPerfAccumulate("spp_pt_bp_nums",io.pt2st_bp.valid)
-  XSPerfAccumulate("spp_pt_cross_page",state === s_lookahead && samePage)
-  XSPerfAccumulate("spp_pt_nextLine",state === s_lookahead && enprefetchnl)
-  XSPerfAccumulate("spp_pt_lookahead2",state === s_lookahead && (lookCount =/= 0.U) && enprefetch)
-  // XSPerfAccumulate( s"spp_pt_do_nextline", enprefetchnl)
-  // for (i <- 0 until pTableEntries) {
-  //   XSPerfAccumulate( s"spp_pt_touched_entry_onlyset_${i.toString}", pTable.io.r.req.bits.setIdx === i.U(log2Up(pTableEntries).W)
-  //   )
-  // }
-}
-class PatternTableTiming(parentName:String="Unkown")(implicit p: Parameters) extends SPPModule {
   val io = IO(new Bundle {
     val req = Flipped(DecoupledIO(new SignatureTableResp))
     val resp = DecoupledIO(new PatternTableResp)
@@ -622,7 +622,7 @@ class PatternTableTiming(parentName:String="Unkown")(implicit p: Parameters) ext
   }
   when(state === s_lookahead){
     s0_current.delta := s1_maxEntry.delta
-    s0_current.block := testOffset
+    s0_current.block := testOffset //TODO: need opimize?
   }.otherwise{
     s0_current.delta := issueReq.delta
     s0_current.block := issueReq.block
@@ -819,16 +819,15 @@ class Unpack(implicit p: Parameters) extends SPPModule {
 class SignaturePathPrefetch(parentName:String="Unkown")(implicit p: Parameters) extends SPPModule {
   val io = IO(new Bundle() {
     val train = Flipped(DecoupledIO(new PrefetchTrain)) //train from mshr ,now recommand using MISS
-    val req = DecoupledIO(new sppPrefetchReq) //issue to current or next-level cache
+    val req = DecoupledIO(new PrefetchReq) //issue to current or next-level cache
+    val hint_req = DecoupledIO(new PrefetchReq)
     val resp = Flipped(DecoupledIO(new PrefetchResp)) //fill request from the next-level cache, using this to update filter
     val db_degree = Flipped(ValidIO(UInt(2.W)))
     val queue_used = Input(UInt(6.W))
   })
 
-  // val sTable = Module(new SignatureTable(parentName + "stable_"))
-  val sTable = Module(new SignatureTableTiming(parentName + "stableTiming_"))
-  // val pTable = Module(new PatternTable(parentName + "ptable_"))
-  val pTable = Module(new PatternTableTiming(parentName + "ptableTiming_"))
+  val sTable = Module(new SignatureTable(parentName + "stable_"))
+  val pTable = Module(new PatternTable(parentName + "ptable_"))
   val unpack = Module(new Unpack)
 
   val oldAddr = io.train.bits.addr //received request from L1 cache
@@ -862,9 +861,10 @@ class SignaturePathPrefetch(parentName:String="Unkown")(implicit p: Parameters) 
   io.req.bits.set := parseFullAddress(newAddr)._2
   io.req.bits.needT := unpack.io.resp.bits.needT
   io.req.bits.source := unpack.io.resp.bits.source
-  io.req.bits.isBOP := false.B
-  io.req.bits.pfId := PfSource.SPP.id.U
-  io.req.bits.hint2llc := unpack.io.resp.valid && send2Llc
+  io.req.bits.pfVec := PfSource.SPP
+  //hint req 
+  io.hint_req.valid := unpack.io.resp.valid && send2Llc
+  io.hint_req.bits := io.req.bits 
 
 
   io.resp.ready := true.B
@@ -872,5 +872,5 @@ class SignaturePathPrefetch(parentName:String="Unkown")(implicit p: Parameters) 
   XSPerfAccumulate( "spp_recv_train", io.train.fire)
   XSPerfAccumulate( "spp_recv_st", sTable.io.resp.fire)
   XSPerfAccumulate( "spp_recv_pt", Mux(pTable.io.resp.fire, pTable.io.resp.bits.deltas.map(a => Mux(a =/= 0.S, 1.U, 0.U)).reduce(_ +& _), 0.U))
-  XSPerfAccumulate( "spp_hintReq", io.req.bits.hint2llc)
+  XSPerfAccumulate( "spp_hintReq", io.hint_req.valid)
 }

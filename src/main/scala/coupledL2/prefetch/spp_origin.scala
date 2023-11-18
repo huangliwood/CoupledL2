@@ -8,10 +8,11 @@ import coupledL2.HasCoupledL2Parameters
 import xs.utils.CircularShift
 import xs.utils.perf.HasPerfLogging
 import xs.utils.sram.SRAMTemplate
-import coupledL2.{PfSource,L2ParamKey}
+import coupledL2.{L2ParamKey}
 import coupledL2.prefetch.{PrefetchParameters,PrefetchReq,PrefetchTrain,PrefetchResp,PrefetchEvict}
 import coupledL2.prefetch.HasPrefetchParameters
 import coupledL2.prefetch.ReplaceableQueueV2
+import coupledL2.PfSource
 
 case class SPPParameters(
   sTableEntries: Int = 256,
@@ -794,8 +795,7 @@ class SignaturePathPrefetch(parentName:String="Unkown")(implicit p: Parameters) 
   io.req.bits.set := parseFullAddress(newAddr)._2
   io.req.bits.needT := unpack.io.resp.bits.needT
   io.req.bits.source := unpack.io.resp.bits.source
-  io.req.bits.isBOP := false.B
-  io.req.bits.pfId := PfSource.SPP.id.U
+  io.req.bits.pfVec := PfSource.SPP
   io.req.bits.hint2llc := unpack.io.resp.valid && send2Llc
 
 

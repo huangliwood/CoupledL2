@@ -166,22 +166,22 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
     val pftRespQueue = Module(new Queue(new Bundle(){
         val tag = UInt(tagBits.W)
         val set = UInt(setBits.W)
-        val pfId = UInt(PfSource.pfSourceBits.W)
+        val pfVec = UInt(PfVectorConst.bits.W)
       },
       entries = 4,
       flow = true))
 
     pftRespQueue.io.enq.valid := io.d_task.valid && dtaskOpcode === HintAck &&
-      io.d_task.bits.task.fromL2pft.getOrElse(false.B)
+      io.d_task.bits.task.isfromL2pft
     pftRespQueue.io.enq.bits.tag := io.d_task.bits.task.tag
     pftRespQueue.io.enq.bits.set := io.d_task.bits.task.set
-    pftRespQueue.io.enq.bits.pfId := io.d_task.bits.task.pfId.getOrElse(PfSource.BOP.id.U)
+    pftRespQueue.io.enq.bits.pfVec := io.d_task.bits.task.pfVec.getOrElse(PfSource.BOP)
 
     val resp = io.prefetchResp.get
     resp.valid := pftRespQueue.io.deq.valid
     resp.bits.tag := pftRespQueue.io.deq.bits.tag
     resp.bits.set := pftRespQueue.io.deq.bits.set
-    resp.bits.pfId := pftRespQueue.io.deq.bits.pfId
+    resp.bits.pfVec := pftRespQueue.io.deq.bits.pfVec
     pftRespQueue.io.deq.ready := resp.ready
 
     // assert(pftRespQueue.io.enq.ready, "pftRespQueue should never be full, no back pressure logic") // TODO: has bug here

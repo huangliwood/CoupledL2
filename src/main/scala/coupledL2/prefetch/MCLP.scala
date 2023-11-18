@@ -7,8 +7,8 @@ import freechips.rocketchip.tilelink._
 import coupledL2.{HasCoupledL2Parameters}
 import xs.utils.perf.HasPerfLogging
 import xs.utils.SRAMQueue
-import coupledL2.{PfSource,L2ParamKey}
-import coupledL2.prefetch.{PrefetchParameters,PrefetchReq,PrefetchTrain,PrefetchResp,PrefetchEvict}
+import coupledL2.{L2ParamKey}
+import coupledL2.prefetch.{PfSource,PrefetchParameters,PrefetchReq,PrefetchTrain,PrefetchResp,PrefetchEvict}
 import coupledL2.prefetch.PrefetchReceiver
 import coupledL2.prefetch.PrefetchReceiverParams
 import coupledL2.prefetch.BOPParameters
@@ -74,7 +74,7 @@ class FilterV2(parentName:String = "Unknown")(implicit p: Parameters) extends Pr
   hit := readResult.valid && tag(pageAddr) === readResult.tag
   val hitForMap = hit && readResult.bitMap(blkOffset)
 
-  io.resp.valid := io.req.fire && (io.req.bits.pfId =/= PfSource.SPP.id.U || !hitForMap)
+  io.resp.valid := io.req.fire && (io.req.bits.pfVec =/= PfSource.SPP || !hitForMap)
   io.resp.bits := io.req.bits
 
   val wData = Wire(fTableEntry())
@@ -114,9 +114,9 @@ class FilterV2(parentName:String = "Unknown")(implicit p: Parameters) extends Pr
   XSPerfAccumulate("hyper_filter_nums",io.req.fire && hitForMap)
   XSPerfAccumulate("hyper_filter_input",io.req.fire)
   XSPerfAccumulate("hyper_filter_output",io.resp.fire)
-  XSPerfAccumulate("hyper_filter_bop_req",io.resp.valid && io.resp.bits.pfId === PfSource.BOP.id.U)
-  XSPerfAccumulate("hyper_filter_sms_req",io.resp.valid && io.resp.bits.pfId === PfSource.SMS.id.U)
-  XSPerfAccumulate("hyper_filter_spp_req",io.resp.valid && io.resp.bits.pfId === PfSource.SPP.id.U)
+  XSPerfAccumulate("hyper_filter_bop_req",io.resp.valid && io.resp.bits.pfVec === PfSource.BOP)
+  XSPerfAccumulate("hyper_filter_sms_req",io.resp.valid && io.resp.bits.pfVec === PfSource.SMS)
+  XSPerfAccumulate("hyper_filter_spp_req",io.resp.valid && io.resp.bits.pfVec === PfSource.SPP)
 }
 
 //Only used for hybrid spp and bop
@@ -193,10 +193,9 @@ class MCLPPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) exte
     fTable.io.req.valid := q_spp.io.deq.valid
     fTable.io.req.bits.tag := q_spp.io.deq.bits.tag
     fTable.io.req.bits.set := q_spp.io.deq.bits.set
-    fTable.io.req.bits.isBOP := q_spp.io.deq.bits.isBOP
     fTable.io.req.bits.source := q_spp.io.deq.bits.source
     fTable.io.req.bits.needT := q_spp.io.deq.bits.needT
-    fTable.io.req.bits.pfId := PfSource.SPP.id.U
+    fTable.io.req.bits.pfVec := PfSource.SPP
     fTable.io.isForce := false.B
     // fTable.io.spp2llc := q_spp.io.deq.bits.hint2llc
   }

@@ -42,7 +42,7 @@ class SinkA(implicit p: Parameters) extends L2Module with HasPerfLogging{
   io.a.ready := commonReq.ready
 
   def fromTLAtoTaskBundle(a: TLBundleA): TaskBundle = {
-    val task = Wire(new TaskBundle)
+    val task = WireInit(0.U.asTypeOf(new TaskBundle));dontTouch(task)
     task.channel := "b001".U
     task.tag := parseAddress(a.address)._1
     task.set := parseAddress(a.address)._2
@@ -58,8 +58,7 @@ class SinkA(implicit p: Parameters) extends L2Module with HasPerfLogging{
     task.mshrId := 0.U(mshrBits.W)
     task.aliasTask.foreach(_ := false.B)
     task.useProbeData := false.B
-    task.fromL2pft.foreach(_ := false.B)
-    task.pfId.foreach(_ := PfSource.NONE.id.U)
+    task.pfVec.foreach(_ := PfSource.NONE)
     task.needHint.foreach(_ := a.data(0))
     task.dirty := false.B
     task.way := 0.U(wayBits.W)
@@ -76,7 +75,7 @@ class SinkA(implicit p: Parameters) extends L2Module with HasPerfLogging{
     task
   }
   def fromPrefetchReqtoTaskBundle(req: PrefetchReq): TaskBundle = {
-    val task = Wire(new TaskBundle)
+    val task = WireInit(0.U.asTypeOf(new TaskBundle));dontTouch(task)
     val fullAddr = Cat(req.tag, req.set, 0.U(offsetBits.W))
     task.channel := "b001".U
     task.tag := parseAddress(fullAddr)._1
@@ -93,8 +92,7 @@ class SinkA(implicit p: Parameters) extends L2Module with HasPerfLogging{
     task.mshrId := 0.U(mshrBits.W)
     task.aliasTask.foreach(_ := false.B)
     task.useProbeData := false.B
-    task.fromL2pft.foreach(_ := req.is_l2pf)
-    task.pfId.foreach(_ := req.pfId)
+    task.pfVec.foreach(_ := req.pfVec)
     task.needHint.foreach(_ := false.B)
     task.dirty := false.B
     task.way := 0.U(wayBits.W)
@@ -113,18 +111,20 @@ class SinkA(implicit p: Parameters) extends L2Module with HasPerfLogging{
   commonReq.valid := io.a.valid
   commonReq.bits := fromTLAtoTaskBundle(io.a.bits)
   if (prefetchOpt.nonEmpty) {
-    val pipe = Module(new Pipeline(io.prefetchReq.get.bits.cloneType, 1))
-    pipe.io.in <> io.prefetchReq.get
-    prefetchReq.get.valid := pipe.io.out.valid
-    prefetchReq.get.bits := fromPrefetchReqtoTaskBundle(pipe.io.out.bits)
-    pipe.io.out.ready := prefetchReq.get.ready
+    // val pipe = Module(new Pipeline(io.prefetchReq.get.bits.cloneType, 1))
+    // pipe.io.in <> io.prefetchReq.get
+    prefetchReq.get.valid := io.prefetchReq.get.valid
+    prefetchReq.get.bits := fromPrefetchReqtoTaskBundle(io.prefetchReq.get.bits)
+    io.prefetchReq.get.ready := prefetchReq.get.ready
     fastArb(Seq(commonReq, prefetchReq.get), io.task)
-    io.task.bits := ParallelPriorityMux(
-      Seq(commonReq.valid, prefetchReq.get.valid),
-      Seq(commonReq.bits, prefetchReq.get.bits)
-    )
-    commonReq.ready := io.task.ready
-    prefetchReq.get.ready := !commonReq.valid && io.task.ready
+    // io.task.valid := commonReq.valid || prefetchReq.get.valid
+    // io.task.bits := ParallelPriorityMux(
+    //   Seq(commonReq.valid, prefetchReq.get.valid),
+    //   Seq(commonReq.bits, prefetchReq.get.bits)
+    // )
+    // commonReq.ready := io.task.ready
+    // prefetchReq.get.ready := io.task.ready && !commonReq.valid
+    XSPerfAccumulate("sinkA_pf_blocked", io.prefetchReq.get.valid && !io.prefetchReq.get.ready)
   } else {
     io.task <> commonReq
   }

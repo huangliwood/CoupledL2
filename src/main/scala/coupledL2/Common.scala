@@ -27,20 +27,31 @@ import freechips.rocketchip.rocket.PRV
 abstract class L2Module(implicit val p: Parameters) extends Module with HasCoupledL2Parameters
 abstract class L2Bundle(implicit val p: Parameters) extends Bundle with HasCoupledL2Parameters
 
+
+object PfSource extends Enumeration {
+  val bits = 3
+  val NONE    = "b000".U(bits.W)
+  val BOP     = "b001".U(bits.W)
+  val SPP     = "b010".U(bits.W)
+  val SMS     = "b100".U(bits.W)
+  val BOP_SPP = "b011".U(bits.W)
+
+}
+object PfVectorConst extends {
+  val BOP = 0
+  val SPP = 1
+  val SMS = 2
+
+  val bits = 3
+  val DEFAULT = 0.U(bits.W)
+}
+
 class ReplacerInfo(implicit p: Parameters) extends L2Bundle {
   val channel = UInt(3.W)
   val opcode = UInt(3.W)
   val reqSource = UInt(MemReqSource.reqSourceBits.W)
 }
-object PfSource extends Enumeration {
-  val NONE = Value("NONE")
-  val BOP     = Value("BOP")
-  val SMS     = Value("SMS")
-  val SPP      = Value("SPP")
 
-  val PfSourceCount = Value("PfSourceCount")
-  val pfSourceBits = log2Ceil(PfSourceCount.id)
-}
 trait HasChannelBits { this: Bundle =>
   val channel = UInt(3.W)
   def fromA = channel(0).asBool
@@ -70,9 +81,9 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle with HasChannelBits {
   val useProbeData = Bool()               // data source, true for ReleaseBuf and false for RefillBuf
 
   // For Intent
-  val fromL2pft = prefetchOpt.map(_ => Bool()) // Is the prefetch req from L2(BOP) or from L1 prefetch?
-                                          // If true, MSHR should send an ack to L2 prefetcher.
-  val pfId = prefetchOpt.map(_ => UInt(PfSource.pfSourceBits.W))
+  // Is the prefetch req from L2(BOP) or from L1 prefetch?
+  // If true, MSHR should send an ack to L2 prefetcher.
+  val pfVec = prefetchOpt.map(_ => UInt(PfVectorConst.bits.W))
   val needHint = prefetchOpt.map(_ => Bool())
 
   // For DirtyKey in Release
@@ -99,6 +110,10 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle with HasChannelBits {
   val reqSource = UInt(MemReqSource.reqSourceBits.W)
 
   def hasData = opcode(0)
+  def isfromL2pft = if(prefetchOpt.isDefined) {(pfVec.get === PfSource.BOP || pfVec.get === PfSource.SPP || pfVec.get === PfSource.BOP_SPP)
+  }else{
+    false.B
+  }
 }
 
 class PipeStatus(implicit p: Parameters) extends L2Bundle with HasChannelBits

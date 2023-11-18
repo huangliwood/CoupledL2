@@ -85,8 +85,8 @@ class CustomL1Hint(implicit p: Parameters) extends L2Module with HasPerfLogging{
   //  req_grantbuffer_next_cycle_s4: this **hit** req will request grantBuffer in S5
   val req_grantbuffer_next_cycle_s4 = !need_write_releaseBuf_s4 && !need_write_refillBuf_s4
 
-  val s3_l2_hit_grant_data = task_s3.valid && !mshr_req_s3 && !need_mshr_s3 && task_s3.bits.fromA && task_s3.bits.opcode === AcquireBlock && !task_s3.bits.fromL2pft.getOrElse(false.B)
-  val s4_l2_hit_grant_data = task_s4.valid && req_grantbuffer_next_cycle_s4 && task_s4.bits.opcode === GrantData && task_s4.bits.fromA && !task_s4.bits.mshrTask && !task_s4.bits.fromL2pft.getOrElse(false.B)
+  val s3_l2_hit_grant_data = task_s3.valid && !mshr_req_s3 && !need_mshr_s3 && task_s3.bits.fromA && task_s3.bits.opcode === AcquireBlock && !task_s3.bits.isfromL2pft
+  val s4_l2_hit_grant_data = task_s4.valid && req_grantbuffer_next_cycle_s4 && task_s4.bits.opcode === GrantData && task_s4.bits.fromA && !task_s4.bits.mshrTask && !task_s4.bits.isfromL2pft
 
   val hint_s1, hint_s2, hint_s3, hint_s4, hint_s5 = Wire(io.l1Hint.cloneType)
   
@@ -158,7 +158,7 @@ class CustomL1Hint(implicit p: Parameters) extends L2Module with HasPerfLogging{
 
   // S3 hint
   //    * l1 acquire and l2 miss situation
-  val s3_l2_miss_refill_grant_data    = d_s3 && mshr_req_s3 && task_s3.bits.fromA && task_s3.bits.opcode === GrantData && !task_s3.bits.fromL2pft.getOrElse(false.B)
+  val s3_l2_miss_refill_grant_data    = d_s3 && mshr_req_s3 && task_s3.bits.fromA && task_s3.bits.opcode === GrantData && !task_s3.bits.isfromL2pft
   val s3_l2_miss_refill_counter_match = Wire(Bool())
   when(d_s5 && d_s4) {
     s3_l2_miss_refill_counter_match := (globalCounter + 3.U + task_s5.bits.opcode(0) + task_s4.bits.opcode(0)) === hintCycleAhead.U
@@ -185,7 +185,7 @@ class CustomL1Hint(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val validHint_s4            = s4_l2_hit_grant_data && s4_l2_hit_counter_match
   // S4 hint
   //    * l1 acquire and l2 miss situation
-  val s4_l2_miss_refill_grant_data    = d_s4 && task_s4.bits.opcode === GrantData && task_s4.bits.fromA && task_s4.bits.mshrTask && !task_s4.bits.fromL2pft.getOrElse(false.B)
+  val s4_l2_miss_refill_grant_data    = d_s4 && task_s4.bits.opcode === GrantData && task_s4.bits.fromA && task_s4.bits.mshrTask && !task_s4.bits.isfromL2pft
   val s4_l2_miss_refill_counter_match = Mux(d_s5 && task_s5.bits.opcode(0), (globalCounter + 3.U) === hintCycleAhead.U, 
                                             Mux(d_s5 && !task_s5.bits.opcode(0), (globalCounter + 2.U) === hintCycleAhead.U, 
                                                 (globalCounter + 1.U) === hintCycleAhead.U ))
@@ -196,10 +196,10 @@ class CustomL1Hint(implicit p: Parameters) extends L2Module with HasPerfLogging{
 
   // S5 hint
   //    * l1 acquire and l2 hit situation
-  val validHint_s5 = d_s5 && task_s5.bits.opcode === GrantData && task_s5.bits.fromA && !task_s5.bits.mshrTask && ((globalCounter + 1.U) === hintCycleAhead.U) && !task_s5.bits.fromL2pft.getOrElse(false.B)
+  val validHint_s5 = d_s5 && task_s5.bits.opcode === GrantData && task_s5.bits.fromA && !task_s5.bits.mshrTask && ((globalCounter + 1.U) === hintCycleAhead.U) && !task_s5.bits.isfromL2pft
   // S5 hint
   //    * l1 acquire and l2 miss situation
-  val validHintMiss_s5 = d_s5 && task_s5.bits.opcode === GrantData && task_s5.bits.fromA && task_s5.bits.mshrTask && ((globalCounter + 1.U) === hintCycleAhead.U) && !task_s5.bits.fromL2pft.getOrElse(false.B)
+  val validHintMiss_s5 = d_s5 && task_s5.bits.opcode === GrantData && task_s5.bits.fromA && task_s5.bits.mshrTask && ((globalCounter + 1.U) === hintCycleAhead.U) && !task_s5.bits.isfromL2pft
 
   hint_s5.valid         := (validHint_s5 || validHintMiss_s5) && !impossible_pipe_hint
   hint_s5.bits.sourceId := task_s5.bits.sourceId

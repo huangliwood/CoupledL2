@@ -24,7 +24,7 @@ import chisel3.util._
 import coupledL2.HasCoupledL2Parameters
 import xs.utils.perf.HasPerfLogging
 import coupledL3.MemReqSource
-import coupledL2.{PfSource}
+import coupledL2.PfSource
 case class BOPParameters(
   rrTableEntries: Int = 256,
   rrTagBits:      Int = 12,
@@ -33,7 +33,7 @@ case class BOPParameters(
   badScore:       Int = 1,
   offsetList: Seq[Int] = Seq(
     -32, -30, -27, -25, -24, -20, -18, -16, -15,
-    -12, -10,  -9,  -8,  -6,  -5,  -4,  -3,  -2,  -1,
+    -12, -10,  -9,  -8,  -6,  -5,  -4,  -3,  -2,  -1, 0, 
       1,   2,   3,   4,   5,   6,   8,   9,  10,
      12,  15,  16,  18,  20,  24,  25,  27,  30//,
     /*32,  36,
@@ -309,8 +309,7 @@ class BestOffsetPrefetch(implicit p: Parameters) extends BOPModule with HasPerfL
 
   io.req.valid := req_valid
   io.req.bits := req
-  io.req.bits.isBOP := true.B
-  io.req.bits.pfId := PfSource.BOP.id.U
+  io.req.bits.pfVec := PfSource.BOP
   io.train.ready := scoreTable.io.req.ready && (!req_valid || io.req.ready)
   io.resp.ready := true.B;dontTouch(io.resp.ready)
   respQueue.io.deq.ready := rrTable.io.w.ready

@@ -118,7 +118,7 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
     io.mshrInfo.map(s =>
       s.valid && s.bits.isAcqOrPrefetch && sameAddr(in, s.bits)) ++
     buffer.map(e =>
-      e.valid && sameAddr(in, e.task)
+      e.valid && sameAddr(in, e.task) && in.pfVec.get === e.task.pfVec.get //ignore diff prefetch
     )
   ).asUInt
   val dup        = io.in.valid && isPrefetch && dupMask.orR
@@ -256,6 +256,7 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
     XSPerfAccumulate("recv_prefetch", io.in.fire && isPrefetch)
     XSPerfAccumulate("recv_normal", io.in.fire && !isPrefetch)
     XSPerfAccumulate("chosenQ_cancel", chosenQValid && cancel)
+    XSPerfAccumulate("reqBuffer_latePrefetch", io.hasLatePF)
     // TODO: count conflict
     for(i <- 0 until entries){
       val cntEnable = PopCount(buffer.map(_.valid)) === i.U
