@@ -43,8 +43,10 @@ class PrefetchReq(implicit p: Parameters) extends PrefetchBundle {
   val pfVec = UInt(PfVectorConst.bits.W)
   def addr = Cat(tag, set, 0.U(offsetBits.W))
   def tag_set = Cat(tag,set)
+  def hasBOP = (pfVec & PfSource.BOP) === PfSource.BOP
+  def hasSPP = (pfVec & PfSource.SPP) === PfSource.SPP
   def is_l1pf = pfVec === PfSource.SMS
-  def is_l2pf = pfVec === PfSource.BOP || pfVec === PfVectorConst.DEFAULT
+  def is_l2pf = (pfVec & (PfSource.BOP | PfSource.SPP)).orR
 }
 
 class PrefetchResp(implicit p: Parameters) extends PrefetchBundle {
@@ -56,6 +58,8 @@ class PrefetchResp(implicit p: Parameters) extends PrefetchBundle {
   def hasBOP = (pfVec & PfSource.BOP) === PfSource.BOP
   def hasSPP = (pfVec & PfSource.SPP) === PfSource.SPP
   def hasSPPBOP = pfVec === PfSource.BOP_SPP
+  def is_l1pf = pfVec === PfSource.SMS
+  def is_l2pf = (pfVec & (PfSource.BOP | PfSource.SPP)).orR  
 }
 
 class PrefetchTrain(implicit p: Parameters) extends PrefetchBundle {
@@ -71,9 +75,12 @@ class PrefetchTrain(implicit p: Parameters) extends PrefetchBundle {
   val state = UInt(AccessState.bits.W)
   val pfVec = UInt(PfVectorConst.bits.W)
   def addr = Cat(tag, set, 0.U(offsetBits.W))
+  def hasSMS =  (pfVec & PfSource.SMS) === PfSource.SMS
   def hasBOP = (pfVec & PfSource.BOP) === PfSource.BOP
   def hasSPP = (pfVec & PfSource.SPP) === PfSource.SPP
   def hasSPPBOP = pfVec === PfSource.BOP_SPP
+  def is_l1pf = pfVec === PfSource.SMS
+  def is_l2pf = (pfVec & (PfSource.BOP | PfSource.SPP)).orR
 }
 
 class PrefetchEvict(implicit p: Parameters) extends PrefetchBundle {
@@ -151,7 +158,10 @@ class PrefetchQueue(implicit p: Parameters) extends PrefetchModule with HasPerfL
 class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends PrefetchModule with HasPerfLogging{
   val io = IO(new PrefetchIO)
   val io_l2_pf_en = IO(Input(Bool()))
-
+  val io_l2_pf_ctrl = IO(Input(UInt(2.W)))
+  dontTouch(io_l2_pf_en)
+  dontTouch(io_l2_pf_ctrl)
+  dontTouch(io.recv_addr)
   var hasSpp = false
   prefetchOpt.get match {
     // case spp: SPPParameters => // case spp only
@@ -224,15 +234,15 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
     case hyperPf: HyperPrefetchParams => // case spp +  bop + smsReceiver
       hasSpp = true
       val hybrid_pfts = Module(new HyperPrefetcher(parentName + "hpft_"))
-      val pipe = Module(new Pipeline(io.req.bits.cloneType, 1))
       hybrid_pfts.io.train <> io.train
       hybrid_pfts.io.resp <> io.resp
       hybrid_pfts.io.recv_addr := ValidIODelay(io.recv_addr, 2)
+      io.req <> hybrid_pfts.io.req
+  
+      // evict
       io.evict match {
         case Some(evict) =>
         hybrid_pfts.io.evict <> evict
-        pipe.io.in <> hybrid_pfts.io.req
-        io.req <> pipe.io.out
         case None =>
         hybrid_pfts.io.evict := DontCare
       }
@@ -253,7 +263,7 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
   XSPerfAccumulate("prefetch_train_on_miss", io.train.fire && io.train.bits.state === AccessState.MISS)
   XSPerfAccumulate("prefetch_train_on_pf_hit", io.train.fire && io.train.bits.state === AccessState.PREFETCH_HIT)
   XSPerfAccumulate("prefetch_train_on_cache_hit", io.train.fire && io.train.bits.state === AccessState.DEMAND_HIT)
-  XSPerfAccumulate("prefetch_send2_pfq", io.req.fire)
+  XSPerfAccumulate("prefetch_req_fire", io.req.fire)
   // XSPerfHistogram("prefetch_dead_block", deadPfEviction, counterWrap, 0, 200, 5)
   // XSPerfHistogram("prefetch_dead_ratio", pf_state, counterWrap, 0, 4, 1)
 }

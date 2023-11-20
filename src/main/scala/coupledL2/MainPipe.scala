@@ -436,9 +436,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
 
   if(io.prefetchTrain.isDefined){
     val train = io.prefetchTrain.get
-    //only for verification test
-    train.valid := task_s3.valid && (req_acquire_s3 || req_get_s3)
-    // train.valid := task_s3.valid && (req_acquire_s3 || req_get_s3) && req_s3.needHint.getOrElse(false.B)
+    train.valid := task_s3.valid && (req_acquire_s3 || req_get_s3) && req_s3.needHint.getOrElse(false.B)
     train.bits.tag := req_s3.tag
     train.bits.set := req_s3.set
     train.bits.needT := req_needT_s3

@@ -63,10 +63,10 @@ extends Module with HasCircularQueuePtrHelper with HasHyperPrefetcherParams{
     val s_idle :: s_qurryFilter :: Nil = Enum(2)
     val state = RegInit(s_idle)
     val (counterValue, counterWrap) = Counter(!empty, 8)
-
+    val direct_deq = WireInit(entries_data(deqPtr.value).pfVec === PfSource.SMS || entries_data(deqPtr.value).pfVec === PfSource.SPP)
     switch(state){
         is(s_idle){
-            when(counterWrap){
+            when(counterWrap && !direct_deq){
                 state := s_qurryFilter
             }
         }
@@ -84,7 +84,7 @@ extends Module with HasCircularQueuePtrHelper with HasHyperPrefetcherParams{
 
     io.enq.ready := true.B
     skip_deq := io.fromFilter.valid && io.fromFilter.bits.needDrop
-    io.deq.valid := (io.fromFilter.valid && !io.fromFilter.bits.needDrop && io.deq.ready) || can_deq
+    io.deq.valid := (io.fromFilter.valid && !io.fromFilter.bits.needDrop && io.deq.ready) || can_deq || direct_deq
     io.deq.bits := entries_data(deqPtr.value)
     io.used := distanceBetween(enqPtr, deqPtr)
 

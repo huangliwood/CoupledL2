@@ -274,6 +274,7 @@ class PrefetchRecv extends Bundle {
   val addr = UInt(64.W)
   val addr_valid = Bool()
   val l2_pf_en = Bool()
+  val io_l2_pf_ctrl = UInt(2.W)
 }
 
 class LlcPrefetchRecv extends Bundle{
