@@ -506,12 +506,14 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
       }
     }
 
-    XSPerfAccumulate("hint_fire", io.l2_hint.valid)
-    val grant_fire = slices.map{ slice => {
-                        val (_, _, grant_fire_last, _) = node.in.head._2.count(slice.io.in.d)
-                        slice.io.in.d.fire && grant_fire_last && slice.io.in.d.bits.opcode === GrantData
-                      }}
-    XSPerfAccumulate("grant_data_fire", PopCount(VecInit(grant_fire)))
+    if(cacheParams.enablePerf) {
+      XSPerfAccumulate("hint_fire", io.l2_hint.valid)
+      val grant_fire = slices.map{ slice => {
+                          val (_, _, grant_fire_last, _) = node.in.head._2.count(slice.io.in.d)
+                          slice.io.in.d.fire && grant_fire_last && slice.io.in.d.bits.opcode === GrantData
+                        }}
+      XSPerfAccumulate("grant_data_fire", PopCount(VecInit(grant_fire)))
+    }
 
     // TODO: perfEvents
     val allPerfEvents = slices.flatMap(_.getPerfEvents)

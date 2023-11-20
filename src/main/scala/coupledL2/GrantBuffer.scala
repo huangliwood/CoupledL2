@@ -129,7 +129,7 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
 
   val grantQueueCnt = grantQueue.io.count
   val full = !grantQueue.io.enq.ready
-  assert(!(full && io.d_task.valid), "GrantBuf full and RECEIVE new task, back pressure failed")
+  if(cacheParams.enableAssert) assert(!(full && io.d_task.valid), "GrantBuf full and RECEIVE new task, back pressure failed")
 
   // =========== dequeue entry and fire ===========
   require(beatSize == 2)
@@ -184,7 +184,7 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
     // assert(pftRespQueue.io.enq.ready, "pftRespQueue should never be full, no back pressure logic") // TODO: has bug here
   }
   // If no prefetch, there never should be HintAck
-  assert(prefetchOpt.nonEmpty.B || !io.d_task.valid || dtaskOpcode =/= HintAck)
+  if(cacheParams.enableAssert) assert(prefetchOpt.nonEmpty.B || !io.d_task.valid || dtaskOpcode =/= HintAck)
 
   // =========== record unreceived GrantAck ===========
   // Addrs with Grant sent and GrantAck not received
@@ -201,7 +201,7 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
     entry.bits.sink   := io.d_task.bits.task.mshrId
   }
   val inflight_full = Cat(inflight_grant.map(_.valid)).andR
-  assert(!inflight_full, "inflight_grant entries should not be full")
+  if(cacheParams.enableAssert) assert(!inflight_full, "inflight_grant entries should not be full")
 
   // report status to SourceB to block same-addr Probe
   io.grantStatus zip inflight_grant foreach {
@@ -214,7 +214,7 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
   when (io.e.fire) {
     // compare sink to clear buffer
     val sinkMatchVec = inflight_grant.map(g => g.valid && g.bits.sink === io.e.bits.sink)
-    assert(PopCount(sinkMatchVec) === 1.U, "GrantBuf: there must be one and only one match")
+    if(cacheParams.enableAssert) assert(PopCount(sinkMatchVec) === 1.U, "GrantBuf: there must be one and only one match")
     val bufIdx = OHToUInt(sinkMatchVec)
     inflight_grant(bufIdx).valid := false.B
   }
@@ -301,7 +301,7 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
       case (e, t) =>
         when(e.valid) { t := t + 1.U }
         when(RegNext(e.valid) && !e.valid) { t := 0.U }
-        assert(t < 10000.U, "Inflight Grant Leak")
+        if(cacheParams.enableAssert) assert(t < 10000.U, "Inflight Grant Leak")
 
         val enable = RegNext(e.valid) && !e.valid
         XSPerfHistogram("grant_grantack_period", t, enable, 0, 12, 1)

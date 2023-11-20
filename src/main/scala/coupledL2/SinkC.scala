@@ -111,7 +111,7 @@ class SinkC(implicit p: Parameters) extends L2Module with HasPerfLogging{
         dataBuf(nextPtr)(beat) := io.c.bits.data
         beatValids(nextPtr)(beat) := true.B
       }.otherwise {
-        assert(last)
+        if(cacheParams.enableAssert) assert(last)
         dataBuf(nextPtrReg)(beat) := io.c.bits.data
         beatValids(nextPtrReg)(beat) := true.B
       }
@@ -190,9 +190,11 @@ class SinkC(implicit p: Parameters) extends L2Module with HasPerfLogging{
   io.bufResp.data := dataBuf(io.bufRead.bits.bufIdx)
 
   // Performance counters
-  val stall = io.c.valid && isRelease && !io.c.ready
-  XSPerfAccumulate("sinkC_c_stall", stall)
-  XSPerfAccumulate("sinkC_c_stall_for_noSpace", stall && hasData && first && full)
-  XSPerfAccumulate("sinkC_toReqArb_stall", io.task.valid && !io.task.ready)
-  XSPerfAccumulate("sinkC_buf_full", full)
+  if(cacheParams.enablePerf) {
+    val stall = io.c.valid && isRelease && !io.c.ready
+    XSPerfAccumulate("sinkC_c_stall", stall)
+    XSPerfAccumulate("sinkC_c_stall_for_noSpace", stall && hasData && first && full)
+    XSPerfAccumulate("sinkC_toReqArb_stall", io.task.valid && !io.task.ready)
+    XSPerfAccumulate("sinkC_buf_full", full)
+  }
 }

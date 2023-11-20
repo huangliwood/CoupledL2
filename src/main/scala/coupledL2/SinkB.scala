@@ -96,9 +96,8 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
 
   // unable to accept incoming B req because same-addr as mainpipe S3
   val s3AddrConflict = io.s3Info.valid && io.s3Info.bits.set === task.set && io.s3Info.bits.tag === task.tag && io.s3Info.bits.willAllocMshr
-
-  assert(PopCount(replaceConflictMask) <= 1.U)
-  assert(PopCount(mergeBMask) <= 1.U)
+  if(cacheParams.enableAssert) assert(PopCount(replaceConflictMask) <= 1.U)
+  if(cacheParams.enableAssert) assert(PopCount(mergeBMask) <= 1.U)
 
   val mergeB = mergeBMask.orR // TODO: && task.param === toN // only toN can merge with MSHR-Release
   val mergeBId = OHToUInt(mergeBMask)
@@ -142,16 +141,20 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
 
   val io_task_can_valid = !addrConflict_s && !replaceConflict_s && !mergeB_s
   val io_bMergeTask_can_valid = mergeB_s
-  when(io.task.valid){
-    assert(io_task_can_valid, "io_task cant valid")
+
+  if(cacheParams.enableAssert) {
+    when(io.task.valid){
+      assert(io_task_can_valid, "io_task cant valid")
+    }
+    when(io.bMergeTask.valid){
+      assert(io_bMergeTask_can_valid, "io_bMergeTask cant valid")
+    }
   }
-  when(io.bMergeTask.valid){
-    assert(io_bMergeTask_can_valid, "io_bMergeTask cant valid")
+
+
+  if(cacheParams.enablePerf) {
+    XSPerfAccumulate("mergeBTask", io.bMergeTask.valid)
+    XSPerfAccumulate("mp_s3_block_sinkB", io.b.valid && !addrConflict && !replaceConflict && !mergeB && s3AddrConflict)
+    //!!WARNING: TODO: if this is zero, that means fucntion [Probe merge into MSHR-Release] is never tested, and may have flaws
   }
-
-
-
-  XSPerfAccumulate("mergeBTask", io.bMergeTask.valid)
-  XSPerfAccumulate("mp_s3_block_sinkB", io.b.valid && !addrConflict && !replaceConflict && !mergeB && s3AddrConflict)
-  //!!WARNING: TODO: if this is zero, that means fucntion [Probe merge into MSHR-Release] is never tested, and may have flaws
 }

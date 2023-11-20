@@ -550,7 +550,8 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   io.releaseBufWrite.beat_sel   := Fill(beatSize, 1.U(1.W))
   io.releaseBufWrite.data.data  := rdata_s5
   io.releaseBufWrite.id         := task_s5.bits.mshrId
-  assert(!(io.releaseBufWrite.valid_dups.reduce(_||_) && !io.releaseBufWrite.ready), "releaseBuf should be ready when given valid")
+  if(cacheParams.enableAssert)
+    assert(!(io.releaseBufWrite.valid_dups.reduce(_||_) && !io.releaseBufWrite.ready), "releaseBuf should be ready when given valid")
 
   io.refillBufWrite.valid_dups.zipWithIndex.foreach{
     case (valid, i) =>
@@ -559,7 +560,8 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   io.refillBufWrite.beat_sel  := Fill(beatSize, 1.U(1.W))
   io.refillBufWrite.data.data := rdata_s5
   io.refillBufWrite.id        := task_s5.bits.mshrId
-  assert(!(io.refillBufWrite.valid_dups.reduce(_||_) && !io.refillBufWrite.ready), "refillBuf should be ready when given valid")
+  if(cacheParams.enableAssert)
+    assert(!(io.refillBufWrite.valid_dups.reduce(_||_) && !io.refillBufWrite.ready), "refillBuf should be ready when given valid")
 
   val c_d_valid_s5 = task_s5_dups_valid(2) && !RegNext(chnl_fire_s4, false.B) && !RegNextN(chnl_fire_s3, 2, Some(false.B))
   c_s5.valid := c_d_valid_s5 && isC_s5
@@ -673,81 +675,84 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   io.toSourceC <> c_arb.io.out
   io.toSourceD <> d_arb.io.out
 
-  /* ===== Performance counters ===== */
-  // num of mshr req
-  XSPerfAccumulate("mshr_grant_req", task_s3.valid && mshr_grant_s3 && !retry)
-  XSPerfAccumulate("mshr_grantdata_req", task_s3.valid && mshr_grantdata_s3 && !retry)
-  XSPerfAccumulate("mshr_accessackdata_req", task_s3.valid && mshr_accessackdata_s3 && !retry)
-  XSPerfAccumulate("mshr_hintack_req", task_s3.valid && mshr_hintack_s3 && !retry)
-  XSPerfAccumulate("mshr_probeack_req", task_s3.valid && mshr_probeack_s3)
-  XSPerfAccumulate("mshr_probeackdata_req", task_s3.valid && mshr_probeackdata_s3)
-  XSPerfAccumulate("mshr_release_req", task_s3.valid && mshr_release_s3)
-
-  // directory access result
+  // Performance counters
   val hit_s3 = task_s3.valid && !mshr_req_s3 && dirResult_s3.hit
   val miss_s3 = task_s3.valid && !mshr_req_s3 && !dirResult_s3.hit
-  XSPerfAccumulate(cacheParams.name+"_a_req_hit", hit_s3 && req_s3.fromA)
-  XSPerfAccumulate(cacheParams.name+"_acquire_hit", hit_s3 && req_s3.fromA &&
-    (req_s3.opcode === AcquireBlock || req_s3.opcode === AcquirePerm))
-  XSPerfAccumulate(cacheParams.name+"_get_hit", hit_s3 && req_s3.fromA && req_s3.opcode === Get)
-  XSPerfAccumulate(cacheParams.name+"_retry", mshr_refill_s3 && retry)
+  
+  if(cacheParams.enablePerf) {
+    // num of mshr req
+    XSPerfAccumulate("mshr_grant_req", task_s3.valid && mshr_grant_s3 && !retry)
+    XSPerfAccumulate("mshr_grantdata_req", task_s3.valid && mshr_grantdata_s3 && !retry)
+    XSPerfAccumulate("mshr_accessackdata_req", task_s3.valid && mshr_accessackdata_s3 && !retry)
+    XSPerfAccumulate("mshr_hintack_req", task_s3.valid && mshr_hintack_s3 && !retry)
+    XSPerfAccumulate("mshr_probeack_req", task_s3.valid && mshr_probeack_s3)
+    XSPerfAccumulate("mshr_probeackdata_req", task_s3.valid && mshr_probeackdata_s3)
+    XSPerfAccumulate("mshr_release_req", task_s3.valid && mshr_release_s3)
 
-  XSPerfAccumulate(cacheParams.name+"_a_req_miss", miss_s3 && req_s3.fromA)
-  XSPerfAccumulate(cacheParams.name+"_acquire_miss", miss_s3 && req_s3.fromA &&
-    (req_s3.opcode === AcquireBlock || req_s3.opcode === AcquirePerm))
-  XSPerfAccumulate(cacheParams.name+"_get_miss", miss_s3 && req_s3.fromA && req_s3.opcode === Get)
+    // directory access result
+    XSPerfAccumulate(cacheParams.name+"_a_req_hit", hit_s3 && req_s3.fromA)
+    XSPerfAccumulate(cacheParams.name+"_acquire_hit", hit_s3 && req_s3.fromA &&
+      (req_s3.opcode === AcquireBlock || req_s3.opcode === AcquirePerm))
+    XSPerfAccumulate(cacheParams.name+"_get_hit", hit_s3 && req_s3.fromA && req_s3.opcode === Get)
+    XSPerfAccumulate(cacheParams.name+"_retry", mshr_refill_s3 && retry)
 
-  XSPerfAccumulate(cacheParams.name + "_c_req_miss", miss_s3 && req_s3.fromC)
-  XSPerfAccumulate(cacheParams.name + "_c_req_hit", hit_s3 && req_s3.fromC)
+    XSPerfAccumulate(cacheParams.name+"_a_req_miss", miss_s3 && req_s3.fromA)
+    XSPerfAccumulate(cacheParams.name+"_acquire_miss", miss_s3 && req_s3.fromA &&
+      (req_s3.opcode === AcquireBlock || req_s3.opcode === AcquirePerm))
+    XSPerfAccumulate(cacheParams.name+"_get_miss", miss_s3 && req_s3.fromA && req_s3.opcode === Get)
 
-  XSPerfAccumulate(cacheParams.name + "_a_req_need_replacement",
-    task_s3.valid && req_s3.mshrTask && a_need_replacement)
-  XSPerfAccumulate(cacheParams.name + "_c_req_need_replacement",
-    false.B)
+    XSPerfAccumulate(cacheParams.name + "_c_req_miss", miss_s3 && req_s3.fromC)
+    XSPerfAccumulate(cacheParams.name + "_c_req_hit", hit_s3 && req_s3.fromC)
 
-  XSPerfAccumulate(cacheParams.name+"_b_req_hit", hit_s3 && req_s3.fromB)
-  XSPerfAccumulate(cacheParams.name+"_b_req_miss", miss_s3 && req_s3.fromB)
+    XSPerfAccumulate(cacheParams.name + "_a_req_need_replacement",
+      task_s3.valid && req_s3.mshrTask && a_need_replacement)
+    XSPerfAccumulate(cacheParams.name + "_c_req_need_replacement",
+      false.B)
 
-  XSPerfHistogram(cacheParams.name+"_a_req_access_way", perfCnt = dirResult_s3.way,
-    enable = task_s3.valid && !mshr_req_s3 && req_s3.fromA, start = 0, stop = cacheParams.ways, step = 1)
-  XSPerfHistogram(cacheParams.name+"_a_req_hit_way", perfCnt = dirResult_s3.way,
-    enable = hit_s3 && req_s3.fromA, start = 0, stop = cacheParams.ways, step = 1)
-  XSPerfHistogram(cacheParams.name+"_a_req_miss_way_choice", perfCnt = dirResult_s3.way,
-    enable = miss_s3 && req_s3.fromA, start = 0, stop = cacheParams.ways, step = 1)
+    XSPerfAccumulate(cacheParams.name+"_b_req_hit", hit_s3 && req_s3.fromB)
+    XSPerfAccumulate(cacheParams.name+"_b_req_miss", miss_s3 && req_s3.fromB)
 
-  // pipeline stages for sourceC and sourceD reqs
-  val sourceC_pipe_len = ParallelMux(Seq(
-    c_s5.fire -> 5.U,
-    c_s4.fire -> 4.U,
-    c_s3.fire -> 3.U
-  ))
-  val sourceD_pipe_len = ParallelMux(Seq(
-    d_s5.fire -> 5.U,
-    d_s4.fire -> 4.U,
-    d_s3.fire -> 3.U
-  ))
-  XSPerfHistogram("sourceC_pipeline_stages", sourceC_pipe_len,
-    enable = io.toSourceC.fire, start = 3, stop = 5+1, step = 1)
-  XSPerfHistogram("sourceD_pipeline_stages", sourceD_pipe_len,
-    enable = io.toSourceD.fire, start = 3, stop = 5+1, step = 1)
+    XSPerfHistogram(cacheParams.name+"_a_req_access_way", perfCnt = dirResult_s3.way,
+      enable = task_s3.valid && !mshr_req_s3 && req_s3.fromA, start = 0, stop = cacheParams.ways, step = 1)
+    XSPerfHistogram(cacheParams.name+"_a_req_hit_way", perfCnt = dirResult_s3.way,
+      enable = hit_s3 && req_s3.fromA, start = 0, stop = cacheParams.ways, step = 1)
+    XSPerfHistogram(cacheParams.name+"_a_req_miss_way_choice", perfCnt = dirResult_s3.way,
+      enable = miss_s3 && req_s3.fromA, start = 0, stop = cacheParams.ways, step = 1)
 
-  // XSPerfAccumulate("a_req_tigger_prefetch", io.prefetchTrain.)
-  prefetchOpt.foreach {
-    _ =>
-      XSPerfAccumulate("a_req_trigger_prefetch", io.prefetchTrain.get.fire)
-      XSPerfAccumulate("a_req_trigger_prefetch_not_ready", io.prefetchTrain.get.valid && !io.prefetchTrain.get.ready)
-      XSPerfAccumulate("acquire_trigger_prefetch_on_miss", io.prefetchTrain.get.fire && req_acquire_s3 && !dirResult_s3.hit)
-      XSPerfAccumulate("acquire_trigger_prefetch_on_hit_pft", io.prefetchTrain.get.fire && req_acquire_s3 && dirResult_s3.hit && meta_s3.prefetch.get)
-      XSPerfAccumulate("release_all", mshr_release_s3)
-      XSPerfAccumulate("release_prefetch_accessed", mshr_release_s3 && meta_s3.prefetch.get && meta_s3.accessed)
-      XSPerfAccumulate("release_prefetch_not_accessed", mshr_release_s3 && meta_s3.prefetch.get && !meta_s3.accessed)
-      XSPerfAccumulate("get_trigger_prefetch_on_miss", io.prefetchTrain.get.fire && req_get_s3 && !dirResult_s3.hit)
-      XSPerfAccumulate("get_trigger_prefetch_on_hit_pft", io.prefetchTrain.get.fire && req_get_s3 && dirResult_s3.hit && meta_s3.prefetch.get)
+    // pipeline stages for sourceC and sourceD reqs
+    val sourceC_pipe_len = ParallelMux(Seq(
+      c_s5.fire -> 5.U,
+      c_s4.fire -> 4.U,
+      c_s3.fire -> 3.U
+    ))
+    val sourceD_pipe_len = ParallelMux(Seq(
+      d_s5.fire -> 5.U,
+      d_s4.fire -> 4.U,
+      d_s3.fire -> 3.U
+    ))
+    XSPerfHistogram("sourceC_pipeline_stages", sourceC_pipe_len,
+      enable = io.toSourceC.fire, start = 3, stop = 5+1, step = 1)
+    XSPerfHistogram("sourceD_pipeline_stages", sourceD_pipe_len,
+      enable = io.toSourceD.fire, start = 3, stop = 5+1, step = 1)
+
+    // XSPerfAccumulate("a_req_tigger_prefetch", io.prefetchTrain.)
+    prefetchOpt.foreach {
+      _ =>
+        XSPerfAccumulate("a_req_trigger_prefetch", io.prefetchTrain.get.fire)
+        XSPerfAccumulate("a_req_trigger_prefetch_not_ready", io.prefetchTrain.get.valid && !io.prefetchTrain.get.ready)
+        XSPerfAccumulate("acquire_trigger_prefetch_on_miss", io.prefetchTrain.get.fire && req_acquire_s3 && !dirResult_s3.hit)
+        XSPerfAccumulate("acquire_trigger_prefetch_on_hit_pft", io.prefetchTrain.get.fire && req_acquire_s3 && dirResult_s3.hit && meta_s3.prefetch.get)
+        XSPerfAccumulate("release_all", mshr_release_s3)
+        XSPerfAccumulate("release_prefetch_accessed", mshr_release_s3 && meta_s3.prefetch.get && meta_s3.accessed)
+        XSPerfAccumulate("release_prefetch_not_accessed", mshr_release_s3 && meta_s3.prefetch.get && !meta_s3.accessed)
+        XSPerfAccumulate("get_trigger_prefetch_on_miss", io.prefetchTrain.get.fire && req_get_s3 && !dirResult_s3.hit)
+        XSPerfAccumulate("get_trigger_prefetch_on_hit_pft", io.prefetchTrain.get.fire && req_get_s3 && dirResult_s3.hit && meta_s3.prefetch.get)
+    }
+
+    XSPerfAccumulate("early_prefetch", meta_s3.prefetch.getOrElse(false.B) && !meta_s3.accessed && !dirResult_s3.hit && task_s3.valid)
   }
-
-  XSPerfAccumulate("early_prefetch", meta_s3.prefetch.getOrElse(false.B) && !meta_s3.accessed && !dirResult_s3.hit && task_s3.valid)
-
-  /* ===== Monitor ===== */
+  
+  // Monitor
   io.toMonitor.task_s2 := task_s2
   io.toMonitor.task_s3 := task_s3
   io.toMonitor.task_s4 := task_s4

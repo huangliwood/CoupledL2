@@ -584,9 +584,11 @@ class MSHR(implicit p: Parameters) extends L2Module {
   io.msInfo.bits.isAcqOrPrefetch := req_acquire || req_prefetch
   io.msInfo.bits.isPrefetch := req_prefetch
 
-  assert(!(c_resp.valid && !io.status.bits.w_c_resp))
-  assert(!(d_resp.valid && !io.status.bits.w_d_resp))
-  assert(!(e_resp.valid && !io.status.bits.w_e_resp))
+  if(cacheParams.enableAssert) {
+    assert(!(c_resp.valid && !io.status.bits.w_c_resp))
+    assert(!(d_resp.valid && !io.status.bits.w_d_resp))
+    assert(!(e_resp.valid && !io.status.bits.w_e_resp))
+  }
 
   /* ======== Handling Nested B ======== */
   when (io.bMergeTask.valid) {
@@ -607,7 +609,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
     when(io.nestedwb.b_set_meta_N && dirResult.hit && meta.state =/= INVALID){
       dirResult.hit := false.B
       state_dups.foreach(_.w_replResp := false.B)
-      assert(meta.state =/= TIP)
+      if(cacheParams.enableAssert) assert(meta.state =/= TIP)
     }
   }
 
