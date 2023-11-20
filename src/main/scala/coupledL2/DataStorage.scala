@@ -117,7 +117,7 @@ class DataStorage(parentName:String = "Unknown")(implicit p: Parameters) extends
     }
 
     io.error := Cat(Cat(dataEccErrVec) & ~Cat(dataEccCorrVec)).orR
-    io.rdata := RegEnable(toDSBlock(corrDataVec), RegNext(ren))
+    io.rdata := toDSBlock(corrDataVec)
     when(~reset.asBool) {
       assert(RegNext(!io.error), "For now, we won't ECC error happen in DataStorage...")
     }
