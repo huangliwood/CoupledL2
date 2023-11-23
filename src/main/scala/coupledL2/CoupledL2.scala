@@ -72,7 +72,7 @@ trait HasCoupledL2Parameters {
   val hasPrefetchBit = prefetchOpt.nonEmpty && prefetchOpt.get.hasPrefetchBit
   val topDownOpt = if(cacheParams.elaboratedTopDown) Some(true) else None
 
-  val enableHintGuidedGrant = true
+  val enableHintGuidedGrant = false
 
   val hintCycleAhead = 3 // how many cycles the hint will send before grantData
 
