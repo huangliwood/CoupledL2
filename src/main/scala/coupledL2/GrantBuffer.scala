@@ -77,10 +77,6 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
 
     // to block sourceB from sending same-addr probe until GrantAck received
     val grantStatus = Output(Vec(grantBufInflightSize, new GrantStatus))
-
-    // generate hint signal for L1
-    val l1Hint = ValidIO(new L2ToL1Hint())
-    val globalCounter = Output(UInt((log2Ceil(mshrsAll) + 1).W))
   })
 
   // =========== functions ===========
@@ -259,40 +255,6 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
   toReqArb.blockMSHRReqEntrance := noSpaceForMSHRReq || noSpaceForWaitSinkE
 
   io.toReqArb := RegNext(toReqArb)
-
-  // =========== generating Hint to L1 ===========
-  // TODO: the following keeps the exact same logic as before, but it needs serious optimization
-  val hintQueue = Module(new Queue(UInt(sourceIdBits.W), entries = mshrsAll))
-  // Total number of beats left to send in GrantBuf
-  // [This is better]
-  // val globalCounter = (grantQueue.io.count << 1.U).asUInt + grantBufValid.asUInt // entries * 2 + grantBufValid
-  val globalCounter = RegInit(0.U((log2Ceil(grantBufSize) + 1).W))
-  when(io.d_task.fire) {
-    val hasData = io.d_task.bits.task.opcode(0)
-    when(hasData) {
-      globalCounter := globalCounter + 1.U // counter = counter + 2 - 1
-    }.otherwise {
-      globalCounter := globalCounter // counter = counter + 1 - 1
-    }
-  }.otherwise {
-    globalCounter := Mux(globalCounter === 0.U, 0.U, globalCounter - 1.U) // counter = counter - 1
-  }
-
-  // if globalCounter >= 3, it means the hint that should be sent is in GrantBuf
-  when(globalCounter >= 3.U) {
-    hintQueue.io.enq.valid := true.B
-    hintQueue.io.enq.bits := io.d_task.bits.task.sourceId
-  }.otherwise {
-    hintQueue.io.enq.valid := false.B
-    hintQueue.io.enq.bits := 0.U(sourceIdBits.W)
-  }
-  hintQueue.io.deq.ready := true.B
-
-  // tell CustomL1Hint about the delay in GrantBuf
-  io.globalCounter := globalCounter
-
-  io.l1Hint.valid := hintQueue.io.deq.valid
-  io.l1Hint.bits.sourceId := hintQueue.io.deq.bits
 
   // =========== XSPerf ===========
   if (cacheParams.enablePerf) {

@@ -35,7 +35,6 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
     val in = Flipped(TLBundle(edgeIn.bundle))
     val out = TLBundle(edgeOut.bundle)
     val sliceId = Input(UInt(bankBits.W))
-    val l1Hint = Decoupled(new L2ToL1Hint())
     val prefetch = prefetchOpt.map(_ => Flipped(new PrefetchIO))
     val msStatus = topDownOpt.map(_ => Vec(mshrsAll, ValidIO(new MSHRStatus)))
     val dirResult = topDownOpt.map(_ => ValidIO(new DirResult))
@@ -116,8 +115,6 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
   mainPipe.io.releaseBufResp_s3.valid := RegNext(releaseBuf.io.r.valid && releaseBuf.io.r.ready, false.B)
   mainPipe.io.releaseBufResp_s3.bits := releaseBuf.io.r.data
   mainPipe.io.fromReqArb.status_s1 := reqArb.io.status_s1
-  mainPipe.io.grantBufferHint := grantBuf.io.l1Hint
-  mainPipe.io.globalCounter := grantBuf.io.globalCounter
   mainPipe.io.taskInfo_s1 <> reqArb.io.taskInfo_s1
 
   // priority: nested-ReleaseData / probeAckData [NEW] > mainPipe DS rdata [OLD]
@@ -135,9 +132,7 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
   refillBuf.io.w(2) <> mainPipe.io.refillBufWrite
 
   sourceC.io.in <> mainPipe.io.toSourceC
-  
-  io.l1Hint.valid := mainPipe.io.l1Hint.valid
-  io.l1Hint.bits := mainPipe.io.l1Hint.bits
+
   mshrCtl.io.grantStatus := grantBuf.io.grantStatus
 
   grantBuf.io.d_task <> mainPipe.io.toSourceD
