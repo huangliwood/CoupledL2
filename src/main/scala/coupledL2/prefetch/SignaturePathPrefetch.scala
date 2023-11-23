@@ -31,7 +31,7 @@ trait HasSPPParams extends HasPrefetchParameters {
   val sTagBits = sppParams.sTagBits
   val sTableEntries = sppParams.sTableEntries
   val pTableEntries = sppParams.pTableEntries
-  val pTableWays = 1
+  val pTableWays = 1 //TODO: further study maybe 2 is better
   val pTableDeltaEntries = sppParams.pTableDeltaEntries
   val signatureBits = sppParams.signatureBits
   val pTableQueueEntries = sppParams.pTableQueueEntries
@@ -60,17 +60,6 @@ trait HasSPPParams extends HasPrefetchParameters {
     out
   }
 
-  def strideMap4dma(a: SInt): UInt = {
-    val out = WireInit(0.U(5.W))
-    when(a < -16.S) {
-      out := (0.U)(5, 0)
-    }.elsewhen(-16.S <= a && a < 16.S) {
-      out := (a + 16.S)(5, 0)
-    }.otherwise {
-      out := 31.U
-    }
-    out
-  }
 }
 
 
@@ -116,10 +105,6 @@ class DeltaEntry(implicit p: Parameters) extends SPPBundle {
     entry.cDelta := cDelta
     entry
   }
-}
-
-class sppPrefetchReq(implicit p:Parameters) extends PrefetchReq{
-  val hint2llc = Bool()
 }
 
 class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) extends SPPModule {
@@ -209,14 +194,14 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
   val stableWriteValid_s2 = newDelta_s2 =/= 0.S && rValid_s2
 
   // bp read
-  val s2_bp_access_index = idx(accessedPage_s2)(4, 0)
+  val s2_bp_access_index = idx(accessedPage_s2)
   val rotate_sig = VecInit(Seq.fill(4)(0.U(signatureBits.W)));
   dontTouch(rotate_sig)
   for (i <- 0 until (4)) {
     rotate_sig(i) := CircularShift(bpTable(s2_bp_access_index).parent_sig.head).left(3 * i)
   }
   val bp_en = WireInit(true.B)
-  bp_hit := bp_en && rValid_s2 && bpTable(s2_bp_access_index).tag === accessedPage_s2 && rotate_sig.map(_ === oldSignature_s2).reduce(_ || _)
+  bp_hit := bp_en && rValid_s2 && bpTable(s2_bp_access_index).tag === tag(accessedPage_s2) && rotate_sig.map(_ === oldSignature_s2).reduce(_ || _)
   bp_prePredicted_blkOff := bpTable(s2_bp_access_index).prePredicted_blkOffset
   val bp_matched_index = WireInit(0.U(2.W))
   bp_matched_sig := rotate_sig(bp_matched_index)
@@ -226,7 +211,7 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
   sTable.io.w.req.bits.setIdx := idx(accessedPage_s2)
   sTable.io.w.req.bits.data(0).valid := true.B
   sTable.io.w.req.bits.data(0).tag := tag(accessedPage_s2)
-  sTable.io.w.req.bits.data(0).signature := (oldSignature_s2 << 3) ^ newDelta_s2.asUInt
+  sTable.io.w.req.bits.data(0).signature := (oldSignature_s2 << 3) ^ strideMap(newDelta_s2)
   sTable.io.w.req.bits.data(0).lastBlock := accessedBlock_s2
 
   io.resp.valid := stableWriteValid_s2
@@ -321,7 +306,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
 
   //bp update operation
   val enbp = WireInit(true.B)
-  val bp_update = WireInit(false.B)
+  val bp_update = WireInit(false.B);dontTouch(io.pt2st_bp)
   io.pt2st_bp.valid := enbp && bp_update
   io.pt2st_bp.bits.pageAddr := current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits)
   io.pt2st_bp.bits.parent_sig(0) := lastSignature
@@ -390,7 +375,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
       when(RegNext(RegNext(pTable.io.r.req.fire))) {
         when(hit_reg) {
           val issued = delta_list_checked.map(a => Mux(a =/= 0.S, 1.U, 0.U)).reduce(_ +& _)
-          val testOffset = (current.block.asSInt + maxEntry.delta.asSInt).asUInt
+          val testOffset = (current.block.asSInt + maxEntry.delta).asUInt
           when(issued =/= 0.U) {
             enprefetch := true.B
             //same page?
@@ -468,7 +453,7 @@ class PatternTableTiming(parentName:String="Unkown")(implicit p: Parameters) ext
       parentName = parentName
     ))
 
-  val q = Module(new Queue(chiselTypeOf(io.req.bits), pTableQueueEntries, flow = true, pipe = false))
+  val q = Module(new ReplaceableQueueV2(chiselTypeOf(io.req.bits), pTableQueueEntries))
   q.io.enq <> io.req
   val issueReq = RegInit(0.U.asTypeOf(new SignatureTableResp))//Mux(q.io.deq.valid,q.io.deq.bits,0.U.asTypeOf(new SignatureTableResp))
   when(q.io.deq.valid){
@@ -480,7 +465,15 @@ class PatternTableTiming(parentName:String="Unkown")(implicit p: Parameters) ext
   val enprefetch = WireInit(false.B)
   val enprefetchnl = WireInit(false.B)
   val lookCount = RegInit(0.U(lookCountBits.W))
-  val miniCount = lookCount >> 2.U
+  def slowLookTable(lc: UInt): UInt = {
+    Mux(lc >= 1.U && lc <= 4.U, (lc >> 1.U) + 1.U, lc)
+  }
+  //TODO: need to be optimized !!! some error here
+  // bp Table
+
+  // val miniCount = slowLookTable(lookCount) // test1
+  val miniCount = lookCount // test2
+  // val miniCount = Mux(q.io.empty, slowLookTable(lookCount), lookCount)
   //read pTable
   // --------------------------------------------------------------------------------
   // stage 0
@@ -545,7 +538,8 @@ class PatternTableTiming(parentName:String="Unkown")(implicit p: Parameters) ext
   // val testOffset = (current.block.asSInt + maxEntry.delta).asUInt
   //same page?
   val samePage = (testOffset(pageAddrBits + blkOffsetBits - 1, blkOffsetBits) === s1_current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits))
-  enprefetch := s1_valid && s1_hit && issued =/= 0.U
+  //
+  enprefetch := s1_valid && s1_hit && issued =/= 0.U && state === s_lookahead
   //forward hold dequeue data
   when(state === s_idle){
     s0_current.signature := q.io.deq.bits.signature
@@ -642,7 +636,7 @@ class PatternTableTiming(parentName:String="Unkown")(implicit p: Parameters) ext
           when(lookCount <= 1.U) {
             val testOffset = s1_current.block + 1.U
             when(testOffset(pageAddrBits + blkOffsetBits - 1, blkOffsetBits) === s1_current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits)) {
-              enprefetchnl := false.B
+              enprefetchnl := true.B 
             }
           }
           lookCount := 0.U
@@ -683,7 +677,7 @@ class Unpack(implicit p: Parameters) extends SPPModule {
   val inProcess = RegInit(false.B)
   val endeq = WireInit(false.B)
 
-  val q = Module(new Queue(chiselTypeOf(io.req.bits), unpackQueueEntries,flow = true, pipe = false))
+  val q = Module(new ReplaceableQueueV2(chiselTypeOf(io.req.bits), unpackQueueEntries))
   q.io.enq <> io.req //change logic to replace the tail entry
   val req= RegInit(0.U.asTypeOf(new PatternTableResp))
   when(q.io.deq.fire){
@@ -751,7 +745,9 @@ class Unpack(implicit p: Parameters) extends SPPModule {
 //    }
 //  }
 }
-
+class sppPrefetchReq(implicit p:Parameters) extends PrefetchReq{
+  val hint2llc = Bool()
+}
 class SignaturePathPrefetch(parentName:String="Unkown")(implicit p: Parameters) extends SPPModule {
   val io = IO(new Bundle() {
     val train = Flipped(DecoupledIO(new PrefetchTrain)) //train from mshr ,now recommand using MISS

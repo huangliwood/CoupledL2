@@ -48,7 +48,6 @@ class FilterV2(parentName:String = "Unknown")(implicit p: Parameters) extends Pr
     val req = Flipped(DecoupledIO(new PrefetchReq))
     val resp = DecoupledIO(new PrefetchReq)
     val evict = Flipped(DecoupledIO(new PrefetchEvict))
-    val isForce = Input(Bool())
     val pf_Id = Input(UInt(2.W))
   })
 
@@ -76,7 +75,8 @@ class FilterV2(parentName:String = "Unknown")(implicit p: Parameters) extends Pr
   hit := readResult.valid && tag(pageAddr) === readResult.tag
   val hitForMap = hit && readResult.bitMap(blkOffset)
 
-  io.resp.valid := io.req.fire && (io.pf_Id =/= PrefetcherId.SPP || !hitForMap)
+  // filter sms and spp, only skip bop
+  io.resp.valid := io.req.fire && (io.pf_Id === PrefetcherId.BOP || !hitForMap)
   io.resp.bits := io.req.bits
 
   val wData = Wire(fTableEntry())
@@ -159,15 +159,17 @@ class HyperPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) ext
         case L2ParamKey => p(L2ParamKey).copy(prefetch = Some(PrefetchReceiverParams()))
   })))
 
-  val q_sms = Module(new Queue(chiselTypeOf(sms.io.req.bits), pTableQueueEntries, flow = true, pipe = false))
-  val q_spp = Module(new Queue(chiselTypeOf(spp.io.req.bits), pTableQueueEntries, flow = false, pipe = false))
+  val q_sms = Module(new ReplaceableQueueV2(chiselTypeOf(sms.io.req.bits), pTableQueueEntries))
+  val q_spp = Module(new ReplaceableQueueV2(chiselTypeOf(spp.io.req.bits), pTableQueueEntries))
   q_sms.io.enq <> sms.io.req
   q_sms.io.deq.ready := !bop.io.req.valid
 
   q_spp.io.enq <> spp.io.req
   q_spp.io.deq.ready := !q_sms.io.deq.fire && !bop.io.req.valid
 
-  spp.io.train.valid := io.train.valid && io.train.bits.state === AccessState.MISS
+  //TODO: SPP need to be trained on any AceessState including MISS,PF_HIT,CACHE_HIT,LATE_HIT
+  // spp.io.train.valid := io.train.valid && io.train.bits.state === AccessState.MISS
+  spp.io.train.valid := io.train.valid
   spp.io.train.bits := io.train.bits
 
   val train_for_bop = RegInit(0.U.asTypeOf(new PrefetchTrain))
@@ -195,15 +197,23 @@ class HyperPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) ext
   sms.io.recv_addr.bits := io.recv_addr.bits
   sms.io.req.ready := true.B
 
+  // fTable.io.req.valid := q_spp.io.deq.fire || q_sms.io.deq.fire || bop.io.req.valid
+  // fTable.io.req.bits := Mux(bop.io.req.valid, bop.io.req.bits, 
+  //                         Mux(q_sms.io.deq.fire, q_sms.io.deq.bits, q_spp.io.deq.bits))
+  // fTable.io.pf_Id := Mux(bop.io.req.valid,PrefetcherId.BOP,
+  //                         Mux(q_sms.io.deq.fire, PrefetcherId.SMS, PrefetcherId.SPP))           
+  // fTable.io.spp2llc := Mux(bop.io.req.valid, false.B,
+  //                         Mux(q_sms.io.deq.fire, false.B, spp_hint2llc))
+
   when(bop.io.req.valid) {
-    fTable.io.req <> bop.io.req
+    fTable.io.req.valid := bop.io.req.valid
+    fTable.io.req.bits := bop.io.req.bits
     fTable.io.pf_Id := PrefetcherId.BOP
-    fTable.io.isForce := true.B
     // fTable.io.spp2llc := false.B
-  }.elsewhen(q_sms.io.deq.valid) {
-    fTable.io.req <> q_sms.io.deq
+  }.elsewhen(q_sms.io.deq.fire) {
+    fTable.io.req.valid := q_sms.io.deq.valid
+    fTable.io.req.bits := q_sms.io.deq.bits
     fTable.io.pf_Id := PrefetcherId.SMS
-    fTable.io.isForce := true.B
     // fTable.io.spp2llc := false.B
   }.otherwise {
     fTable.io.req.valid := q_spp.io.deq.valid
@@ -213,7 +223,6 @@ class HyperPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) ext
     fTable.io.req.bits.source := q_spp.io.deq.bits.source
     fTable.io.req.bits.needT := q_spp.io.deq.bits.needT
     fTable.io.pf_Id := PrefetcherId.SPP
-    fTable.io.isForce := false.B
     // fTable.io.spp2llc := q_spp.io.deq.bits.hint2llc
   }
 
