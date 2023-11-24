@@ -617,7 +617,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       maxFlight = Some(16)
     ))
   )))
- l2xbar := TLBuffer() := AXI2TL(16, 16) := AXI4Fragmenter() := l3FrontendAXI4Node
+ l2xbar := TLBuffer() := AXI2TL(16, 16) := AXI2TLFragmenter() := l3FrontendAXI4Node
   // l2xbar :=
   // TLFIFOFixer() :=
   // TLWidthWidget(32) :=
