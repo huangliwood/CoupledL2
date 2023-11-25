@@ -135,6 +135,8 @@ class SinkA(implicit p: Parameters) extends L2Module with HasPerfLogging{
       XSPerfAccumulate("sinkA_prefetch_req", io.prefetchReq.get.fire)
       XSPerfAccumulate("sinkA_prefetch_from_l2", io.prefetchReq.get.bits.isBOP && io.prefetchReq.get.fire)
       XSPerfAccumulate("sinkA_prefetch_from_l1", !io.prefetchReq.get.bits.isBOP && io.prefetchReq.get.fire)
+      XSPerfAccumulate("sinkA_prefetch_from_bop", io.prefetchReq.get.bits.isBOP && io.prefetchReq.get.fire)
+      XSPerfAccumulate("sinkA_prefetch_from_sms", !io.prefetchReq.get.bits.isBOP && io.prefetchReq.get.fire)
   }
 
   // cycels stalled by mainpipe

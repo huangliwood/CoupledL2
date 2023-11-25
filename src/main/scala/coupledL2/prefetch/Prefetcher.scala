@@ -240,6 +240,8 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
       XSPerfAccumulate("prefetch_req_fromL1", l1_pf.io.req.valid)
       XSPerfAccumulate("prefetch_req_fromL2", bop_en && bop.io.req.valid)
       XSPerfAccumulate("prefetch_req_L1L2_overlapped", l1_pf.io.req.valid && bop_en && bop.io.req.valid)
+      XSPerfAccumulate("bop_send2_queue", bop_en && bop.io.req.valid)
+      XSPerfAccumulate("sms_send2_queue", l1_pf.io.req.valid)
     
     case hyperPf: HyperPrefetchParams => // case spp +  bop + smsReceiver
       hasSpp = true

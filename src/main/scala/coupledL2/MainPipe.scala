@@ -394,6 +394,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     ),
     MetaEntry()
   )
+  io.metaWReq.bits.channel := task_s3.bits.channel
 
   io.tagWReq.valid     := task_s3.valid && req_s3.tagWen && mshr_refill_s3 && !retry
   io.tagWReq.bits.set  := req_s3.set

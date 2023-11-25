@@ -8,6 +8,9 @@ import coupledL2.HasCoupledL2Parameters
 import xs.utils.CircularShift
 import xs.utils.perf.HasPerfLogging
 import xs.utils.sram.SRAMTemplate
+import xs.utils.OneHot
+import xs.utils.HighestBit
+
 case class SPPParameters(
   sTableEntries: Int = 256,
   sTagBits: Int = 12,
@@ -43,6 +46,9 @@ trait HasSPPParams extends HasPrefetchParameters {
   val blkOffsetBits = pageOffsetBits - offsetBits
   val pTagBits = signatureBits - log2Up(pTableEntries)
   val fTagBits = fullAddressBits - offsetBits - log2Up(fTableEntries)
+
+  val ENABLE_BP = true
+  val ENABLE_NL = false
 
   def strideMap(a: SInt) : UInt = {
     val out = WireInit(0.U(3.W))
@@ -111,7 +117,7 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
   val io = IO(new Bundle {
     val req = Flipped(DecoupledIO(new SignatureTableReq))
     val resp = DecoupledIO(new SignatureTableResp) //output old signature and delta to write PT
-    val bp_update = Flipped(ValidIO(new BreakPointReq))
+    val s0_bp_update = Flipped(ValidIO(new BreakPointReq))
   })
   assert(pageAddrBits>=(2 * log2Up(sTableEntries)),s"pageAddrBits as least 20 bits to use hash")
   def hash1(addr:    UInt) = addr(log2Up(sTableEntries) - 1, 0)
@@ -168,6 +174,7 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
   // --------------------------------------------------------------------------------
   // update sTable & req pTable
   val bp_hit = WireInit(false.B)
+  val bp_mask = WireInit(VecInit(Seq.fill(4)(false.B)))
   val bp_prePredicted_blkOff = WireInit(0.U(blkOffsetBits.W))
   val bp_matched_sig = WireInit(0.U(signatureBits.W))
 
@@ -181,11 +188,16 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
 
   // write
   val bpTable = RegInit(VecInit(Seq.fill(256)(0.U.asTypeOf(breakPointEntry()))))
-  val bp_page = io.bp_update.bits.pageAddr
-  bpTable(idx(bp_page)).valid := io.bp_update.valid
-  bpTable(idx(bp_page)).tag := bp_page
-  bpTable(idx(bp_page)).parent_sig.zip(io.bp_update.bits.parent_sig).foreach(x => x._1 := x._2)
-  bpTable(idx(bp_page)).prePredicted_blkOffset := io.bp_update.bits.offset
+  val bp_page = io.s0_bp_update.bits.pageAddr
+  when(io.s0_bp_update.valid){
+    val bp_page = io.s0_bp_update.bits.pageAddr
+    bpTable(idx(bp_page)).valid := true.B
+    bpTable(idx(bp_page)).tag := bp_page
+    for( i <- 0 until(io.s0_bp_update.bits.parent_sig.length)){
+        bpTable(idx(bp_page)).parent_sig(i) := io.s0_bp_update.bits.parent_sig(i)
+    }
+    bpTable(idx(bp_page)).prePredicted_blkOffset := io.s0_bp_update.bits.offset
+  }
 
   val rValid_s2 = RegNext(rValid_s1,false.B)
   val hit_s2 = rData_s2.tag === tag(accessedPage_s2) && rData_s2.valid
@@ -199,12 +211,13 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
   dontTouch(rotate_sig)
   for (i <- 0 until (4)) {
     rotate_sig(i) := CircularShift(bpTable(s2_bp_access_index).parent_sig.head).left(3 * i)
+    bp_mask(i) := rotate_sig(i) === oldSignature_s2
   }
-  val bp_en = WireInit(true.B)
-  bp_hit := bp_en && rValid_s2 && bpTable(s2_bp_access_index).tag === tag(accessedPage_s2) && rotate_sig.map(_ === oldSignature_s2).reduce(_ || _)
+
+  bp_hit := ENABLE_BP.asBool && rValid_s2 && bpTable(s2_bp_access_index).tag === accessedPage_s2 && bp_mask.reduce(_ || _)
   bp_prePredicted_blkOff := bpTable(s2_bp_access_index).prePredicted_blkOffset
-  val bp_matched_index = WireInit(0.U(2.W))
-  bp_matched_sig := rotate_sig(bp_matched_index)
+  val bp_matchedIdx = WireInit(OneHot.OH1ToUInt(HighestBit(bp_mask.asUInt,4)));dontTouch(bp_matchedIdx)
+  bp_matched_sig := rotate_sig(bp_matchedIdx)
 
 
   sTable.io.w.req.valid := stableWriteValid_s2
@@ -219,7 +232,7 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
 
   when(bp_hit){
     io.resp.bits.signature := bp_matched_sig
-    io.resp.bits.block := (accessedAddr_s2 >> blkOffsetBits << blkOffsetBits) + bp_prePredicted_blkOff
+    io.resp.bits.block := (accessedAddr_s2) + bp_prePredicted_blkOff
   }.otherwise {
     io.resp.bits.signature := oldSignature_s2
     io.resp.bits.block := accessedAddr_s2
@@ -230,7 +243,7 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
   XSPerfAccumulate("spp_st_req_nums",io.resp.valid)
   XSPerfAccumulate("spp_st_reqfire_nums",io.resp.fire)
   XSPerfAccumulate("spp_st_bp_req", bp_hit)
-  XSPerfAccumulate("spp_st_bp_update",io.bp_update.valid)
+  XSPerfAccumulate("spp_st_bp_update",io.s0_bp_update.valid)
 }
 
 class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends SPPModule {
@@ -305,9 +318,8 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   }
 
   //bp update operation
-  val enbp = WireInit(true.B)
-  val bp_update = WireInit(false.B);dontTouch(io.pt2st_bp)
-  io.pt2st_bp.valid := enbp && bp_update
+  val s0_bp_update = WireInit(false.B);dontTouch(io.pt2st_bp)
+  io.pt2st_bp.valid := ENABLE_BP.asBool && s0_bp_update
   io.pt2st_bp.bits.pageAddr := current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits)
   io.pt2st_bp.bits.parent_sig(0) := lastSignature
   io.pt2st_bp.bits.offset := current.block(blkOffsetBits - 1, 0)
@@ -392,7 +404,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
             }
           }.otherwise {
             when(lookCount >= 4.U){
-              bp_update := true.B
+              s0_bp_update := true.B
             }
             lookCount := 0.U
             state := s_idle
@@ -472,8 +484,8 @@ class PatternTableTiming(parentName:String="Unkown")(implicit p: Parameters) ext
   // bp Table
 
   // val miniCount = slowLookTable(lookCount) // test1
-  val miniCount = lookCount // test2
-  // val miniCount = Mux(q.io.empty, slowLookTable(lookCount), lookCount)
+  // val miniCount = lookCount // test2
+  val miniCount = Mux(q.io.empty, slowLookTable(lookCount), lookCount) // test3
   //read pTable
   // --------------------------------------------------------------------------------
   // stage 0
@@ -494,8 +506,8 @@ class PatternTableTiming(parentName:String="Unkown")(implicit p: Parameters) ext
   s0_readResult := pTable.io.r.resp.data(0)
 
   val enbp = WireInit(true.B)
-  val bp_update = WireInit(false.B)
-  io.pt2st_bp.valid := enbp && bp_update
+  val s0_bp_update = WireInit(false.B)
+  io.pt2st_bp.valid := enbp && s0_bp_update
   io.pt2st_bp.bits.pageAddr := s0_current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits)
   io.pt2st_bp.bits.parent_sig(0) := s0_lastSignature
   io.pt2st_bp.bits.offset := s0_current.block(blkOffsetBits - 1, 0)
@@ -627,7 +639,7 @@ class PatternTableTiming(parentName:String="Unkown")(implicit p: Parameters) ext
             }
           }.otherwise {
             when(lookCount>=4.U){
-              bp_update := true.B
+              s0_bp_update := true.B
             }
             lookCount := 0.U
             state := s_idle
@@ -773,7 +785,7 @@ class SignaturePathPrefetch(parentName:String="Unkown")(implicit p: Parameters) 
   sTable.io.req.valid := io.train.fire
 
   pTable.io.req <> sTable.io.resp //to detail
-  pTable.io.pt2st_bp <> sTable.io.bp_update
+  pTable.io.pt2st_bp <> sTable.io.s0_bp_update
   pTable.io.resp <> unpack.io.req
 
   val newAddr = Cat(unpack.io.resp.bits.prefetchBlock, 0.U(offsetBits.W))
