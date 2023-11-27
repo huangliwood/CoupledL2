@@ -112,7 +112,7 @@ case class L2Param
 
   hartIds: Seq[Int] = Seq[Int](),
   // Prefetch
-  prefetch: Option[PrefetchParameters] = Some(HyperPrefetchParams()),
+  prefetch: Option[PrefetchParameters] = None,
   // Signature Path Prefetch multi-level cache refill support option
   sppMultiLevelRefill : Option[PrefetchParameters] = None,
   // Performance analysis

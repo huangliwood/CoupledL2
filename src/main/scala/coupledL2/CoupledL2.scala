@@ -32,6 +32,7 @@ import xs.utils.mbist.{MBISTInterface, MBISTPipeline}
 import xs.utils.perf.HasPerfLogging
 import xs.utils.sram.SRAMTemplate
 import coupledL2.utils.HasPerfEvents
+import prefetch.{SPPParameters, HyperPrefetchParams}
 
 trait HasCoupledL2Parameters {
   val p: Parameters
@@ -229,11 +230,18 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
  val pf_recv_node: Option[BundleBridgeSink[PrefetchRecv]] = prefetchOpt match {
   case Some(receive: PrefetchReceiverParams) => Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
   case Some(sms_sender_hyper: HyperPrefetchParams) => Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
+  case Some(sms_sender_hyper: intel_spp.HyperPrefetchParams) => Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
   case _ => None
 }
 
   val spp_send_node: Option[BundleBridgeSource[LlcPrefetchRecv]] = prefetchOpt match {
     case Some(hyper_pf: HyperPrefetchParams) =>
+      sppMultiLevelRefillOpt match{
+        case Some(receive: PrefetchReceiverParams) =>
+          Some(BundleBridgeSource(() => new LlcPrefetchRecv()))
+        case _ => None
+      }
+    case Some(hyper_pf2: intel_spp.HyperPrefetchParams) =>
       sppMultiLevelRefillOpt match{
         case Some(receive: PrefetchReceiverParams) =>
           Some(BundleBridgeSource(() => new LlcPrefetchRecv()))
@@ -296,6 +304,8 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
     val prefetchResps = prefetchOpt.map(_ => Wire(Vec(banks, DecoupledIO(new PrefetchResp()(pftParams)))))
     val prefetchEvicts = prefetchOpt.map({
       case hyper : HyperPrefetchParams =>
+        Some( Wire(Vec(banks, DecoupledIO(new PrefetchEvict()(pftParams)))))
+      case hyper2 : intel_spp.HyperPrefetchParams =>
         Some( Wire(Vec(banks, DecoupledIO(new PrefetchEvict()(pftParams)))))
       case _ => None
     })

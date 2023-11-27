@@ -41,13 +41,13 @@ class PrefetchReceiver()(implicit p: Parameters) extends PrefetchModule {
     val req = DecoupledIO(new PrefetchReq)
     val recv_addr = Flipped(ValidIO(UInt(64.W)))
   })
-
+  io.req.valid := io.recv_addr.valid
   io.req.bits.tag := parseFullAddress(io.recv_addr.bits)._1
   io.req.bits.set := parseFullAddress(io.recv_addr.bits)._2
   io.req.bits.needT := false.B
   io.req.bits.pfVec := PfSource.SMS
   io.req.bits.source := 0.U // TODO: ensure source 0 is dcache
-  io.req.valid := io.recv_addr.valid
+ 
 
 }
 
@@ -56,8 +56,10 @@ class PrefetchSmsOuterNode(val clientNum:Int=2)(implicit p: Parameters) extends 
   val outNode = BundleBridgeSource(Some(() => new coupledL2.PrefetchRecv()))
   lazy val module = new LazyModuleImp(this){
     val prefetchRecv = outNode.out.head._1
-    prefetchRecv.addr := 0.U
-    prefetchRecv.addr_valid := false.B
+    val (counterValue, counterWrap) = Counter(true.B, 200)
+    val tmp = RegEnable(0x8000_0000L.U + counterValue,counterWrap)
+    prefetchRecv.addr_valid := false.B//counterValue <= 50.U
+    prefetchRecv.addr := tmp + counterValue << 6.U
     prefetchRecv.l2_pf_en := true.B
   }
 }

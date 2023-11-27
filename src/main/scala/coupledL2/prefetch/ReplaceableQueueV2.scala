@@ -1,4 +1,4 @@
-package coupledL2.prefetch
+package coupledL2.prefetch.queue
 
 import chisel3._
 import chisel3.util._

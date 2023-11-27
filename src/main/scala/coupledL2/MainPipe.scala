@@ -27,7 +27,8 @@ import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink.TLPermissions._
 import coupledL2.utils._
 import coupledL2.debug._
-import coupledL2.prefetch.{AccessState, HyperPrefetchParams, PrefetchEvict, PrefetchTrain}
+import coupledL2.prefetch.{AccessState, PrefetchEvict, PrefetchTrain}
+import coupledL2.prefetch.HyperPrefetchParams
 import xs.utils.perf.HasPerfLogging
 
 class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with HasPerfEvents{
@@ -105,6 +106,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     val prefetchEvict = if(prefetchOpt.isDefined){
       prefetchOpt.get match{
         case hyper: HyperPrefetchParams => Some(DecoupledIO(new PrefetchEvict))
+        case hyper2: prefetch.intel_spp.HyperPrefetchParams => Some(DecoupledIO(new PrefetchEvict))
         case _ => None
       }
     } else {

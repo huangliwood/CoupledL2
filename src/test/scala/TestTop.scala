@@ -497,6 +497,8 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
   var master_nodes: Seq[TLClientNode] = Seq() // TODO
   val NumCores=2
   // val nullNode = LazyModule(new SppSenderNull)
+  val l1_sms_send_0_node = (0 until nrL2).map{i =>LazyModule(new PrefetchSmsOuterNode)}
+  // val sms_sink = BundleBridgeSink(Some(() => new coupledL2.PrefetchRecv()))
   val l2List = (0 until nrL2).map{i =>
     val l1d = createClientNode(s"l1d$i", 32)
     val l1i = TLClientNode(Seq(
@@ -519,7 +521,8 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
         clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
         echoField = Seq(huancun.DirtyField()),
         // prefetch = Some(PrefetchReceiverParams()),
-        prefetch = Some(HyperPrefetchParams()),
+        // prefetch = Some(HyperPrefetchParams()),
+        prefetch = Some(intel_spp.HyperPrefetchParams()),
         /* del L2 prefetche recv option, move into: prefetch =  PrefetchReceiverParams
         prefetch options:
           SPPParameters          => spp only
@@ -541,8 +544,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
     l1xbar := TLBuffer() := l1d
     l2node.pf_recv_node match{
       case Some(l2Recv) => 
-        val l1_sms_send_0_node = LazyModule(new PrefetchSmsOuterNode)
-        l2Recv := l1_sms_send_0_node.outNode
+        l2Recv := l1_sms_send_0_node(i).outNode
       case None =>
     }
     l2xbar := TLBuffer() := l2node.node := l1xbar
@@ -609,6 +611,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
   l3.ctlnode.foreach(_ := TLBuffer() := ctrl_node)
   l3.intnode.foreach(ecc_int_sink := _)
   l3.rst_nodes.foreach(_.foreach(l3_reset_sink := _))
+  // l1_sms_send_0_node.foreach(sms_sink := _.outNode )
 
   val idBits = 14
   val l3FrontendAXI4Node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
@@ -648,7 +651,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
     ctrl_node.makeIOs()(ValName("cmo_port"))
     ecc_int_sink.makeIOs()(ValName("int_port"))
     l3_reset_sink.makeIOs()(ValName("rst_port"))
-
+    // sms_sink.makeIOs()(ValName("sms_port"))
     val io = IO(new Bundle{
       val perfClean = Input(Bool())
       val perfDump = Input(Bool())

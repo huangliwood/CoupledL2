@@ -42,7 +42,7 @@ class SinkA(implicit p: Parameters) extends L2Module with HasPerfLogging{
   io.a.ready := commonReq.ready
 
   def fromTLAtoTaskBundle(a: TLBundleA): TaskBundle = {
-    val task = WireInit(0.U.asTypeOf(new TaskBundle));dontTouch(task)
+    val task = Wire(new TaskBundle) //WireInit(0.U.asTypeOf(new TaskBundle));dontTouch(task)
     task.channel := "b001".U
     task.tag := parseAddress(a.address)._1
     task.set := parseAddress(a.address)._2
@@ -59,8 +59,8 @@ class SinkA(implicit p: Parameters) extends L2Module with HasPerfLogging{
     task.aliasTask.foreach(_ := false.B)
     task.useProbeData := false.B
     task.pfVec.foreach(_ := PfSource.NONE)
-    // task.needHint.foreach(_ := a.data(0))
-    task.needHint.foreach(_ := true.B)
+    task.needHint.foreach(_ := a.data(0))
+    // task.needHint.foreach(_ := true.B)
     task.dirty := false.B
     task.way := 0.U(wayBits.W)
     task.meta := 0.U.asTypeOf(new MetaEntry)
@@ -76,7 +76,7 @@ class SinkA(implicit p: Parameters) extends L2Module with HasPerfLogging{
     task
   }
   def fromPrefetchReqtoTaskBundle(req: PrefetchReq): TaskBundle = {
-    val task = WireInit(0.U.asTypeOf(new TaskBundle));dontTouch(task)
+    val task = Wire(new TaskBundle) //WireInit(0.U.asTypeOf(new TaskBundle));dontTouch(task)
     val fullAddr = Cat(req.tag, req.set, 0.U(offsetBits.W))
     task.channel := "b001".U
     task.tag := parseAddress(fullAddr)._1

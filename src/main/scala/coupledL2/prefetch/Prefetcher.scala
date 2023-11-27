@@ -25,6 +25,8 @@ import freechips.rocketchip.tilelink._
 import coupledL2._
 import xs.utils.mbist.MBISTPipeline
 import xs.utils.perf.HasPerfLogging
+// import {HyperPrefetcher, HyperPrefetchParams}
+import intel_spp.{HyperPrefetcher, HyperPrefetchParams}
 
 object AccessState {
   val bits = 2
@@ -98,7 +100,7 @@ class PrefetchIO(implicit p: Parameters) extends PrefetchBundle {
   val recv_addr = Flipped(ValidIO(UInt(64.W)))
   val evict = prefetchOpt.get match {
     case hyper: HyperPrefetchParams => Some(Flipped(DecoupledIO(new PrefetchEvict)))
-    case _ => None
+    case _ => Some(Flipped(DecoupledIO(new PrefetchEvict)))
   }
   val hint2llc = if(sppMultiLevelRefillOpt.nonEmpty)  Some(ValidIO(new PrefetchReq)) else None
 }
@@ -230,21 +232,63 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
       XSPerfAccumulate("bop_send2_queue", bop.io.req.valid)
       XSPerfAccumulate("prefetch_req_fromL2", bop_en && bop.io.req.valid)
       XSPerfAccumulate("prefetch_req_L1L2_overlapped", l1_pf.io.req.valid && bop_en && bop.io.req.valid)
-    
-    case hyperPf: HyperPrefetchParams => // case spp +  bop + smsReceiver
+    case hyperPf_intel: intel_spp.HyperPrefetchParams => // case spp +  bop + smsReceiver
       hasSpp = true
-      val hybrid_pfts = Module(new HyperPrefetcher(parentName + "hpft_"))
+      val hybrid_pfts = Module(new intel_spp.HyperPrefetcher(parentName + "hpft_intel_").suggestName("intel_spp"))
       hybrid_pfts.io.train <> io.train
       hybrid_pfts.io.resp <> io.resp
       hybrid_pfts.io.recv_addr := ValidIODelay(io.recv_addr, 2)
       io.req <> hybrid_pfts.io.req
-  
+
+      hybrid_pfts.io.db_degree := 0.U.asTypeOf(hybrid_pfts.io.db_degree.cloneType)
+      hybrid_pfts.io.queue_used := 0.U
       // evict
       io.evict match {
         case Some(evict) =>
-        hybrid_pfts.io.evict <> evict
-        case None =>
+        // hybrid_pfts.io.evict <> evict
         hybrid_pfts.io.evict := DontCare
+        io.evict.get.ready := true.B
+      }
+      // has spp multi-level cache option
+      io.hint2llc match{
+        case Some(sender) =>
+          println(s"${cacheParams.name} Prefetch Config: BOP + SMS receiver + SPP + SPP cross-level refill")
+          sender <> hybrid_pfts.io.hint2llc
+        case _ => println(s"${cacheParams.name} Prefetch Config: BOP + SMS receiver + SPP")
+      }
+    case hyperPf: HyperPrefetchParams => // case spp +  bop + smsReceiver
+      hasSpp = true
+      val hybrid_pfts = Module(new intel_spp.HyperPrefetcher(parentName + "hpft_intel_"))
+      hybrid_pfts.io.train <> io.train
+      hybrid_pfts.io.resp <> io.resp
+      hybrid_pfts.io.recv_addr := ValidIODelay(io.recv_addr, 2)
+      io.req <> hybrid_pfts.io.req
+
+      hybrid_pfts.io.db_degree := 0.U.asTypeOf(hybrid_pfts.io.db_degree.cloneType)
+      hybrid_pfts.io.queue_used := 0.U 
+      // evict
+      io.evict match {
+        case Some(evict) =>
+        // hybrid_pfts.io.evict <> evict
+        hybrid_pfts.io.evict := DontCare
+        io.evict.get.ready := true.B
+        // case None =>
+        // hybrid_pfts.io.evict := DontCare
+      }
+      // val hybrid_pfts = Module(new HyperPrefetcher(parentName + "hpft_"))
+      // hybrid_pfts.io.train <> io.train
+      // hybrid_pfts.io.resp <> io.resp
+      // hybrid_pfts.io.recv_addr := ValidIODelay(io.recv_addr, 2)
+      // io.req <> hybrid_pfts.io.req
+
+      // evict
+      io.evict match {
+        case Some(evict) =>
+        // hybrid_pfts.io.evict <> evict
+        hybrid_pfts.io.evict := DontCare
+        io.evict.get.ready := true.B
+        // case None =>
+        // hybrid_pfts.io.evict := DontCare
       }
       // has spp multi-level cache option
       io.hint2llc match{
