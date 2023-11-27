@@ -56,10 +56,10 @@ class SinkC(implicit p: Parameters) extends L2Module with HasPerfLogging{
 
   // dataBuf entry is valid when Release has data
   // taskBuf entry is valid when ReqArb is not ready to receive C tasks
-  val dataBuf = Reg(Vec(bufBlocks, Vec(beatSize, UInt((beatBytes * 8).W))))
+  val dataBuf = RegInit(VecInit(Seq.fill(bufBlocks)(VecInit(Seq.fill(beatSize)(0.U.asTypeOf(UInt((beatBytes * 8).W)))))))
   val beatValids = RegInit(VecInit(Seq.fill(bufBlocks)(VecInit(Seq.fill(beatSize)(false.B)))))
   val dataValids = VecInit(beatValids.map(_.asUInt.orR)).asUInt
-  val taskBuf = Reg(Vec(bufBlocks, new TaskBundle))
+  val taskBuf = RegInit(VecInit(Seq.fill(bufBlocks)(0.U.asTypeOf(new TaskBundle))))
   val taskValids = RegInit(VecInit(Seq.fill(bufBlocks)(false.B)))
   val taskArb = Module(new RRArbiterInit(new TaskBundle, bufBlocks))
   val outPipe = Queue(taskArb.io.out, entries = 1, pipe = true, flow = false) // for timing: taskArb <> outPipe
