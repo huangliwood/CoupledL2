@@ -33,6 +33,32 @@ trait HasHyperPrefetcherParams extends HasCoupledL2Parameters {
 
 abstract class PrefetchBranchV2Module(implicit val p: Parameters) extends Module with HasHyperPrefetcherParams
 abstract class PrefetchBranchV2Bundle(implicit val p: Parameters) extends Bundle with HasHyperPrefetcherParams
+object PfSource extends Enumeration {
+  val bits = 3
+  val NONE    = "b000".U(bits.W)
+  val BOP     = "b001".U(bits.W)
+  val SPP     = "b010".U(bits.W)
+  val SMS     = "b100".U(bits.W)
+  val BOP_SPP = "b011".U(bits.W)
+
+}
+object PfcovState {
+  val bits = 2
+
+  def p_0     = 0.U(bits.W)
+  def p_25    = 1.U(bits.W)
+  def p_50    = 2.U(bits.W)
+  def p_75    = 3.U(bits.W)
+}
+
+object PfaccState {
+  val bits = 2
+
+  def p_0     = 0.U(bits.W)
+  def p_25    = 1.U(bits.W)
+  def p_50    = 2.U(bits.W)
+  def p_75    = 3.U(bits.W)
+}
 
 object PrefetcherId {
   val bits = 2
@@ -197,6 +223,7 @@ class HyperPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) ext
   sms.io.recv_addr.bits := io.recv_addr.bits
   sms.io.req.ready := true.B
 
+  spp.io.from_ghr := 0.U.asTypeOf(spp.io.from_ghr.cloneType)
   // fTable.io.req.valid := q_spp.io.deq.fire || q_sms.io.deq.fire || bop.io.req.valid
   // fTable.io.req.bits := Mux(bop.io.req.valid, bop.io.req.bits, 
   //                         Mux(q_sms.io.deq.fire, q_sms.io.deq.bits, q_spp.io.deq.bits))
@@ -239,6 +266,7 @@ class HyperPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) ext
   spp.io.db_degree.valid := io.db_degree.valid
   spp.io.db_degree.bits := io.db_degree.bits
   spp.io.queue_used := io.queue_used
+  spp.io.hint_req.ready := false.B
 
   XSPerfAccumulate("bop_send2_queue", bop.io.req.valid)
   XSPerfAccumulate("sms_send2_queue", q_sms.io.enq.fire)
