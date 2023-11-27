@@ -182,7 +182,7 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
   val s1_req = RegEnable(s0_req,s0_valid)
   val s1_entryData = sTable.io.r.resp.data(0)
   // bp read
-  val s1_bp_access_index = get_idx(s1_req.pageAddr)(4, 0)
+  val s1_bp_access_index = get_idx(s1_req.pageAddr)
   val s1_bp_hit = WireInit(false.B)
   val s1_bp_mask = WireInit(VecInit(Seq.fill(4)(false.B)))
   val s1_bp_prePredicted_blkOff = WireInit(0.U(blkOffsetBits.W))
@@ -197,7 +197,7 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
   s1_bp_prePredicted_blkOff := bpTable(s1_bp_access_index).prePredicted_blkOffset
   //TODO: there should set offset for matchedIndex?
   val s1_bp_matchedIdx = WireInit(OneHot.OH1ToUInt(HighestBit(s1_bp_mask.asUInt,4)));dontTouch(s1_bp_matchedIdx)
-  s1_bp_matched_sig := rotate_sig(s1_bp_matchedIdx)
+  s1_bp_matched_sig := rotate_sig(s1_bp_matchedIdx-1.U)
   // --------------------------------------------------------------------------------
   // stage 2
   // --------------------------------------------------------------------------------
@@ -219,30 +219,31 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
  
   val s2_oldSignature = Mux(s2_hit, s2_entryData.signature, 0.U)
   // used for prefetch hit traning and probe one delta
-  val s2_probeDelta   = Mux(s2_req.isBP,s2_oldSignature.head(9).tail(6).asSInt,0.S)
-  def get_latest_lastTrigerDelta(now:UInt,origin:UInt):SInt={
-    val is_bigger = now > origin
-    val out=Mux(is_bigger,(now-origin).asSInt,io.req.bits.fromGHR_shareBO+2.S)
-    out
-  }
-  def get_biggest_blkAddr(now:UInt,origin:UInt):UInt={
-    val is_bigger = now > origin
-    val out=Mux(is_bigger,now,origin)
-    out
-  }
-  val s2_newDelta     = Mux(s2_hit, get_latest_lastTrigerDelta(s2_req.blkOffset,s2_entryData.lastBlockOff), 0.S) // should hold 0 when miss
+  // val s2_probeDelta   = Mux(s2_req.isBP,s2_oldSignature.head(9).tail(6).asSInt,0.S)
+  // def get_latest_lastTrigerDelta(now:UInt,origin:UInt):SInt={
+  //   val is_bigger = now > origin
+  //   val out=Mux(is_bigger,(now-origin).asSInt,io.req.bits.fromGHR_shareBO+2.S)
+  //   out
+  // }
+  // def get_biggest_blkAddr(now:UInt,origin:UInt):UInt={
+  //   val is_bigger = now > origin
+  //   val out=Mux(is_bigger,now,origin)
+  //   out
+  // }
+  // val s2_newDelta     = Mux(s2_hit, get_latest_lastTrigerDelta(s2_req.blkOffset,s2_entryData.lastBlockOff), 0.S) // should hold 0 when miss
+  val s2_newDelta    =  Mux(s2_hit, s2_req.blkOffset.asSInt - s2_entryData.lastBlockOff.asSInt, s2_req.blkOffset.asSInt)
   //   val s2_newBlkAddr   = get_biggest_blkAddr(s2_req.get_blkAddr,Cat(s2_req.pageAddr,s2_entryData.lastBlockOff))
   val s2_newBlkAddr  = s2_req.get_blkAddr
 
-  def get_predicted_sig(old_sig:UInt,delta:SInt):UInt={
-    // assert delta should > 0
-    // should reserve origin sig to avoid disturbing
-    val sig = WireInit(0.U(signatureBits.W))
-    val anchored_distance = WireInit(s2_newDelta)
-    val is_biggerThan_Last2Sig = s2_newDelta.asUInt > s2_oldSignature(5,3)
-    sig := Mux(is_biggerThan_Last2Sig,old_sig, makeSign(s2_oldSignature,strideMap(s2_newDelta)))
-    sig
-  }
+  // def get_predicted_sig(old_sig:UInt,delta:SInt):UInt={
+  //   // assert delta should > 0
+  //   // should reserve origin sig to avoid disturbing
+  //   val sig = WireInit(0.U(signatureBits.W))
+  //   val anchored_distance = WireInit(s2_newDelta)
+  //   val is_biggerThan_Last2Sig = s2_newDelta.asUInt > s2_oldSignature(5,3)
+  //   sig := Mux(is_biggerThan_Last2Sig,old_sig, makeSign(s2_oldSignature,strideMap(s2_newDelta)))
+  //   sig
+  // }
 
 
   sTable.io.w.req.valid := s2_valid
@@ -445,7 +446,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   // enable prefetch
   enprefetch :=  !s0_first_flag && s1_valid && s1_hit && s1_issued =/= 0.U && state === s_lookahead && s1_samePage
   // enable nextline when
-  when(s1_valid && s1_lookCount <= 1.U) {
+  when(!s0_valid && s1_valid && s1_lookCount === 1.U && state === s_lookahead && !enprefetch) {
     val s1_testOffset = s1_current.block + 1.U
     when(s1_testOffset(pageAddrBits + blkOffsetBits - 1, blkOffsetBits) === s1_current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits)) {
       enprefetchnl := ENABLE_NL.B
