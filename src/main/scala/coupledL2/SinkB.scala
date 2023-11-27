@@ -147,7 +147,10 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
   //--------------------------------- assert ----------------------------------------//
   val s_addrConflict = addrConflict(io.task.bits)
   val s_replaceConflict = replaceConflict(io.task.bits)
-  val s_mergeB = mergeB(io.task.bits)
+
+  val mergeB_mshr = WireInit(io.msInfo(io.bMergeTask.bits.id))
+  val mergeB_task = WireInit(io.bMergeTask.bits.task)
+  val s_mergeB = mergeB_mshr.valid && mergeB_mshr.bits.metaTag === mergeB_task.tag && mergeB_mshr.bits.set === mergeB_task.set && mergeB_mshr.bits.mergeB
 
   val io_task_can_valid = !s_addrConflict && !s_replaceConflict && !s_mergeB
   val io_bMergeTask_can_valid = s_mergeB
@@ -160,6 +163,8 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
     }
     dontTouch(s_addrConflict)
     dontTouch(s_replaceConflict)
+    dontTouch(mergeB_mshr)
+    dontTouch(mergeB_task)
     dontTouch(s_mergeB)
     dontTouch(io_task_can_valid)
     dontTouch(io_bMergeTask_can_valid)
