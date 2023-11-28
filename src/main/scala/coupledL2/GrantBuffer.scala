@@ -91,7 +91,7 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
      d.sink := td.task.mshrId
      d.denied := false.B
      d.data := data(0).asUInt
-     d.corrupt := false.B
+     d.corrupt := td.task.corrupt
      d.echo.lift(DirtyKey).foreach(_ := td.task.dirty)
      beat1 := data(1)
 

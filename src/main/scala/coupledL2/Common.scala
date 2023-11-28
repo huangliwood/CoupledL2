@@ -32,6 +32,10 @@ class ReplacerInfo(implicit p: Parameters) extends L2Bundle {
   val reqSource = UInt(MemReqSource.reqSourceBits.W)
 }
 
+trait HasCorruptBit {
+  val corrupt = Bool() // corrupt data checked by ECC in DataStorage (ECC)
+}
+
 trait HasChannelBits { this: Bundle =>
   val channel = UInt(3.W)
   def fromA = channel(0).asBool
@@ -41,7 +45,7 @@ trait HasChannelBits { this: Bundle =>
 
 // We generate a Task for every TL request
 // this is the info that flows in Mainpipe
-class TaskBundle(implicit p: Parameters) extends L2Bundle with HasChannelBits {
+class TaskBundle(implicit p: Parameters) extends L2Bundle with HasChannelBits with HasCorruptBit {
   val set = UInt(setBits.W)
   val tag = UInt(tagBits.W)
   val off = UInt(offsetBits.W)
