@@ -43,96 +43,120 @@ object PrefetcherId {
   def OHTERS        = 3.U(bits.W)
 }
 
-class FilterV2(parentName:String = "Unknown")(implicit p: Parameters) extends PrefetchBranchV2Module with HasPerfLogging{
-  val io = IO(new Bundle() {
-    val req = Flipped(DecoupledIO(new PrefetchReq))
-    val resp = DecoupledIO(new PrefetchReq)
-    val evict = Flipped(DecoupledIO(new PrefetchEvict))
-    val isForce = Input(Bool())
-    val pf_Id = Input(UInt(2.W))
-  })
+class FilterTiming(parentName:String="Unkown")(implicit p: Parameters) extends PrefetchBranchV2Module {
+ val io = IO(new Bundle() {
+   val req = Flipped(DecoupledIO(new PrefetchReq))
+   val resp = DecoupledIO(new PrefetchReq)
+   val evict = Flipped(DecoupledIO(new PrefetchEvict))
+   val from_bop = Input(Bool())
+   val spp2llc = Input(Bool())
+   val hint2llc = ValidIO(new PrefetchReq)
+ })
 
-  def idx(addr:      UInt) = addr(log2Up(fTableEntries) - 1, 0)
-  def tag(addr:      UInt) = addr(pageAddrBits - 1, log2Up(fTableEntries))
+ def idx(addr:      UInt) = addr(log2Up(fTableEntries) - 1, 0)
+ def tag(addr:      UInt) = addr(pageAddrBits - 1, log2Up(fTableEntries))
 
-  def fTableEntry() = new Bundle {
-    val valid = Bool()
-    val tag = UInt(fTagBits.W)
-    val bitMap = Vec(64, Bool())
-  }
+ def fTableEntry() = new Bundle {
+   val valid = Bool()
+   val tag = UInt(fTagBits.W)
+   val bitMap = Vec(64, Bool())
+ }
+ val dupNums = 16
 
-  val fTable = RegInit(VecInit(Seq.fill(fTableEntries)(0.U.asTypeOf(fTableEntry()))))
-  val q = Module(new ReplaceableQueueV2(UInt(fullAddressBits.W), fTableQueueEntries))
+ val req_dups = RegInit(VecInit(Seq.fill(dupNums)(0.U.asTypeOf(new PrefetchReq))))
+ val req_dups_valid = RegInit(VecInit(Seq.fill(dupNums)(false.B)))
+ val req_hint2llc = RegNext(io.spp2llc,false.B)
+ req_dups.foreach(_ := io.req.bits)
+ req_dups_valid.foreach( _ := io.req.valid)
+ val dupOffsetBits = log2Up(fTableEntries/dupNums)
+ val dupBits = log2Up(dupNums)
+ val fTable = RegInit(VecInit(Seq.fill(fTableEntries)(0.U.asTypeOf(fTableEntry()))))
+ val q = Module(new Queue(UInt(fullAddressBits.W), fTableQueueEntries,flow= false, pipe= false))
+  //  val q = Module(new SRAMQueue(UInt(fullAddressBits.W), fTableQueueEntries,
+  //    flow = true, hasMbist = cacheParams.hasMbist, hasShareBus = cacheParams.hasShareBus,
+  //    hasClkGate = enableClockGate, parentName = parentName))
 
-  val oldAddr = io.req.bits.addr
-  val blkAddr = oldAddr(fullAddressBits - 1, offsetBits)
-  val pageAddr = oldAddr(fullAddressBits - 1, pageOffsetBits)
-  val blkOffset = oldAddr(pageOffsetBits - 1, offsetBits)
+ val hit = WireInit(VecInit.fill(dupNums)(false.B))
+ val readResult = WireInit(VecInit.fill(dupNums)(0.U.asTypeOf(fTableEntry())))
+ val hitForMap = WireInit(VecInit.fill(dupNums)(false.B))
 
-  //read fTable
-  val hit = Wire(Bool())
-  val readResult = Wire(fTableEntry())
-  readResult := fTable(idx(pageAddr))
-  hit := readResult.valid && tag(pageAddr) === readResult.tag
-  val hitForMap = hit && readResult.bitMap(blkOffset)
+ for(i <- 0 until(dupNums)) {
+   when(req_dups(i).set(dupOffsetBits-1+dupBits-1,dupOffsetBits-1) === i.U(dupBits.W)) {
+     val oldAddr = req_dups(i).addr
+     val pageAddr = oldAddr(fullAddressBits - 1, pageOffsetBits)
+     val blkOffset = oldAddr(pageOffsetBits - 1, offsetBits)
 
-  io.resp.valid := io.req.fire && (io.pf_Id =/= PrefetcherId.SPP || !hitForMap)
-  io.resp.bits := io.req.bits
+     //read fTable
+     readResult(i) := fTable(idx(pageAddr))
+     hit(i) := readResult(i).valid
+     hitForMap(i) := hit(i) && readResult(i).bitMap(blkOffset)
 
-  val wData = Wire(fTableEntry())
-  val newBitMap = readResult.bitMap.zipWithIndex.map{ case (b, i) => Mux(i.asUInt === blkOffset, true.B, false.B) }
-  
-  wData.valid := true.B
-  wData.tag := tag(pageAddr)
-  wData.bitMap := newBitMap
-  when(io.req.fire) {
-    when(hit) {
-      fTable(idx(pageAddr)).bitMap(blkOffset) := true.B
-    } .otherwise {
-      fTable(idx(pageAddr)) := wData
-    }
-  }
+     val wData = WireInit(0.U.asTypeOf(fTableEntry()))
+     val newBitMap = readResult(i).bitMap.zipWithIndex.map { case (b, i) => Mux(i.asUInt === blkOffset, true.B, false.B) }
 
-  q.io.enq.valid := io.req.fire && !hitForMap
-  q.io.enq.bits := io.req.bits.addr
-  q.io.deq.ready := q.io.full && q.io.enq.fire
+     wData.valid := true.B
+     wData.tag := tag(pageAddr)
+     wData.bitMap := newBitMap
+     when(req_dups_valid(i)) {
+       when(hit(i)) {
+         fTable(idx(pageAddr)).bitMap(blkOffset) := true.B
+       }.otherwise {
+         fTable(idx(pageAddr)) := wData
+       }
+     }
+   }
+ }
+ io.resp.valid := req_dups_valid(0) && (!hitForMap.asUInt.orR || io.from_bop)
+ io.resp.bits := req_dups(0)
 
-  val evictAddr = q.io.deq.bits
-  val evictPageAddr = evictAddr(fullAddressBits - 1, pageOffsetBits)
-  val evictBlkOffset = evictAddr(pageOffsetBits - 1, offsetBits)
-  val evictBlkAddr = evictAddr(fullAddressBits - 1, offsetBits)
-  val readEvict = Wire(fTableEntry())
-  val hitEvict = Wire(Bool())
-  val conflict = io.req.fire && blkAddr === evictBlkAddr
-  readEvict := fTable(idx(evictPageAddr))
-  hitEvict := q.io.deq.fire && readEvict.valid && tag(evictPageAddr) === readEvict.tag && readEvict.bitMap(evictBlkOffset) && !conflict
-  when(hitEvict) {
-    fTable(idx(evictPageAddr)).bitMap(evictBlkOffset) := false.B
-  }
+ io.hint2llc.valid := req_dups_valid(1) && req_hint2llc
+ io.hint2llc.bits := req_dups(1)
 
-  /*
-  val evictAddr = io.evict.bits.addr
-  val evictPageAddr = evictAddr(fullAddressBits - 1, pageOffsetBits)
-  val evictBlkOffset = evictAddr(pageOffsetBits - 1, offsetBits)
-  val evictBlkAddr = evictAddr(fullAddressBits - 1, offsetBits)
-  val readEvict = Wire(fTableEntry())
-  val hitEvict = Wire(Bool())
-  val conflict = io.req.fire && blkAddr === evictBlkAddr
-  readEvict := fTable(idx(evictPageAddr))
-  hitEvict := io.evict.valid && readEvict.valid && tag(evictPageAddr) === readEvict.tag && readEvict.bitMap(evictBlkOffset) && !conflict
-  when(hitEvict) {
-    fTable(idx(evictPageAddr)).bitMap(evictBlkOffset) := false.B
-  }*/
+ q.io.enq.valid := req_dups_valid(2) && !hitForMap.asUInt.orR && !req_hint2llc // if spp2llc , don't enq
+ q.io.enq.bits := req_dups(2).addr
 
-  io.req.ready := true.B
-  io.evict.ready := true.B
-  XSPerfAccumulate("hyper_filter_nums",io.req.fire && hitForMap)
-  XSPerfAccumulate("hyper_filter_input",io.req.fire)
-  XSPerfAccumulate("hyper_filter_output",io.resp.fire)
-  XSPerfAccumulate("hyper_filter_bop_req",io.resp.valid && io.pf_Id === PrefetcherId.BOP)
-  XSPerfAccumulate("hyper_filter_sms_req",io.resp.valid && io.pf_Id === PrefetcherId.SMS)
-  XSPerfAccumulate("hyper_filter_spp_req",io.resp.valid && io.pf_Id === PrefetcherId.SPP)
+ val isqFull = q.io.count === fTableQueueEntries.U
+ q.io.deq.ready := isqFull;dontTouch(q.io.deq.ready)
+
+ val evictAddr = q.io.deq.bits
+ val evictPageAddr = evictAddr(fullAddressBits - 1, pageOffsetBits)
+ val evictBlkOffset = evictAddr(pageOffsetBits - 1, offsetBits)
+ val evictBlkAddr = evictAddr(fullAddressBits - 1, offsetBits)
+ val readEvict = WireInit(VecInit.fill(dupNums)(0.U.asTypeOf(fTableEntry())))
+ val hitEvict =  WireInit(VecInit.fill(dupNums)(false.B))
+ for(i <- 0 until(dupNums)) {
+   when(req_dups(i).set(dupOffsetBits-1+dupBits,dupOffsetBits-1) === i.U(dupBits.W)) {
+     val oldAddr = req_dups(i).addr
+     val blkAddr = oldAddr(fullAddressBits - 1, offsetBits)
+     val conflict = req_dups_valid.reduce(_ || _) && blkAddr === evictBlkAddr
+     readEvict(i) := fTable(idx(evictPageAddr))
+     hitEvict(i) := RegEnable(readEvict(i).valid && tag(evictPageAddr) === readEvict(i).tag && readEvict(i).bitMap(evictBlkOffset) && !conflict, q.io.deq.fire)
+     when(hitEvict(i)) {
+       fTable(idx(evictPageAddr)).bitMap(evictBlkOffset) := false.B
+     }
+   }
+ }
+
+ /*
+ val evictAddr = io.evict.bits.addr
+ val evictPageAddr = evictAddr(fullAddressBits - 1, pageOffsetBits)
+ val evictBlkOffset = evictAddr(pageOffsetBits - 1, offsetBits)
+ val evictBlkAddr = evictAddr(fullAddressBits - 1, offsetBits)
+ val readEvict = Wire(fTableEntry())
+ val hitEvict = Wire(Bool())
+ val conflict = io.req.fire && blkAddr === evictBlkAddr
+ readEvict := fTable(idx(evictPageAddr))
+ hitEvict := io.evict.valid && readEvict.valid && tag(evictPageAddr) === readEvict.tag && readEvict.bitMap(evictBlkOffset) && !conflict
+ when(hitEvict) {
+   fTable(idx(evictPageAddr)).bitMap(evictBlkOffset) := false.B
+ }*/
+ io.req.ready := true.B
+ io.evict.ready := true.B
+ XSPerfAccumulate("hyper_filter_valid_nums", req_dups_valid(0) && (hitForMap.asUInt.orR))
+ XSPerfAccumulate("hyper_filter_input", io.req.fire)
+ XSPerfAccumulate("hyper_filter_output", io.resp.fire)
 }
+
 
 //Only used for hybrid spp and bop
 class HyperPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends PrefetchBranchV2Module with HasPerfLogging{
@@ -147,7 +171,7 @@ class HyperPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) ext
     val queue_used = Input(UInt(6.W))
   })
 
-  val fTable = Module(new FilterV2(parentName + "ftable_"))
+  val fTable = Module(new FilterTiming(parentName + "ftable_"))
 
   val spp = Module(new SignaturePathPrefetch(parentName = parentName + "spp_")(p.alterPartial({
         case L2ParamKey => p(L2ParamKey).copy(prefetch = Some(SPPParameters()))
@@ -206,12 +230,12 @@ class HyperPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) ext
     fTable.io.isForce := true.B
     // fTable.io.spp2llc := false.B
   }.otherwise {
-    fTable.io.req.valid := q_spp.io.deq.valid
-    fTable.io.req.bits.tag := q_spp.io.deq.bits.tag
-    fTable.io.req.bits.set := q_spp.io.deq.bits.set
-    fTable.io.req.bits.isBOP := q_spp.io.deq.bits.isBOP
-    fTable.io.req.bits.source := q_spp.io.deq.bits.source
-    fTable.io.req.bits.needT := q_spp.io.deq.bits.needT
+    fTable.io.req.valid := RegNext(q_spp.io.deq.valid,false.B)
+    fTable.io.req.bits.tag := RegEnable(q_spp.io.deq.bits.tag,q_spp.io.deq.valid)
+    fTable.io.req.bits.set := RegEnable(q_spp.io.deq.bits.set,q_spp.io.deq.valid)
+    fTable.io.req.bits.isBOP := RegEnable(q_spp.io.deq.bits.isBOP,q_spp.io.deq.valid)
+    fTable.io.req.bits.source := RegEnable(q_spp.io.deq.bits.source,q_spp.io.deq.valid)
+    fTable.io.req.bits.needT := RegEnable(q_spp.io.deq.bits.needT,q_spp.io.deq.valid)
     fTable.io.pf_Id := PrefetcherId.SPP
     fTable.io.isForce := false.B
     // fTable.io.spp2llc := q_spp.io.deq.bits.hint2llc
