@@ -64,6 +64,11 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
     }))
 
     val hasLatePF = Output(Bool())
+
+    val hintDup = ValidIO(new Bundle() {
+      val tag = Input(UInt(tagBits.W))
+      val set = Input(UInt(setBits.W))
+    })
   })
 
   /* ======== Data Structure ======== */
@@ -124,7 +129,13 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
       e.valid && sameAddr(in, e.task)
     )
   ).asUInt
-  val dup        = io.in.valid && isPrefetch && dupMask.orR
+
+  val dup        = io.in.valid && isPrefetch && dupMask.orR // open latePf dup
+//  val dup        = false.B // close latePf dup
+
+  io.hintDup.valid := dup
+  io.hintDup.bits.tag := io.in.bits.tag
+  io.hintDup.bits.set := io.in.bits.set
 
   //!! TODO: we can also remove those that duplicate with mainPipe
 

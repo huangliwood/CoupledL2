@@ -77,6 +77,11 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
 
     // to block sourceB from sending same-addr probe until GrantAck received
     val grantStatus = Output(Vec(grantBufInflightSize, new GrantStatus))
+
+    val hintDup = Flipped(ValidIO(new Bundle() {
+      val tag = Input(UInt(tagBits.W))
+      val set = Input(UInt(setBits.W))
+    }))
   })
 
   // =========== functions ===========
@@ -163,21 +168,37 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
         val tag = UInt(tagBits.W)
         val set = UInt(setBits.W)
       },
-      entries = 4,
+      entries = 8,
       flow = true))
+
+    val latePftRespQueue = Module(new Queue(new Bundle() {
+        val tag = UInt(tagBits.W)
+        val set = UInt(setBits.W)
+      },
+      entries = 8,
+      flow = true))
+
+    latePftRespQueue.io.enq.valid := io.hintDup.valid
+    latePftRespQueue.io.enq.bits.tag := io.hintDup.bits.tag
+    latePftRespQueue.io.enq.bits.set := io.hintDup.bits.set
 
     pftRespQueue.io.enq.valid := io.d_task.valid && dtaskOpcode === HintAck &&
       io.d_task.bits.task.fromL2pft.getOrElse(false.B)
     pftRespQueue.io.enq.bits.tag := io.d_task.bits.task.tag
     pftRespQueue.io.enq.bits.set := io.d_task.bits.task.set
 
-    val resp = io.prefetchResp.get
-    resp.valid := pftRespQueue.io.deq.valid
-    resp.bits.tag := pftRespQueue.io.deq.bits.tag
-    resp.bits.set := pftRespQueue.io.deq.bits.set
-    pftRespQueue.io.deq.ready := resp.ready
+    val toPftArb = Module(new FastArbiter(new Bundle() {
+      val tag = UInt(tagBits.W)
+      val set = UInt(setBits.W)
+    }, 2))
+    toPftArb.io.in(0) <> pftRespQueue.io.deq
+    toPftArb.io.in(1) <> latePftRespQueue.io.deq
 
-    // assert(pftRespQueue.io.enq.ready, "pftRespQueue should never be full, no back pressure logic") // TODO: has bug here
+    val resp = io.prefetchResp.get
+    resp <> toPftArb.io.out
+
+    assert(latePftRespQueue.io.enq.ready, "latePftRespQueue should never be full, no back pressure logic") // TODO: has bug here
+    assert(pftRespQueue.io.enq.ready, "pftRespQueue should never be full, no back pressure logic") // TODO: has bug here
   }
   // If no prefetch, there never should be HintAck
   if(cacheParams.enableAssert) assert(prefetchOpt.nonEmpty.B || !io.d_task.valid || dtaskOpcode =/= HintAck)
