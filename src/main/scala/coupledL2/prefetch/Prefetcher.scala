@@ -175,31 +175,6 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
   }
   var hasSpp = false
   prefetchOpt.get match {
-    case spp: SPPParameters => // case spp only
-      hasSpp = true
-      val pft = Module(new SignaturePathPrefetch(parentName + "spp_"))
-      val pftQueue = Module(new PrefetchQueue)
-      val pipe = Module(new Pipeline(io.req.bits.cloneType, 1))
-      pft.io.train <> io.train
-      pft.io.resp <> io.resp
-      pftQueue.io.enq <> pft.io.req
-      pipe.io.in <> pftQueue.io.deq
-      io.req <> pipe.io.out
-      io.hint2llc match{
-      case Some(sender) =>
-        println(s"${cacheParams.name} Prefetch Config: SPP + SPP cross-level refill")
-        pftQueue.io.enq.valid := pft.io.req.valid && (!pft.io.req.bits.hint2llc)
-        pftQueue.io.enq.bits <> pft.io.req.bits
-        pipe.io.in <> pftQueue.io.deq
-        io.req <> pipe.io.out
-        sender.valid := pft.io.req.bits.hint2llc
-        sender.bits := pft.io.req.bits
-      case _ =>
-        println(s"${cacheParams.name} Prefetch Config: SPP")
-        pftQueue.io.enq <> pft.io.req
-        pipe.io.in <> pftQueue.io.deq
-        io.req <> pipe.io.out
-    }
     case bop: BOPParameters => // case bop only
       println(s"${cacheParams.name} Prefetch Config: BOP")
       val pft = Module(new BestOffsetPrefetch)
@@ -240,6 +215,8 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
       XSPerfAccumulate("prefetch_req_fromL1", l1_pf.io.req.valid)
       XSPerfAccumulate("prefetch_req_fromL2", bop_en && bop.io.req.valid)
       XSPerfAccumulate("prefetch_req_L1L2_overlapped", l1_pf.io.req.valid && bop_en && bop.io.req.valid)
+      XSPerfAccumulate("bop_send2_queue", bop_en && bop.io.req.valid)
+      XSPerfAccumulate("sms_send2_queue", l1_pf.io.req.valid)
     
     case hyperPf: HyperPrefetchParams => // case spp +  bop + smsReceiver
       hasSpp = true
