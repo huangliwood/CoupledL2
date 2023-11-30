@@ -41,14 +41,16 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
     val latePF = topDownOpt.map(_ => Output(Bool()))
   })
 
+  val reqBuf_entries = 4
+
   val reqArb = Module(new RequestArb())
-  val a_reqBuf = Module(new RequestBuffer)
+  val a_reqBuf = Module(new RequestBuffer(entries = reqBuf_entries))
   val mainPipe = Module(new MainPipe())
   val mshrCtl = Module(new MSHRCtl())
   val directory = Module(new Directory(parentName + "dir_"))
   val dataStorage = Module(new DataStorage(parentName + "data_"))
   val refillUnit = Module(new RefillUnit())
-  val sinkA = Module(new SinkA)
+  val sinkA = Module(new SinkA(entries = reqBuf_entries))
   val sinkB = Module(new SinkB)
   val sinkC = Module(new SinkC)
   val sourceC = Module(new SourceC)
@@ -68,6 +70,8 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
   a_reqBuf.io.mshrInfo := mshrCtl.io.msInfo
   a_reqBuf.io.mainPipeBlock := mainPipe.io.toReqBuf
   a_reqBuf.io.s1Entrance := reqArb.io.s1Entrance
+  sinkA.io.mshrInfo := mshrCtl.io.msInfo
+  sinkA.io.mpInfo := a_reqBuf.io.bufferInfo ++ reqArb.io.mpInfo ++ mainPipe.io.mpInfo
   sinkB.io.s3Info := mainPipe.io.toSinkB
   sinkB.io.msInfo := mshrCtl.io.msInfo
   sinkC.io.msInfo := mshrCtl.io.msInfo

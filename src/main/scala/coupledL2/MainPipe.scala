@@ -92,6 +92,9 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
       val data = new DSBlock
     })
 
+    /* send to sinkA and req_buffer to count stall */
+    val mpInfo = Vec(2, ValidIO(new MainPipeInfo))
+
     /* write dir, including reset dir */
     val metaWReq = ValidIO(new MetaWrite)
     val tagWReq = ValidIO(new TagWrite)
@@ -677,6 +680,19 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   val miss_s3 = task_s3.valid && !mshr_req_s3 && !dirResult_s3.hit
   dontTouch(hit_s3)
   dontTouch(miss_s3)
+
+  def TaskBundletoMainPipeInfo(task: TaskBundle): MainPipeInfo = {
+    val info = Wire(new MainPipeInfo)
+    info.reqTag := task.tag
+    info.set := task.set
+    info.isPrefetch := task.opcode === Hint
+    info.channel := task.channel
+    info
+  }
+  io.mpInfo(0).valid := task_s2.valid
+  io.mpInfo(0).bits := TaskBundletoMainPipeInfo(task_s2.bits)
+  io.mpInfo(1).valid := task_s3.valid
+  io.mpInfo(1).bits := TaskBundletoMainPipeInfo(task_s3.bits)
   
   if(cacheParams.enablePerf) {
     // num of mshr req

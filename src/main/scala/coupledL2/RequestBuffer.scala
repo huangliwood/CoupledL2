@@ -55,6 +55,9 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
     val ATag        = Output(UInt(tagBits.W))
     val ASet        = Output(UInt(setBits.W))
 
+    /* send to sinkA and req_buffer to count stall */
+    val bufferInfo = Vec(entries, ValidIO(new MainPipeInfo))
+
     // when Probe/Release/MSHR enters MainPipe, we need also to block A req
     val s1Entrance = Flipped(ValidIO(new L2Bundle {
       val set = UInt(setBits.W)
@@ -244,6 +247,21 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
 
   // for Dir to choose a free way
   io.out.bits.wayMask := Fill(cacheParams.ways, 1.U(1.W))
+
+
+  def TaskBundletoMainPipeInfo(task: TaskBundle): MainPipeInfo = {
+    val info = Wire(new MainPipeInfo)
+    info.reqTag := task.tag
+    info.set := task.set
+    info.isPrefetch := task.opcode === Hint
+    info.channel := task.channel
+    info
+  }
+  io.bufferInfo.zip(buffer).foreach {
+    case (out, in) =>
+      out.valid := in.valid
+      out.bits := TaskBundletoMainPipeInfo(in.task)
+  }
 
   // add XSPerf to see how many cycles the req is held in Buffer
   if(cacheParams.enablePerf) {
