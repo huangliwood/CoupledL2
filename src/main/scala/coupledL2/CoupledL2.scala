@@ -32,6 +32,7 @@ import xs.utils.mbist.{MBISTInterface, MBISTPipeline}
 import xs.utils.perf.{DebugOptionsKey, HasPerfLogging}
 import xs.utils.sram.SRAMTemplate
 import coupledL2.utils.HasPerfEvents
+import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 
 trait HasCoupledL2Parameters {
   val p: Parameters
@@ -242,6 +243,8 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
       }
     case _ => None //Spp not exist, can not use multl-level refill
   }
+  val device = new SimpleDevice("l2", Seq("xiangshan,cpl2"))
+  val intNode = IntSourceNode(IntSourcePortSimple(resources = device.int))
 
   lazy val module = new CoupledL2Impl
   class CoupledL2Impl extends LazyModuleImp(this) with HasPerfLogging with HasPerfEvents{
@@ -250,6 +253,8 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
     val io = IO(new Bundle {
       val dfx_reset = Input(new DFTResetSignals())
     })
+    intNode.out.foreach(int => int._1.foreach(_ := false.B))
+    intNode.out.foreach(i => dontTouch(i._1))
 
     // Display info
     val sizeBytes = cacheParams.toCacheParams.capacity.toDouble
