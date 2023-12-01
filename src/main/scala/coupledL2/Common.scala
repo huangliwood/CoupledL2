@@ -52,6 +52,10 @@ class ReplacerInfo(implicit p: Parameters) extends L2Bundle {
   val reqSource = UInt(MemReqSource.reqSourceBits.W)
 }
 
+trait HasCorruptBit {
+  val corrupt = Bool() // corrupt data checked by ECC in DataStorage (ECC)
+}
+
 trait HasChannelBits { this: Bundle =>
   val channel = UInt(3.W)
   def fromA = channel(0).asBool
@@ -61,7 +65,7 @@ trait HasChannelBits { this: Bundle =>
 
 // We generate a Task for every TL request
 // this is the info that flows in Mainpipe
-class TaskBundle(implicit p: Parameters) extends L2Bundle with HasChannelBits {
+class TaskBundle(implicit p: Parameters) extends L2Bundle with HasChannelBits with HasCorruptBit {
   val set = UInt(setBits.W)
   val tag = UInt(tagBits.W)
   val off = UInt(offsetBits.W)
@@ -176,7 +180,14 @@ class MSHRRequest(implicit p: Parameters) extends L2Bundle {
     val isPrefetch = Bool()
   }
 
-// MSHR info to ReqBuf and SinkB
+// MainPipe info
+class MainPipeInfo(implicit p: Parameters) extends L2Bundle with HasChannelBits {
+  val reqTag = UInt(tagBits.W)
+  val set = UInt(setBits.W)
+  val isPrefetch = Bool()
+}
+
+// MSHR info to ReqBuf and SinkB and sinkA and ReqArb
 class MSHRInfo(implicit p: Parameters) extends L2Bundle with HasChannelBits {
   val set = UInt(setBits.W)
   val way = UInt(wayBits.W)
@@ -281,7 +292,7 @@ class PrefetchRecv extends Bundle {
   val addr = UInt(64.W)
   val addr_valid = Bool()
   val l2_pf_en = Bool()
-  val io_l2_pf_ctrl = UInt(2.W)
+  val l2_pf_ctrl = UInt(2.W)
 }
 
 class LlcPrefetchRecv extends Bundle{

@@ -17,6 +17,7 @@ import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import chisel3.util.experimental.BoringUtils
 import scala.collection.mutable.ArrayBuffer
 import xs.utils.GTimer
+import xs.utils.DFTResetSignals
 import xs.utils.perf.{DebugOptions,DebugOptionsKey}
 import huancun.{HuanCun, HCCacheParameters, HCCacheParamsKey, CacheParameters, CacheCtrl}
 import coupledL2.utils.HasPerfEvents
@@ -516,8 +517,9 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       case L2ParamKey => L2Param(
         name = s"L2",
         ways = 4,
-        // sets = 128,
         sets = 32,
+        // ways = 8,
+        // sets = 256,
         clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
         echoField = Seq(huancun.DirtyField()),
         prefetch = Some(PrefetchReceiverParams()),
@@ -558,6 +560,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       level = 3,
       ways = 4,
       sets = 64,
+      // sets = 2048,
       inclusive = false,
       clientCaches = Seq(CacheParameters(sets = 32, ways = 4, blockGranularity = log2Ceil(32), name = "L2")),
       sramClkDivBy2 = true,
@@ -622,19 +625,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       maxFlight = Some(16)
     ))
   )))
- l2xbar := TLBuffer() := AXI2TL(16, 16) := l3FrontendAXI4Node
-  // l2xbar :=
-  // TLFIFOFixer() :=
-  // TLWidthWidget(32) :=
-  // TLBuffer() :=
-  // AXI4ToTL() :=
-  // AXI4Buffer() :=
-  // AXI4UserYanker(Some(16)) :=
-  // AXI4Fragmenter() :=
-  // AXI4Buffer() :=
-  // AXI4Buffer() :=
-  // AXI4IdIndexer(4) :=
-  // l3FrontendAXI4Node
+ l2xbar := TLBuffer() := AXI2TL(16, 16) := AXI4Fragmenter() := l3FrontendAXI4Node
 
   ram.node :=
     TLXbar() :=*
@@ -658,6 +649,10 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       val perfDump = Input(Bool())
     })
 
+    l2List.foreach(_.module.io.dfx_reset.scan_mode := false.B)
+    l2List.foreach(_.module.io.dfx_reset.lgc_rst_n := true.B.asAsyncReset)
+    l2List.foreach(_.module.io.dfx_reset.mode := false.B)
+    
     val logTimestamp = WireInit(0.U(64.W))
     val perfClean = WireInit(false.B)
     val perfDump = WireInit(false.B)

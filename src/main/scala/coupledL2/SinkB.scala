@@ -18,7 +18,7 @@
 package coupledL2
 
 import chisel3._
-import chisel3.util._
+import chisel3.util.{DecoupledIO, _}
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink._
 import xs.utils.perf.HasPerfLogging
@@ -34,6 +34,11 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
     val b = Flipped(DecoupledIO(new TLBundleB(edgeIn.bundle)))
     val task = DecoupledIO(new TaskBundle)
     val msInfo = Vec(mshrsAll, Flipped(ValidIO(new MSHRInfo)))
+    val s3Info = Flipped(ValidIO(new Bundle() {
+      val tag = UInt(tagBits.W)
+      val set = UInt(setBits.W)
+      val willAllocMshr = Bool()
+    }))
     val bMergeTask = ValidIO(new BMergeTask)
   })
 
@@ -68,43 +73,108 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
     task.reqSource := MemReqSource.NoWhere.id.U // Ignore
     task.replTask := false.B
     task.mergeTask := false.B
+    task.corrupt := false.B
     task
   }
   val task = fromTLBtoTaskBundle(io.b.bits)
 
   /* ======== Merge Nested-B req ======== */
+  def sameAddr(a: TaskBundle, s: MSHRInfo): Bool = {
+    a.set === s.set && a.tag === s.reqTag
+  }
+  def sameAddrMeta(a: TaskBundle, s: MSHRInfo): Bool = {
+    a.set === s.set && a.tag === s.metaTag
+  }
+  def addrConflictMask(a: TaskBundle): UInt = VecInit(io.msInfo.map(s =>
+    s.valid && sameAddr(a, s.bits) && !s.bits.willFree && !s.bits.nestB)).asUInt
+  def replaceConflictMask(a: TaskBundle): UInt = VecInit(io.msInfo.map(s =>
+    s.valid && sameAddr(a, s.bits) && s.bits.releaseNotSent && !s.bits.mergeB)).asUInt
+  def mergeBMask(a: TaskBundle): UInt = VecInit(io.msInfo.map(s =>
+    s.valid && sameAddrMeta(a, s.bits) && s.bits.mergeB)).asUInt
+
   // unable to accept incoming B req because same-addr as some MSHR REQ
-  val addrConflict = VecInit(io.msInfo.map(s =>
-    s.valid && s.bits.set === task.set && s.bits.reqTag === task.tag && !s.bits.willFree && !s.bits.nestB
-  )).asUInt.orR
+  def addrConflict(a: TaskBundle): Bool = addrConflictMask(a).orR
 
   // unable to accept incoming B req because same-addr as some MSHR replaced block and cannot nest
-  val replaceConflictMask = VecInit(io.msInfo.map(s =>
-    s.valid && s.bits.set === task.set && s.bits.metaTag === task.tag && s.bits.releaseNotSent && !s.bits.mergeB
-  )).asUInt
-  val replaceConflict = replaceConflictMask.orR
+  def replaceConflict(a: TaskBundle): Bool = replaceConflictMask(a).orR
 
   // incoming B can be merged with some MSHR replaced block and able to be accepted
-  val mergeBMask = VecInit(io.msInfo.map(s =>
-    s.valid && s.bits.set === task.set && s.bits.metaTag === task.tag && s.bits.mergeB
-  )).asUInt
+  def mergeB(a: TaskBundle) = mergeBMask(a).orR // TODO: && task.param === toN // only toN can merge with MSHR-Release
+  def mergeBId(a: TaskBundle) = OHToUInt(mergeBMask(a))
 
-  assert(PopCount(replaceConflictMask) <= 1.U)
-  assert(PopCount(mergeBMask) <= 1.U)
+  // unable to accept incoming B req because same-addr as mainpipe S3
+  def s3AddrConflict(a: TaskBundle): Bool = io.s3Info.bits.set === a.set && io.s3Info.bits.tag === a.tag && io.s3Info.bits.willAllocMshr
 
-  val mergeB = mergeBMask.orR // TODO: && task.param === toN // only toN can merge with MSHR-Release
-  val mergeBId = OHToUInt(mergeBMask)
+  val task_temp = WireInit(0.U.asTypeOf(io.task))
+  val task_retry = WireInit(0.U.asTypeOf(io.task))
+  val taskOutPipe = Queue(task_temp, entries = 1, pipe = true, flow = false) // for timing: mshrCtl <> sinkB <> reqArb
+  val taskRetryPipe = Queue(task_retry, entries = 1, pipe = true, flow = true)
+
+  val task_be_sent = Mux(taskRetryPipe.valid, taskRetryPipe.bits, task)
+  val task_addrConflict = addrConflict(task_be_sent)
+  val task_replaceConflict = replaceConflict(task_be_sent)
+  val task_mergeB = mergeB(task_be_sent)
+  val task_mergeBId = mergeBId(task_be_sent)
+  val task_s3AddrConflict = s3AddrConflict(task_be_sent)
 
   // when conflict, we block B req from entering SinkB
   // when !conflict and mergeB , we merge B req to MSHR
-  io.task.valid := io.b.valid && !addrConflict && !replaceConflict && !mergeB
-  io.task.bits  := task
-  io.b.ready :=  mergeB || (io.task.ready && !addrConflict && !replaceConflict)
+  task_temp.valid := (io.b.valid || taskRetryPipe.valid) && !task_addrConflict && !task_replaceConflict && !task_mergeB && !task_s3AddrConflict
+  task_temp.bits := task_be_sent
+  // task_out
+  io.task.valid := taskOutPipe.valid
+  io.task.bits := taskOutPipe.bits
+  taskOutPipe.ready := true.B
+  // retry
+  task_retry.valid := io.task.valid && !io.task.ready
+  task_retry.bits := taskOutPipe.bits
+  // task can pass (retry override io.b)
+  val task_out_ready = task_mergeB || (task_temp.ready && !task_addrConflict && !task_replaceConflict && !task_s3AddrConflict)
+  io.b.ready :=  task_out_ready && !taskRetryPipe.valid
+  taskRetryPipe.ready := task_out_ready
 
-  io.bMergeTask.valid := io.b.valid && mergeB
-  io.bMergeTask.bits.id := mergeBId
-  io.bMergeTask.bits.task := task
+  dontTouch(task_temp)
+  dontTouch(task_retry)
 
-  XSPerfAccumulate("mergeBTask", io.bMergeTask.valid)
-  //!!WARNING: TODO: if this is zero, that means fucntion [Probe merge into MSHR-Release] is never tested, and may have flaws
+  val bMergeTask = Wire(Decoupled(new BMergeTask))
+  bMergeTask.valid := io.b.valid && task_mergeB && !task_s3AddrConflict
+  bMergeTask.bits.id := task_mergeBId
+  bMergeTask.bits.task := task
+  val bMergeTaskOutPipe = Queue(bMergeTask, entries = 1, pipe = true, flow = false) // for timing: mshrCtl <> sinkB <> mshrCtl
+  io.bMergeTask.valid := bMergeTaskOutPipe.valid
+  io.bMergeTask.bits := bMergeTaskOutPipe.bits
+  bMergeTaskOutPipe.ready := true.B
+
+  //--------------------------------- assert ----------------------------------------//
+  val s_addrConflict = addrConflict(io.task.bits)
+  val s_replaceConflict = replaceConflict(io.task.bits)
+
+  val mergeB_mshr = WireInit(io.msInfo(io.bMergeTask.bits.id))
+  val mergeB_task = WireInit(io.bMergeTask.bits.task)
+  val s_mergeB = mergeB_mshr.valid && mergeB_mshr.bits.metaTag === mergeB_task.tag && mergeB_mshr.bits.set === mergeB_task.set && mergeB_mshr.bits.mergeB
+
+  val io_task_can_valid = !s_addrConflict && !s_replaceConflict && !s_mergeB
+  val io_bMergeTask_can_valid = s_mergeB
+  if(cacheParams.enableAssert) {
+    when(io.task.fire){
+      assert(io_task_can_valid, "io_task cant valid")
+    }
+    when(io.bMergeTask.fire){
+      assert(io_bMergeTask_can_valid, "io_bMergeTask cant valid")
+    }
+    dontTouch(s_addrConflict)
+    dontTouch(s_replaceConflict)
+    dontTouch(mergeB_mshr)
+    dontTouch(mergeB_task)
+    dontTouch(s_mergeB)
+    dontTouch(io_task_can_valid)
+    dontTouch(io_bMergeTask_can_valid)
+  }
+
+  if(cacheParams.enablePerf) {
+    XSPerfAccumulate("io_task_retry", task_retry.valid)
+    XSPerfAccumulate("mergeBTask", io.bMergeTask.valid)
+    XSPerfAccumulate("mp_s3_block_sinkB", (io.b.valid || taskRetryPipe.valid) && !task_addrConflict && !task_replaceConflict && !task_mergeB && task_s3AddrConflict)
+    //!!WARNING: TODO: if this is zero, that means fucntion [Probe merge into MSHR-Release] is never tested, and may have flaws
+  }
 }

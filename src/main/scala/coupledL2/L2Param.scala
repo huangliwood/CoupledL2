@@ -110,13 +110,19 @@ case class L2Param
   hasMbist: Boolean = false,
   hasShareBus: Boolean = false,
 
+  // Numbers of Performance Counter in <xxx submodule>
+  numPCntMP: Int = 11,
+  numPCntReqArb: Int = 0,
+
   hartIds: Seq[Int] = Seq[Int](),
   // Prefetch
   prefetch: Option[PrefetchParameters] = None,
   // Signature Path Prefetch multi-level cache refill support option
   sppMultiLevelRefill : Option[PrefetchParameters] = None,
   // Performance analysis
-  enablePerf: Boolean = true,
+  enablePerf: Boolean = false,
+  // Assert enable (we should disable assertion if we want to collect coverage info while simulating)
+  enableAssert: Boolean = true,
   // Monitor
   enableMonitor: Boolean = true,
   // TopDown
@@ -131,6 +137,8 @@ case class L2Param
     blockGranularity = log2Ceil(sets),
     blockBytes = blockBytes
   )
+
+  def getPCntAll: Int = numPCntMP + numPCntReqArb
 }
 
 case object EdgeInKey extends Field[TLEdgeIn]
