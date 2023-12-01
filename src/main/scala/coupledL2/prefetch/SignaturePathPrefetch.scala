@@ -672,7 +672,11 @@ class SignaturePathPrefetch(parentName:String="Unkown")(implicit p: Parameters) 
 
   pTable.io.req <> sTable.io.resp //to detail
   pTable.io.pt2st_bp <> sTable.io.s0_bp_update
-  pTable.io.resp <> unpack.io.req
+//  pTable.io.resp <> unpack.io.req
+  val pTable_resp = Mux(reset.asBool, pTable.io.resp.bits, 0.U.asTypeOf(pTable.io.resp.bits))
+  pTable.io.resp.ready := false.B
+  unpack.io.req.valid := false.B
+  unpack.io.req.bits := pTable_resp
 
   val newAddr = Cat(unpack.io.resp.bits.prefetchBlock, 0.U(offsetBits.W))
   val ghr_deadCov_state = RegEnable(io.from_ghr.bits.deadCov_state, 1.U, io.from_ghr.valid)
