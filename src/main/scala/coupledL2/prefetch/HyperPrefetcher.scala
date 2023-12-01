@@ -25,7 +25,7 @@ trait HasHyperPrefetcherParams extends HasCoupledL2Parameters {
   val pageAddrBits = fullAddressBits - pageOffsetBits
   val blkOffsetBits = pageOffsetBits - offsetBits
   val blkNums = 1<<blkOffsetBits //64
-  
+
   val fTableEntries = hyperPrefetchParams.fTableEntries
   val fTagBits = pageAddrBits - log2Up(fTableEntries)
   val pTableQueueEntries = hyperPrefetchParams.pTableQueueEntries
@@ -266,12 +266,12 @@ class HyperPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) ext
     fTable.io.req.bits := bop.io.req.bits
     fTable.io.pf_Id := PrefetcherId.BOP
     // fTable.io.spp2llc := false.B
-  }.elsewhen(q_sms.io.deq.fire) {
+  }.elsewhen(q_sms.io.deq.valid) {
     fTable.io.req.valid := q_sms.io.deq.valid
     fTable.io.req.bits := q_sms.io.deq.bits
     fTable.io.pf_Id := PrefetcherId.SMS
     // fTable.io.spp2llc := false.B
-  }.otherwise {
+  }.elsewhen(q_spp.io.deq.valid) {
     fTable.io.req.valid := RegNext(q_spp.io.deq.valid,false.B)
     fTable.io.req.bits.tag := RegEnable(q_spp.io.deq.bits.tag,q_spp.io.deq.valid)
     fTable.io.req.bits.set := RegEnable(q_spp.io.deq.bits.set,q_spp.io.deq.valid)
@@ -280,9 +280,16 @@ class HyperPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) ext
     fTable.io.req.bits.needT := RegEnable(q_spp.io.deq.bits.needT,q_spp.io.deq.valid)
     fTable.io.pf_Id := PrefetcherId.SPP
     // fTable.io.spp2llc := q_spp.io.deq.bits.hint2llc
+  }.otherwise{
+    fTable.io.req.valid := false.B
+    fTable.io.req.bits := 0.U.asTypeOf(fTable.io.req.bits.cloneType)
+    fTable.io.pf_Id := PrefetcherId.BOP
   }
 
-  io.req <> fTable.io.resp
+  io.req.valid := RegNext(fTable.io.resp.valid,false.B)
+  io.req.bits := RegEnable(fTable.io.resp.bits,fTable.io.resp.valid)
+  fTable.io.resp.ready := true.B
+
   // io.hint2llc := fTable.io.hint2llc;dontTouch(io.hint2llc)
   io.hint2llc := 0.U.asTypeOf(Valid(new PrefetchReq))
   fTable.io.evict.valid := io.evict.valid

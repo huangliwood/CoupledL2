@@ -226,12 +226,12 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
       hybrid_pfts.io.train <> io.train
       hybrid_pfts.io.resp <> io.resp
       hybrid_pfts.io.recv_addr := ValidIODelay(io.recv_addr, 2)
+      pftQueue.io.enq <> hybrid_pfts.io.req
+      pipe.io.in <> pftQueue.io.deq
+      io.req <> pipe.io.out
       io.evict match {
         case Some(evict) =>
         hybrid_pfts.io.evict <> evict
-        pftQueue.io.enq <> hybrid_pfts.io.req
-        pipe.io.in <> pftQueue.io.deq
-        io.req <> pipe.io.out
         case None =>
         hybrid_pfts.io.evict := DontCare
       }
