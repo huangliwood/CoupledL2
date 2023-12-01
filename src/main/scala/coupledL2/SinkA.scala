@@ -113,6 +113,7 @@ class SinkA(implicit p: Parameters) extends L2Module with HasPerfLogging{
   if (prefetchOpt.nonEmpty) {
     val pipe = Module(new Pipeline(io.prefetchReq.get.bits.cloneType, 1))
     pipe.io.in <> io.prefetchReq.get
+    pipe.io.in.ready := true.B
     prefetchReq.get.valid := pipe.io.out.valid
     prefetchReq.get.bits := fromPrefetchReqtoTaskBundle(pipe.io.out.bits)
     pipe.io.out.ready := prefetchReq.get.ready

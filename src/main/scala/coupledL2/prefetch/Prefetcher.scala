@@ -229,6 +229,7 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
       pftQueue.io.enq <> hybrid_pfts.io.req
       pipe.io.in <> pftQueue.io.deq
       io.req <> pipe.io.out
+      pipe.io.out.ready := true.B
       io.evict match {
         case Some(evict) =>
         hybrid_pfts.io.evict <> evict
