@@ -81,6 +81,12 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
     // generate hint signal for L1
     val l1Hint = ValidIO(new L2ToL1Hint())
     val globalCounter = Output(UInt((log2Ceil(mshrsAll) + 1).W))
+
+    val hintDup = Flipped(ValidIO(new Bundle() {
+      val tag = Input(UInt(tagBits.W))
+      val set = Input(UInt(setBits.W))
+      val pfVec = prefetchOpt.map(_ => UInt(PfVectorConst.bits.W))
+    }))
   })
 
   // =========== functions ===========
@@ -168,23 +174,38 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
         val set = UInt(setBits.W)
         val pfVec = UInt(PfVectorConst.bits.W)
       },
-      entries = 4,
+      entries = 8,
       flow = true))
+    val latePftRespQueue = Module(new Queue(new Bundle() {
+            val tag = UInt(tagBits.W)
+            val set = UInt(setBits.W)
+            val pfVec = prefetchOpt.map(_ => UInt(PfVectorConst.bits.W))
+          },
+      entries = 8,
+      flow = true))
+
+    latePftRespQueue.io.enq.valid := io.hintDup.valid
+    latePftRespQueue.io.enq.bits.tag := io.hintDup.bits.tag
+    latePftRespQueue.io.enq.bits.set := io.hintDup.bits.set
+    latePftRespQueue.io.enq.bits.pfVec.get := io.hintDup.bits.pfVec.get
 
     pftRespQueue.io.enq.valid := io.d_task.valid && dtaskOpcode === HintAck &&
       io.d_task.bits.task.isfromL2pft
     pftRespQueue.io.enq.bits.tag := io.d_task.bits.task.tag
     pftRespQueue.io.enq.bits.set := io.d_task.bits.task.set
-    pftRespQueue.io.enq.bits.pfVec := io.d_task.bits.task.pfVec.getOrElse(PfSource.BOP)
+    pftRespQueue.io.enq.bits.pfVec := io.d_task.bits.task.pfVec.getOrElse(PfSource.NONE)
 
-    val resp = io.prefetchResp.get
-    resp.valid := pftRespQueue.io.deq.valid
-    resp.bits.tag := pftRespQueue.io.deq.bits.tag
-    resp.bits.set := pftRespQueue.io.deq.bits.set
-    resp.bits.pfVec := pftRespQueue.io.deq.bits.pfVec
-    pftRespQueue.io.deq.ready := resp.ready
+    val toPftArb = Module(new FastArbiter(new Bundle() {
+      val tag = UInt(tagBits.W)
+      val set = UInt(setBits.W)
+      val pfVec = prefetchOpt.map(_ => UInt(PfVectorConst.bits.W))
+    }, 2))
+    toPftArb.io.in(0) <> pftRespQueue.io.deq
+    toPftArb.io.in(1) <> latePftRespQueue.io.deq
+    io.prefetchResp.get <> toPftArb.io.out
 
-    // assert(pftRespQueue.io.enq.ready, "pftRespQueue should never be full, no back pressure logic") // TODO: has bug here
+    assert(latePftRespQueue.io.enq.ready, "latePftRespQueue should never be full, no back pressure logic") // TODO: has bug here
+    assert(pftRespQueue.io.enq.ready, "pftRespQueue should never be full, no back pressure logic") // TODO: has bug here  
   }
   // If no prefetch, there never should be HintAck
   assert(prefetchOpt.nonEmpty.B || !io.d_task.valid || dtaskOpcode =/= HintAck)
@@ -293,6 +314,8 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
   io.l1Hint.bits.sourceId := hintQueue.io.deq.bits
 
   // =========== XSPerf ===========
+  XSPerfAccumulate("grantbuffer_pf_resp",io.prefetchResp.get.valid)
+  XSPerfAccumulate("grantbuffer_pf_resp_onlyBOP",io.prefetchResp.get.valid && io.prefetchResp.get.bits.pfVec === PfSource.BOP)
   if (cacheParams.enablePerf) {
     val timers = RegInit(VecInit(Seq.fill(grantBufInflightSize){0.U(64.W)}))
     inflight_grant zip timers map {

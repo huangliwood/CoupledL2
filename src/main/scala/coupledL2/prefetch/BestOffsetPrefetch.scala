@@ -262,10 +262,10 @@ class OffsetScoreTable(implicit p: Parameters) extends BOPModule with HasPerfLog
 
   for (off <- offsetList) {
     if (off < 0) {
-      XSPerfAccumulate("best_offset_neg_" + (-off).toString + "_learning_phases",
+      XSPerfAccumulate("best_offset_learning_phases_neg_" + (-off).toString,
         Mux(state === s_idle, (bestOffset === off.S(offsetWidth.W).asUInt).asUInt, 0.U))
     } else {
-      XSPerfAccumulate("best_offset_pos_" + off.toString + "_learning_phases",
+      XSPerfAccumulate("best_offset_learning_phases_pos_" + off.toString ,
         Mux(state === s_idle, (bestOffset === off.U).asUInt, 0.U))
     }
   }
@@ -323,8 +323,10 @@ class BestOffsetPrefetch(implicit p: Parameters) extends BOPModule with HasPerfL
       XSPerfAccumulate("best_offset_pos_" + off.toString, prefetchOffset === off.U)
     }
   }
+  dontTouch(io)
   XSPerfAccumulate("bop_req", io.req.fire)
-  XSPerfAccumulate("bop_train", io.train.fire)
+  XSPerfAccumulate("bop_recv_train", io.train.fire)
+  XSPerfAccumulate("bop_recv_resp", io.resp.fire)
   XSPerfAccumulate("bop_train_stall_for_st_not_ready", io.train.valid && !scoreTable.io.req.ready)
   XSPerfAccumulate("bop_cross_page", scoreTable.io.req.fire && crossPage)
 }

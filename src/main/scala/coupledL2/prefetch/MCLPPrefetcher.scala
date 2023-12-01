@@ -29,7 +29,7 @@ import coupledL2.PfSource
 
 
 
-case class HyperPrefetchParams(
+case class MCLPPrefetchParams(
   fTableEntries: Int = 32,
   pTableQueueEntries: Int = 2
 )
@@ -38,8 +38,8 @@ case class HyperPrefetchParams(
   override val inflightEntries: Int = 32
 }
 
-trait HasHyperPrefetcherParams extends HasCoupledL2Parameters {
-  val hyperPrefetchParams = prefetchOpt.get.asInstanceOf[HyperPrefetchParams]
+trait HasMCLPPrefetcherParams extends HasCoupledL2Parameters {
+  val hyperPrefetchParams = MCLPPrefetchParams()
   
   val blkAddrBits = fullAddressBits - offsetBits
   val pageAddrBits = fullAddressBits - pageOffsetBits
@@ -54,8 +54,8 @@ trait HasHyperPrefetcherParams extends HasCoupledL2Parameters {
   def get_blockAddr(x:UInt) = x(fullAddressBits-1,offsetBits)
 }
 
-abstract class PrefetchBranchV2Module(implicit val p: Parameters) extends Module with HasHyperPrefetcherParams
-abstract class PrefetchBranchV2Bundle(implicit val p: Parameters) extends Bundle with HasHyperPrefetcherParams
+abstract class PrefetchBranchV2Module(implicit val p: Parameters) extends Module with HasMCLPPrefetcherParams
+abstract class PrefetchBranchV2Bundle(implicit val p: Parameters) extends Bundle with HasMCLPPrefetcherParams
 
 object PfcovState {
   val bits = 2
@@ -76,7 +76,7 @@ object PfaccState {
 }
 
 class Monitorbuffer[T <: Data](val gen: PrefetchReq,val entries:Int=16)(implicit val p: Parameters)
-extends Module with HasCircularQueuePtrHelper with HasHyperPrefetcherParams{
+extends Module with HasCircularQueuePtrHelper with HasMCLPPrefetcherParams{
     val io = IO(new Bundle{
         val enq = Flipped(DecoupledIO(gen))
         val deq = DecoupledIO(gen)
@@ -1236,8 +1236,7 @@ class SignaturePathPrefetch(parentName:String="Unkown")(implicit p: Parameters) 
   XSPerfAccumulate( "spp_hintReq", io.hint_req.valid)
 }
 
-
-class HyperPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends PrefetchBranchV2Module with HasPerfLogging{
+class MCLPPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends PrefetchBranchV2Module with HasPerfLogging{
   val io = IO(new Bundle() {
     val train = Flipped(DecoupledIO(new PrefetchTrain))
     val req = DecoupledIO(new PrefetchReq)
@@ -1452,9 +1451,11 @@ class HyperPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) ext
   val train_bop_q = Module(new Queue(new PrefetchTrain, entries = 2, flow = true, pipe = false))
   val train_spp_q = Module(new Queue(new PrefetchTrain, entries = 2, flow = true, pipe = false))
   // train_bop_q.io.enq.valid := false.B
-  train_bop_q.io.enq.valid :=(train_q.io.deq.valid && (train_q.io.deq.bits.hasBOP || train_q.io.deq.bits.hasSMS) && (train_q.io.deq.bits.state === AccessState.MISS)) || 
-  (trainRedircect.valid && (trainRedircect.bits.hasBOP || trainRedircect.bits.hasSMS))
+  train_bop_q.io.enq.valid := train_q.io.deq.valid 
+  // train_bop_q.io.enq.valid :=(train_q.io.deq.valid && (train_q.io.deq.bits.hasBOP || train_q.io.deq.bits.hasSMS) && (train_q.io.deq.bits.state === AccessState.MISS)) || 
+  // (trainRedircect.valid && (trainRedircect.bits.hasBOP || trainRedircect.bits.hasSMS))
   train_bop_q.io.enq.bits := Mux(trainRedircect.valid,trainRedircect.bits,train_q.io.deq.bits)
+
   // train_spp_q.io.enq.valid := false.B
   // train_spp_q.io.enq.valid := train_q.io.deq.valid 
   train_spp_q.io.enq.valid := (train_q.io.deq.valid && train_q.io.deq.bits.hasSPP && (train_q.io.deq.bits.state === AccessState.MISS)) || 
@@ -1470,7 +1471,7 @@ class HyperPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) ext
   bop.io.train.bits := train_bop_q.io.deq.bits
   train_bop_q.io.deq.ready := bop.io.train.ready
 
-  bop.io.resp.valid := io.resp.valid && io.resp.bits.hasBOP
+  bop.io.resp.valid := io.resp.valid //&& io.resp.bits.hasBOP
   bop.io.resp.bits := io.resp.bits
   io.resp.ready := bop.io.resp.ready
 
@@ -1510,7 +1511,6 @@ class HyperPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) ext
   spp.io.from_ghr.bits.global_queue_used := MLFQ_1.io.used
 
 
-  XSPerfAccumulate("bop_recv_train", train_bop_q.io.deq.fire)
   XSPerfAccumulate("spp_recv_train", train_spp_q.io.deq.fire)
   XSPerfAccumulate("bop_send2_queue", q_bop.io.enq.fire)
   XSPerfAccumulate("sms_send2_queue", q_sms.io.enq.fire)

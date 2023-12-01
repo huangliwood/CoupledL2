@@ -43,7 +43,8 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
   })
 
   val reqArb = Module(new RequestArb())
-  val a_reqBuf = Module(new RequestBuffer(entries=8))
+  // val a_reqBuf = Module(new RequestBuffer(entries=8))
+  val a_reqBuf = Module(new RequestBuffer(entries = 4))
   val mainPipe = Module(new MainPipe())
   val mshrCtl = Module(new MSHRCtl())
   val directory = Module(new Directory(parentName + "dir_"))
@@ -69,6 +70,8 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
   a_reqBuf.io.mshrInfo := mshrCtl.io.msInfo
   a_reqBuf.io.mainPipeBlock := mainPipe.io.toReqBuf
   a_reqBuf.io.s1Entrance := reqArb.io.s1Entrance
+  sinkA.io.mshrInfo := mshrCtl.io.msInfo
+  sinkA.io.mpInfo := a_reqBuf.io.bufferInfo ++ reqArb.io.mpInfo ++ mainPipe.io.mpInfo
   sinkB.io.msInfo := mshrCtl.io.msInfo
   sinkC.io.msInfo := mshrCtl.io.msInfo
 
@@ -142,6 +145,7 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
   grantBuf.io.d_task <> mainPipe.io.toSourceD
   grantBuf.io.fromReqArb.status_s1 := reqArb.io.status_s1
   grantBuf.io.pipeStatusVec := reqArb.io.status_vec ++ mainPipe.io.status_vec
+  grantBuf.io.hintDup := a_reqBuf.io.hintDup
   mshrCtl.io.pipeStatusVec(0) := reqArb.io.status_vec(1) // s2 status
   mshrCtl.io.pipeStatusVec(1) := mainPipe.io.status_vec(0) // s3 status
 
@@ -151,7 +155,7 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
     sinkA.io.prefetchReq.get <> pfio.req
     pfio.resp <> grantBuf.io.prefetchResp.get
     pfio.recv_addr := 0.U.asTypeOf(ValidIO(UInt(64.W)))
-    if(pfio.evict.isDefined){
+    if(pfio.evict.isDefined && mainPipe.io.prefetchEvict.isDefined){
       pfio.evict.get <> mainPipe.io.prefetchEvict.get
     }
   }

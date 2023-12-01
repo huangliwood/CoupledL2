@@ -28,11 +28,13 @@ import xs.utils.{Pipeline,ParallelPriorityMux}
 import xs.utils.perf.HasPerfLogging
 import xs.utils.tl.MemReqSource
 
-class SinkA(implicit p: Parameters) extends L2Module with HasPerfLogging{
+class SinkA(entries: Int=4)(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val io = IO(new Bundle() {
     val a = Flipped(DecoupledIO(new TLBundleA(edgeIn.bundle)))
     val prefetchReq = prefetchOpt.map(_ => Flipped(DecoupledIO(new PrefetchReq)))
     val task = DecoupledIO(new TaskBundle)
+    val mshrInfo  = Vec(mshrsAll, Flipped(ValidIO(new MSHRInfo)))
+    val mpInfo = Vec(entries+3, Flipped(ValidIO(new MainPipeInfo)))
   })
   assert(!(io.a.valid && io.a.bits.opcode(2, 1) === 0.U), "no Put")
 
@@ -145,6 +147,37 @@ class SinkA(implicit p: Parameters) extends L2Module with HasPerfLogging{
       XSPerfAccumulate("sinkA_prefetch_from_l2", io.prefetchReq.get.bits.is_l2pf && io.prefetchReq.get.fire)
       XSPerfAccumulate("sinkA_prefetch_from_l1", io.prefetchReq.get.bits.is_l1pf && io.prefetchReq.get.fire)
   }
+
+  // cycels stalled by mainpipe
+  def mshrSameAddr(a: TaskBundle, b: MSHRInfo): Bool = Cat(a.tag, a.set) === Cat(b.reqTag, b.set)
+  def mpSameAddr(a: TaskBundle, b: MainPipeInfo): Bool = Cat(a.tag, a.set) === Cat(b.reqTag, b.set)
+
+  def HintMshrAddrConflictMask(a: TaskBundle): UInt = VecInit(io.mshrInfo.map(s =>
+    s.valid && mshrSameAddr(a, s.bits) && !s.bits.willFree && s.bits.isPrefetch)).asUInt
+  def HintMpAddrConflictMask(a: TaskBundle): UInt = VecInit(io.mpInfo.map(s =>
+    s.valid && mpSameAddr(a, s.bits) && s.bits.isPrefetch)).asUInt
+
+  def reqAMshrAddrConflictMask(a: TaskBundle): UInt = VecInit(io.mshrInfo.map(s =>
+    s.valid && mshrSameAddr(a, s.bits) && !s.bits.willFree && !s.bits.isPrefetch && s.bits.fromA)).asUInt
+  def reqAMpAddrConflictMask(a: TaskBundle): UInt = VecInit(io.mpInfo.map(s =>
+    s.valid && mpSameAddr(a, s.bits) && !s.bits.isPrefetch && s.bits.fromA)).asUInt
+
+  val reqA_match_mshr_hint = HintMshrAddrConflictMask(io.task.bits).orR
+  val reqA_match_mp_hint = HintMpAddrConflictMask(io.task.bits).orR
+
+  val reqHint_match_mshr_hint = reqAMshrAddrConflictMask(io.task.bits).orR
+  val reqHint_match_mp_hint = reqAMpAddrConflictMask(io.task.bits).orR
+
+  XSPerfAccumulate("sinkA_Acquire_and_has_Hint(SameAddr)_in_MSHR", io.task.fire && reqA_match_mshr_hint && ( io.task.bits.opcode === AcquireBlock || io.task.bits.opcode === AcquireBlock))
+  XSPerfAccumulate("sinkA_Get_and_has_Hint(SameAddr)_in_MSHR", io.task.fire && reqA_match_mshr_hint && io.task.bits.opcode === Get)
+  XSPerfAccumulate("sinkA_Hint_and_has_Hint(SameAddr)_in_MSHR", io.task.fire && reqA_match_mshr_hint && io.task.bits.opcode === Hint)
+
+  XSPerfAccumulate("sinkA_Acquire_and_has_Hint(SameAddr)_in_mp_and_buffer", io.task.fire && reqA_match_mp_hint && (io.task.bits.opcode === AcquireBlock || io.task.bits.opcode === AcquireBlock))
+  XSPerfAccumulate("sinkA_Get_and_has_Hint(SameAddr)_in_mp_and_buffer", io.task.fire && reqA_match_mp_hint && io.task.bits.opcode === Get)
+  XSPerfAccumulate("sinkA_Hint_and_has_Hint(SameAddr)_in_mp_and_buffer", io.task.fire && reqA_match_mp_hint && io.task.bits.opcode === Hint)
+
+  XSPerfAccumulate("sinkA_Hint_and_has_reqA(SameAddr)_in_MSHR", io.task.fire && reqHint_match_mshr_hint && io.task.bits.opcode === Hint)
+  XSPerfAccumulate("sinkA_Hint_and_has_reqA(SameAddr)_in_mp_and_buffer", io.task.fire && reqHint_match_mp_hint && io.task.bits.opcode === Hint)
 
   // cycels stalled by mainpipe
   val stall = io.task.valid && !io.task.ready

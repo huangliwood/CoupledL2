@@ -28,7 +28,7 @@ import freechips.rocketchip.tilelink.TLPermissions._
 import coupledL2.utils._
 import coupledL2.debug._
 import coupledL2.prefetch.{AccessState, PrefetchEvict, PrefetchTrain}
-import coupledL2.prefetch.HyperPrefetchParams
+import coupledL2.prefetch.MCLPPrefetchParams
 import xs.utils.perf.HasPerfLogging
 
 class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with HasPerfEvents{
@@ -95,6 +95,9 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     /* read DS and write data into RefillBuf when Acquire toT hits on B */
     val refillBufWrite = Flipped(new MSHRBufWrite())
 
+    /* send to sinkA and req_buffer to count stall */
+    val mpInfo = Vec(2, ValidIO(new MainPipeInfo))
+
     val nestedwb = Output(new NestedWriteback)
     val nestedwbData = Output(new DSBlock)
 
@@ -105,7 +108,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     val prefetchTrain = prefetchOpt.map(_ => DecoupledIO(new PrefetchTrain))
     val prefetchEvict = if(prefetchOpt.isDefined){
       prefetchOpt.get match{
-        case hyper: HyperPrefetchParams => Some(DecoupledIO(new PrefetchEvict))
+        case hyper: MCLPPrefetchParams => Some(DecoupledIO(new PrefetchEvict))
         case hyper2: prefetch.intel_spp.HyperPrefetchParams => Some(DecoupledIO(new PrefetchEvict))
         case _ => None
       }
@@ -157,7 +160,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   val req_acquire_s3        = sinkA_req_s3 && (req_s3.opcode === AcquireBlock || req_s3.opcode === AcquirePerm)
   val req_acquireBlock_s3   = sinkA_req_s3 && req_s3.opcode === AcquireBlock
   val req_prefetch_s3       = sinkA_req_s3 && req_s3.opcode === Hint
-  val req_prefetchMerge_s3  = req_prefetch_s3 && (dirResult_s3.hit && dirResult_s3.meta.prefetch.get && (meta_s3.pfVec.get & req_s3.pfVec.get) =/= req_s3.pfVec.get)
+  val req_prefetchMerge_s3  = req_prefetch_s3 && (dirResult_s3.hit && dirResult_s3.meta.prefetch.get && meta_s3.pfVec.get =/= req_s3.pfVec.get)
   val req_get_s3            = sinkA_req_s3 && req_s3.opcode === Get
 
   val mshr_grant_s3         = mshr_req_s3 && req_s3.fromA && req_s3.opcode(2, 1) === Grant(2, 1) // Grant or GrantData from mshr
@@ -669,6 +672,19 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   io.toSourceC <> c_arb.io.out
   io.toSourceD <> d_arb.io.out
 
+
+  def TaskBundletoMainPipeInfo(task: TaskBundle): MainPipeInfo = {
+    val info = Wire(new MainPipeInfo)
+    info.reqTag := task.tag
+    info.set := task.set
+    info.isPrefetch := task.opcode === Hint
+    info.channel := task.channel
+    info
+  }
+  io.mpInfo(0).valid := task_s2.valid
+  io.mpInfo(0).bits := TaskBundletoMainPipeInfo(task_s2.bits)
+  io.mpInfo(1).valid := task_s3.valid
+  io.mpInfo(1).bits := TaskBundletoMainPipeInfo(task_s3.bits)
   /* ===== Performance counters ===== */
   // num of mshr req
   XSPerfAccumulate("mshr_grant_req", task_s3.valid && mshr_grant_s3 && !retry)

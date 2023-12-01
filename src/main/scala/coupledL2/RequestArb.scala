@@ -57,6 +57,9 @@ class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging wi
     val status_s1 = Output(new PipeEntranceStatus) // set & tag of entrance status
     val status_vec = Vec(2, ValidIO(new PipeStatus)) // whether this stage will flow into SourceD
 
+    /* send to sinkA and req_buffer to count stall */
+    val mpInfo = Vec(1, ValidIO(new MainPipeInfo))
+    
     /* handle set conflict, capacity conflict */
     val fromMSHRCtl = Input(new BlockInfo())
     val fromMainPipe = Input(new BlockInfo())
@@ -200,7 +203,16 @@ class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging wi
   }
 
   dontTouch(io)
-
+  def TaskBundletoMainPipeInfo(task: TaskBundle): MainPipeInfo = {
+    val info = Wire(new MainPipeInfo)
+    info.reqTag := task.tag
+    info.set := task.set
+    info.isPrefetch := task.opcode === Hint
+    info.channel := task.channel
+    info
+  }
+  io.mpInfo(0).valid := task_s1.valid
+  io.mpInfo(0).bits := TaskBundletoMainPipeInfo(task_s1.bits)
   // Performance counters
   XSPerfAccumulate("mshr_req", mshr_task_s0.valid)
   XSPerfAccumulate("mshr_req_stall", io.mshrTask.valid && !io.mshrTask.ready)

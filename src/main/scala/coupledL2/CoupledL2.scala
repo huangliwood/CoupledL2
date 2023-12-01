@@ -32,7 +32,7 @@ import xs.utils.mbist.{MBISTInterface, MBISTPipeline}
 import xs.utils.perf.HasPerfLogging
 import xs.utils.sram.SRAMTemplate
 import coupledL2.utils.HasPerfEvents
-import prefetch.{SPPParameters, HyperPrefetchParams}
+import prefetch.{SPPParameters, MCLPPrefetchParams}
 
 trait HasCoupledL2Parameters {
   val p: Parameters
@@ -229,13 +229,13 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
 
  val pf_recv_node: Option[BundleBridgeSink[PrefetchRecv]] = prefetchOpt match {
   case Some(receive: PrefetchReceiverParams) => Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
-  case Some(sms_sender_hyper: HyperPrefetchParams) => Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
+  case Some(sms_sender_hyper: MCLPPrefetchParams) => Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
   case Some(sms_sender_hyper: intel_spp.HyperPrefetchParams) => Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
   case _ => None
 }
 
   val spp_send_node: Option[BundleBridgeSource[LlcPrefetchRecv]] = prefetchOpt match {
-    case Some(hyper_pf: HyperPrefetchParams) =>
+    case Some(hyper_pf: MCLPPrefetchParams) =>
       sppMultiLevelRefillOpt match{
         case Some(receive: PrefetchReceiverParams) =>
           Some(BundleBridgeSource(() => new LlcPrefetchRecv()))
@@ -303,7 +303,7 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
     val prefetchTrains = prefetchOpt.map(_ => Wire(Vec(banks, DecoupledIO(new PrefetchTrain()(pftParams)))))
     val prefetchResps = prefetchOpt.map(_ => Wire(Vec(banks, DecoupledIO(new PrefetchResp()(pftParams)))))
     val prefetchEvicts = prefetchOpt.map({
-      case hyper : HyperPrefetchParams =>
+      case hyper : MCLPPrefetchParams =>
         Some( Wire(Vec(banks, DecoupledIO(new PrefetchEvict()(pftParams)))))
       case hyper2 : intel_spp.HyperPrefetchParams =>
         Some( Wire(Vec(banks, DecoupledIO(new PrefetchEvict()(pftParams)))))
@@ -438,17 +438,6 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
               prefetchTrains.get(i).bits.set := train_set
               prefetchResps.get(i).bits.tag := resp_tag
               prefetchResps.get(i).bits.set := resp_set
-              // prefetchEvicts match {
-              //   case Some(evict_wire) => 
-              //     val s_evict = Pipeline(s.evict.get)
-              //     val evict_full_addr = Cat(
-              //       s_evict.bits.tag, s_evict.bits.set, i.U(bankBits.W), 0.U(offsetBits.W)
-              //     )
-              //     val (evict_tag, evict_set, _) = s.parseFullAddress(evict_full_addr)
-              //     evict_wire(i).bits.tag := evict_tag
-              //     evict_wire(i).bits.set := evict_set
-              //   case None =>
-              // }
             }
         }
 

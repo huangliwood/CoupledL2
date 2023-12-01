@@ -55,12 +55,20 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
     val ATag        = Output(UInt(tagBits.W))
     val ASet        = Output(UInt(setBits.W))
 
+    /* send to sinkA and req_buffer to count stall */
+    val bufferInfo = Vec(entries, ValidIO(new MainPipeInfo))
+
     // when Probe/Release/MSHR enters MainPipe, we need also to block A req
     val s1Entrance = Flipped(ValidIO(new L2Bundle {
       val set = UInt(setBits.W)
     }))
 
     val hasLatePF = Output(Bool())
+    val hintDup = ValidIO(new Bundle() {
+      val tag = Input(UInt(tagBits.W))
+      val set = Input(UInt(setBits.W))
+      val pfVec = prefetchOpt.map(_ => UInt(PfVectorConst.bits.W))
+    })
   })
 
   /* ======== Data Structure ======== */
@@ -123,6 +131,10 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   ).asUInt
   val dup        = io.in.valid && isPrefetch && dupMask.orR
 
+  io.hintDup.valid := dup
+  io.hintDup.bits.tag := io.in.bits.tag
+  io.hintDup.bits.set := io.in.bits.set
+  io.hintDup.bits.pfVec.get := io.in.bits.pfVec.get
   //!! TODO: we can also remove those that duplicate with mainPipe
 
   /* ======== Alloc ======== */
@@ -241,13 +253,27 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   when(chosenQ.io.deq.fire && !cancel) {
     buffer(chosenQ.io.deq.bits.id).valid := false.B
   }
+  def TaskBundletoMainPipeInfo(task: TaskBundle): MainPipeInfo = {
+    val info = Wire(new MainPipeInfo)
+    info.reqTag := task.tag
+    info.set := task.set
+    info.isPrefetch := task.opcode === Hint
+    info.channel := task.channel
+    info
+  }
+  io.bufferInfo.zip(buffer).foreach {
+    case (out, in) =>
+      out.valid := in.valid
+      out.bits := TaskBundletoMainPipeInfo(in.task)
+  }
 
   // for Dir to choose a free way
   io.out.bits.wayMask := Fill(cacheParams.ways, 1.U(1.W))
 
   // add XSPerf to see how many cycles the req is held in Buffer
+  XSPerfAccumulate("drop_prefetch", dup) // this also serves as late prefetch
   if(cacheParams.enablePerf) {
-    XSPerfAccumulate("drop_prefetch", dup) // this also serves as late prefetch
+    
     if(flow){
       XSPerfAccumulate("req_buffer_flow", io.in.valid && doFlow)
     }
