@@ -246,15 +246,13 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
   val device = new SimpleDevice("l2", Seq("xiangshan,cpl2"))
   val intNode = IntSourceNode(IntSourcePortSimple(resources = device.int))
 
-  lazy val module = new CoupledL2Impl
-  class CoupledL2Impl extends LazyModuleImp(this) with HasPerfLogging with HasPerfEvents{
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) with HasPerfLogging with HasPerfEvents{
     val banks = node.in.size
     val bankBits = if (banks == 1) 0 else log2Up(banks)
     val io = IO(new Bundle {
       val dfx_reset = Input(new DFTResetSignals())
     })
-    intNode.out.foreach(int => int._1.foreach(_ := false.B))
-    intNode.out.foreach(i => dontTouch(i._1))
 
     // Display info
     val sizeBytes = cacheParams.toCacheParams.capacity.toDouble
@@ -429,6 +427,12 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
 
         slice
     }
+
+    // TODO: config reg for ECC (enable or disable)
+    val slicesECC = VecInit(slices.map( s => RegNext(s.io.eccError)))
+    val hasECCError = Cat(slicesECC.asUInt).orR
+    intNode.out.foreach(int => int._1.foreach(_ := hasECCError))
+    intNode.out.foreach(i => dontTouch(i._1))
 
     private val mbistPl = MBISTPipeline.PlaceMbistPipeline(Int.MaxValue,
       s"${parentName}_mbistPipe",

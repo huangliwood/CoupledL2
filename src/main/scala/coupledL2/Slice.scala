@@ -39,6 +39,7 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
     val msStatus = topDownOpt.map(_ => Vec(mshrsAll, ValidIO(new MSHRStatus)))
     val dirResult = topDownOpt.map(_ => ValidIO(new DirResult))
     val latePF = topDownOpt.map(_ => Output(Bool()))
+    val eccError = Output(Bool())
   })
 
   val reqArb = Module(new RequestArb())
@@ -104,6 +105,7 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
 
   dataStorage.io.req <> mainPipe.io.toDS.req_s3
   dataStorage.io.wdata := mainPipe.io.toDS.wdata_s3
+  io.eccError := RegNext(dataStorage.io.error)
   
   mainPipe.io.toMSHRCtl <> mshrCtl.io.fromMainPipe
   mainPipe.io.fromMSHRCtl <> mshrCtl.io.toMainPipe
