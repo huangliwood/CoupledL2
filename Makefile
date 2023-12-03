@@ -26,6 +26,15 @@ test-top-fullsys:
 	mill -i CoupledL2.test.runMain coupledL2.TestTop_fullSys -td build | tee ./build/build.log
 	mv build/TestTop_fullSys.v build/TestTop.v
 
+test-top-fullsys-4Core:
+	mill -i CoupledL2.test.runMain coupledL2.TestTop_fullSys_4Core -td build | tee ./build/build.log
+	mv build/TestTop_fullSys_4Core.v build/TestTop.v
+
+test-top-fullsys-1Core:
+	mill -i CoupledL2.test.runMain coupledL2.TestTop_fullSys_1Core -td build | tee ./build/build.log
+	mv build/TestTop_fullSys_1Core.v build/TestTop.v
+
+
 test-top-fullsys_1:
 	mill -i CoupledL2.test.runMain coupledL2.TestTop_fullSys_1 -td build
 	mv build/TestTop_fullSys_1.v build/TestTop.v
