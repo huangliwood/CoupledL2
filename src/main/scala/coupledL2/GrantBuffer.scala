@@ -25,6 +25,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import coupledL2.prefetch.PrefetchResp
 import xs.utils.perf.HasPerfLogging
+import prefetch.ReplaceableQueueV2
 
 // record info of those with Grant sent, yet GrantAck not received
 // used to block Probe upwards
@@ -81,6 +82,7 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
     val hintDup = Flipped(ValidIO(new Bundle() {
       val tag = Input(UInt(tagBits.W))
       val set = Input(UInt(setBits.W))
+      val pfVec = prefetchOpt.map(_ => UInt(PfVectorConst.bits.W))
     }))
   })
 
@@ -160,55 +162,45 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
     deq.d
   )
 
-  // =========== send response to prefetcher ===========
+    // =========== send response to prefetcher ===========
   // WARNING: this should never overflow (extremely rare though)
   // but a second thought, pftQueue overflow results in no functional correctness bug
   prefetchOpt.map { _ =>
-    val pftRespQueue = Module(new Queue(new Bundle(){
+    val pftRespQueue = Module(new ReplaceableQueueV2(new Bundle(){
         val tag = UInt(tagBits.W)
         val set = UInt(setBits.W)
         val pfVec = UInt(PfVectorConst.bits.W)
       },
-      entries = 8,
-      flow = true))
-    val latePftRespQueue = Module(new Queue(new Bundle() {
+      entries = 16))
+    val latePftRespQueue = Module(new ReplaceableQueueV2(new Bundle() {
             val tag = UInt(tagBits.W)
             val set = UInt(setBits.W)
             val pfVec = prefetchOpt.map(_ => UInt(PfVectorConst.bits.W))
           },
-      entries = 8,
-      },
-      entries = 8,
-      flow = true))
-
-    val latePftRespQueue = Module(new Queue(new Bundle() {
-        val tag = UInt(tagBits.W)
-        val set = UInt(setBits.W)
-      },
-      entries = 8,
-      flow = true))
+      entries = 32))
 
     latePftRespQueue.io.enq.valid := io.hintDup.valid
     latePftRespQueue.io.enq.bits.tag := io.hintDup.bits.tag
     latePftRespQueue.io.enq.bits.set := io.hintDup.bits.set
+    latePftRespQueue.io.enq.bits.pfVec.get := io.hintDup.bits.pfVec.get
 
     pftRespQueue.io.enq.valid := io.d_task.valid && dtaskOpcode === HintAck &&
       io.d_task.bits.task.isfromL2pft
     pftRespQueue.io.enq.bits.tag := io.d_task.bits.task.tag
     pftRespQueue.io.enq.bits.set := io.d_task.bits.task.set
+    pftRespQueue.io.enq.bits.pfVec := io.d_task.bits.task.pfVec.getOrElse(PfSource.NONE)
 
     val toPftArb = Module(new FastArbiter(new Bundle() {
       val tag = UInt(tagBits.W)
       val set = UInt(setBits.W)
+      val pfVec = prefetchOpt.map(_ => UInt(PfVectorConst.bits.W))
     }, 2))
     toPftArb.io.in(0) <> pftRespQueue.io.deq
     toPftArb.io.in(1) <> latePftRespQueue.io.deq
+    io.prefetchResp.get <> toPftArb.io.out
 
-    val resp = io.prefetchResp.get
-    resp <> toPftArb.io.out
-
-    assert(latePftRespQueue.io.enq.ready, "latePftRespQueue should never be full, no back pressure logic") // TODO: has bug here
-    assert(pftRespQueue.io.enq.ready, "pftRespQueue should never be full, no back pressure logic") // TODO: has bug here
+    // assert(latePftRespQueue.io.enq.ready, "latePftRespQueue should never be full, no back pressure logic") // TODO: has bug here
+    // assert(pftRespQueue.io.enq.ready, "pftRespQueue should never be full, no back pressure logic") // TODO: has bug here
   }
   // If no prefetch, there never should be HintAck
   if(cacheParams.enableAssert) assert(prefetchOpt.nonEmpty.B || !io.d_task.valid || dtaskOpcode =/= HintAck)

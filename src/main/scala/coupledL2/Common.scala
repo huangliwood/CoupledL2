@@ -180,13 +180,6 @@ class MSHRRequest(implicit p: Parameters) extends L2Bundle {
     val isPrefetch = Bool()
   }
 
-// MainPipe info
-class MainPipeInfo(implicit p: Parameters) extends L2Bundle with HasChannelBits {
-  val reqTag = UInt(tagBits.W)
-  val set = UInt(setBits.W)
-  val isPrefetch = Bool()
-}
-
 // MSHR info to ReqBuf and SinkB and sinkA and ReqArb
 class MSHRInfo(implicit p: Parameters) extends L2Bundle with HasChannelBits {
   val set = UInt(setBits.W)

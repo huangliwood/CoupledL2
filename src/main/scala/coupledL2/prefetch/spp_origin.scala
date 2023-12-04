@@ -378,7 +378,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   pTable.io.w.req.bits.data(0).deltaEntries := deltaEntries
   pTable.io.w.req.bits.data(0).count := count
   pTable.io.w.req.bits.data(0).tag := tag(lastSignature)
-  val samePage = WireInit(false.B)
+
   //FSM
   switch(state) {
     is(s_idle) {

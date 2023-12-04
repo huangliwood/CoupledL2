@@ -106,9 +106,6 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     /* read DS and write data into RefillBuf when Acquire toT hits on B */
     val refillBufWrite = Flipped(new MSHRBufWrite())
 
-    /* send to sinkA and req_buffer to count stall */
-    val mpInfo = Vec(2, ValidIO(new MainPipeInfo))
-
     val nestedwb = Output(new NestedWriteback)
     val nestedwbData = Output(new DSBlock)
     val nestedwbDataHasCorrupt = Output(Bool())
@@ -462,6 +459,10 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     train.bits.needT := req_needT_s3
     train.bits.source := req_s3.sourceId
     train.bits.vaddr.foreach(_ := req_s3.vaddr.getOrElse(0.U))
+    val prefetch_pf_hit = WireInit(task_s3.valid && req_prefetch_s3 && dirResult_s3.hit);dontTouch(prefetch_pf_hit)
+    val normal_pf_hit = WireInit(train.valid && dirResult_s3.hit);dontTouch(normal_pf_hit)
+    XSPerfAccumulate("mp_prefetch_pf_hit",prefetch_pf_hit)
+    XSPerfAccumulate("mp_normal_pf_hit",normal_pf_hit)
     train.bits.state:= Mux(!dirResult_s3.hit, AccessState.MISS,
       Mux(meta_s3.prefetch.get && req_s3.needHint.getOrElse(false.B), AccessState.PREFETCH_HIT, AccessState.DEMAND_HIT))
     train.bits.pfVec := Mux(!dirResult_s3.hit, PfSource.BOP_SPP, meta_s3.pfVec.getOrElse(PfSource.NONE))
@@ -715,15 +716,6 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     XSPerfAccumulate("mshr_probeackdata_req", task_s3.valid && mshr_probeackdata_s3)
     XSPerfAccumulate("mshr_release_req", task_s3.valid && mshr_release_s3)
 
-    // directory access result
-    XSPerfAccumulate(cacheParams.name+"_a_req_hit", hit_s3 && req_s3.fromA)
-    XSPerfAccumulate(cacheParams.name+"_acquire_hit", hit_s3 && req_s3.fromA &&
-      (req_s3.opcode === AcquireBlock || req_s3.opcode === AcquirePerm))
-    XSPerfAccumulate(cacheParams.name+"_get_hit", hit_s3 && req_s3.fromA && req_s3.opcode === Get)
-    XSPerfAccumulate(cacheParams.name+"_retry", mshr_refill_s3 && retry)
-  // directory access result
-  val hit_s3 = task_s3.valid && !mshr_req_s3 && dirResult_s3.hit
-  val miss_s3 = task_s3.valid && !mshr_req_s3 && !dirResult_s3.hit
   XSPerfAccumulate(cacheParams.name+"_req_hit", hit_s3)
   XSPerfAccumulate(cacheParams.name+"_a_req_hit", hit_s3 && req_s3.fromA)
   XSPerfAccumulate(cacheParams.name+"_a_normalAcquire_miss", miss_s3 && req_s3.fromA && 
@@ -750,8 +742,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     task_s3.valid && req_s3.mshrTask && a_need_replacement)
   XSPerfAccumulate(cacheParams.name + "_a_req_need_replacement_pf",
     task_s3.valid && req_s3.mshrTask && a_need_replacement && meta_s3.prefetch.get)
-  XSPerfAccumulate(cacheParams.name + "_c_req_need_replacement",
-    false.B)
+  XSPerfAccumulate(cacheParams.name + "_c_req_need_replacement",false.B)
 
     XSPerfAccumulate(cacheParams.name+"_b_req_hit", hit_s3 && req_s3.fromB)
     XSPerfAccumulate(cacheParams.name+"_b_req_miss", miss_s3 && req_s3.fromB)

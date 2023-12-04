@@ -59,12 +59,6 @@ class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging wi
 
     /* send to sinkA and req_buffer to count stall */
     val mpInfo = Vec(1, ValidIO(new MainPipeInfo))
-
-    /* send to sinkA and req_buffer to count stall */
-    val mpInfo = Vec(1, ValidIO(new MainPipeInfo))
-
-    /* send to sinkA and req_buffer to count stall */
-    val mpInfo = Vec(1, ValidIO(new MainPipeInfo))
     
     /* handle set conflict, capacity conflict */
     val fromMSHRCtl = Input(new BlockInfo())

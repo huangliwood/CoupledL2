@@ -25,10 +25,11 @@ import freechips.rocketchip.util.leftOR
 import org.chipsalliance.cde.config.Parameters
 import coupledL2.utils._
 import coupledL2.debug._
-import coupledL2.prefetch.PrefetchIO
+import coupledL2.prefetch.{PrefetchIO,PrefetchTrain}
 import xs.utils.RegNextN
 import xs.utils.mbist.MBISTPipeline
 import xs.utils.perf.HasPerfLogging
+import xs.utils.FastArbiter
 
 class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Module with HasPerfLogging with HasPerfEvents{
   val io = IO(new Bundle {
@@ -73,6 +74,7 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
   a_reqBuf.io.s1Entrance := reqArb.io.s1Entrance
   sinkA.io.mshrInfo := mshrCtl.io.msInfo
   sinkA.io.mpInfo := a_reqBuf.io.bufferInfo ++ reqArb.io.mpInfo ++ mainPipe.io.mpInfo
+  sinkB.io.s3Info := mainPipe.io.toSinkB
   sinkB.io.msInfo := mshrCtl.io.msInfo
   sinkC.io.msInfo := mshrCtl.io.msInfo
 
@@ -152,7 +154,11 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
 
   if(io.prefetch.isDefined){
     val pfio = io.prefetch.get
-    pfio.train <> mainPipe.io.prefetchTrain.get
+    val pf_train_arb = Module(new FastArbiter(new PrefetchTrain(), 2))
+    pf_train_arb.io.in(0) <> a_reqBuf.io.prefetchTrain.get
+    pf_train_arb.io.in(1) <> mainPipe.io.prefetchTrain.get
+    pfio.train <> pf_train_arb.io.out
+    
     sinkA.io.prefetchReq.get <> pfio.req
     pfio.resp <> grantBuf.io.prefetchResp.get
     pfio.recv_addr := 0.U.asTypeOf(ValidIO(UInt(64.W)))

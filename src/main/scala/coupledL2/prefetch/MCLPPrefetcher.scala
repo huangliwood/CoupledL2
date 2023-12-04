@@ -49,7 +49,7 @@ trait HasMCLPPrefetcherParams extends HasCoupledL2Parameters {
   val fTableEntries = hyperPrefetchParams.fTableEntries
   val fTagBits = pageAddrBits - log2Up(fTableEntries)
   val pTableQueueEntries = 2
-  val fTableQueueEntries = 256
+  val fTableQueueEntries = 512
 
   def get_blockAddr(x:UInt) = x(fullAddressBits-1,offsetBits)
 }
@@ -418,7 +418,7 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
       anchored_longest_blkOff(i) := OneHot.OH1ToUInt(HighestBit(hitForMap_bitVec(i).asUInt,blkNums))
 
       // now only considering spp chase bop ,must hit one
-      can_send2_mlfq2(i) := hit(i) && FitlerVecState.is_SPPchase(req_dups(i).bits.pfVec,anchored_value) //TODO has more thing todo!!!
+      can_send2_mlfq2(i) := !hit(i) && FitlerVecState.is_SPPchase(req_dups(i).bits.pfVec,anchored_value) //TODO has more thing todo!!!
       // should filter when any other prefetchBitVec existed expected L1
       can_send2_mlfq1(i) := !hit(i) || anchored_value === PfSource.NONE //|| anchored_value === PfSource.SMS
 
@@ -504,8 +504,8 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
 
   io.from_pfQ.ready := true.B
 
-  XSPerfAccumulate("hyper_filter_nums",s1_frompfQ && !(io.out_mlfq2.fire || io.out_mlfq1.fire))
-  XSPerfAccumulate("hyper_filter_input",io.from_pfQ.fire)
+  XSPerfAccumulate("hyper_filter_nums",s1_frompfQ && !(io.out_mlfq2.fire || io.out_mlfq1.fire || io.out_mlfq0.fire))
+  XSPerfAccumulate("hyper_filter_input",s1_frompfQ)
   XSPerfAccumulate("hyper_filter_output",io.out_mlfq2.fire || io.out_mlfq1.fire)
   XSPerfAccumulate("hyper_filter_mlfq1",io.out_mlfq1.fire)
   XSPerfAccumulate("hyper_filter_mlfq1_sms",io.out_mlfq1.fire && io.out_mlfq1.bits.pfVec === FitlerVecState.SMS)
@@ -1451,9 +1451,9 @@ class MCLPPrefetcher(parentName:String = "Unknown")(implicit p: Parameters) exte
   val train_bop_q = Module(new Queue(new PrefetchTrain, entries = 2, flow = true, pipe = false))
   val train_spp_q = Module(new Queue(new PrefetchTrain, entries = 2, flow = true, pipe = false))
   // train_bop_q.io.enq.valid := false.B
-  train_bop_q.io.enq.valid := train_q.io.deq.valid 
-  // train_bop_q.io.enq.valid :=(train_q.io.deq.valid && (train_q.io.deq.bits.hasBOP || train_q.io.deq.bits.hasSMS) && (train_q.io.deq.bits.state === AccessState.MISS)) || 
-  // (trainRedircect.valid && (trainRedircect.bits.hasBOP || trainRedircect.bits.hasSMS))
+  // train_bop_q.io.enq.valid := train_q.io.deq.valid 
+  train_bop_q.io.enq.valid :=(train_q.io.deq.valid && (train_q.io.deq.bits.hasBOP || train_q.io.deq.bits.hasSMS) && (train_q.io.deq.bits.state === AccessState.MISS)) || 
+  (trainRedircect.valid && (trainRedircect.bits.hasBOP || trainRedircect.bits.hasSMS))
   train_bop_q.io.enq.bits := Mux(trainRedircect.valid,trainRedircect.bits,train_q.io.deq.bits)
 
   // train_spp_q.io.enq.valid := false.B
