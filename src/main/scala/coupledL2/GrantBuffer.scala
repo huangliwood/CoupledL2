@@ -162,12 +162,13 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
     val pftRespQueue = Module(new Queue(new Bundle(){
         val tag = UInt(tagBits.W)
         val set = UInt(setBits.W)
+        val pfVec = UInt(PfVectorConst.bits.W)
       },
-      entries = 4,
+      entries = 16,
       flow = true))
 
     pftRespQueue.io.enq.valid := io.d_task.valid && dtaskOpcode === HintAck &&
-      io.d_task.bits.task.fromL2pft.getOrElse(false.B)
+      io.d_task.bits.task.isfromL2pft && io.d_task.bits.task.pfVec.get === PfSource.BOP
     pftRespQueue.io.enq.bits.tag := io.d_task.bits.task.tag
     pftRespQueue.io.enq.bits.set := io.d_task.bits.task.set
 

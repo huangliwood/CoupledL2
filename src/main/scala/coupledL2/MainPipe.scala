@@ -229,7 +229,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   ms_task.mshrId           := 0.U(mshrBits.W)
   ms_task.aliasTask.foreach(_ := cache_alias)
   ms_task.useProbeData     := false.B
-  ms_task.fromL2pft.foreach(_ := req_s3.fromL2pft.get)
+  ms_task.pfVec.foreach    (_ := req_s3.pfVec.get)
   ms_task.needHint.foreach(_  := req_s3.needHint.get)
   ms_task.dirty            := false.B
   ms_task.way              := req_s3.way
@@ -444,6 +444,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     train.bits.vaddr.foreach(_ := req_s3.vaddr.getOrElse(0.U))
     train.bits.state:= Mux(!dirResult_s3.hit, AccessState.MISS,
       Mux(!meta_s3.prefetch.get, AccessState.HIT, AccessState.PREFETCH_HIT))
+    train.bits.pfVec := Mux(!dirResult_s3.hit, PfSource.BOP_SPP, req_s3.pfVec.getOrElse(PfSource.NONE))
   }
   if(io.prefetchEvict.isDefined){
     val evict = io.prefetchEvict.get

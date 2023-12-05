@@ -308,7 +308,7 @@ class BestOffsetPrefetch(implicit p: Parameters) extends BOPModule with HasPerfL
 
   io.req.valid := req_valid
   io.req.bits := req
-  io.req.bits.isBOP := true.B
+  io.req.bits.pfVec := PfSource.BOP
   io.train.ready := scoreTable.io.req.ready && (!req_valid || io.req.ready)
   io.resp.ready := true.B;dontTouch(io.resp.ready)
   respQueue.io.deq.ready := rrTable.io.w.ready

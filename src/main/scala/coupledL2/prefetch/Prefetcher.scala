@@ -41,14 +41,25 @@ class PrefetchReq(implicit p: Parameters) extends PrefetchBundle {
   val needT = Bool()
   val source = UInt(sourceIdBits.W)
   val isBOP = Bool()
+  val pfVec = UInt(PfVectorConst.bits.W)
   def addr = Cat(tag, set, 0.U(offsetBits.W))
+  def tag_set = Cat(tag,set)
+  def is_l1pf = pfVec === PfSource.SMS
+  def is_l2pf = pfVec === PfSource.BOP || pfVec === PfVectorConst.DEFAULT
+  def hasSMS = (pfVec & PfSource.SMS) === PfSource.SMS
+  def hasBOP = (pfVec & PfSource.BOP) === PfSource.BOP
+  def hasSPP = (pfVec & PfSource.SPP) === PfSource.SPP
 }
 
 class PrefetchResp(implicit p: Parameters) extends PrefetchBundle {
   // val id = UInt(sourceIdBits.W)
   val tag = UInt(fullTagBits.W)
   val set = UInt(setBits.W)
+  val pfVec = UInt(PfVectorConst.bits.W)
   def addr = Cat(tag, set, 0.U(offsetBits.W))
+  def hasBOP = (pfVec & PfSource.BOP) === PfSource.BOP
+  def hasSPP = (pfVec & PfSource.SPP) === PfSource.SPP
+  def hasSPPBOP = pfVec === PfSource.BOP_SPP
 }
 
 class PrefetchTrain(implicit p: Parameters) extends PrefetchBundle {
@@ -62,7 +73,14 @@ class PrefetchTrain(implicit p: Parameters) extends PrefetchBundle {
   // val miss = Bool()
   // val prefetched = Bool()
   val state = UInt(AccessState.bits.W)
+  val pfVec = UInt(PfVectorConst.bits.W)
   def addr = Cat(tag, set, 0.U(offsetBits.W))
+  def hasSMS =  (pfVec & PfSource.SMS) === PfSource.SMS
+  def hasBOP = (pfVec & PfSource.BOP) === PfSource.BOP
+  def hasSPP = (pfVec & PfSource.SPP) === PfSource.SPP
+  def hasSPPBOP = pfVec === PfSource.BOP_SPP
+  def is_l1pf = pfVec === PfSource.SMS
+  def is_l2pf = pfVec === PfSource.BOP || pfVec === PfVectorConst.DEFAULT
 }
 
 class PrefetchEvict(implicit p: Parameters) extends PrefetchBundle {
@@ -220,7 +238,7 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
     
     case hyperPf: HyperPrefetchParams => // case spp +  bop + smsReceiver
       hasSpp = true
-      val hybrid_pfts = Module(new HyperPrefetcher(parentName + "hpft_"))
+      val hybrid_pfts = Module(new HyperPrefetchDev2(parentName + "hpft_"))
       val pftQueue = Module(new PrefetchQueue)
       val pipe = Module(new Pipeline(io.req.bits.cloneType, 1))
       hybrid_pfts.io.train <> io.train
@@ -240,12 +258,12 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
       io.hint2llc match{
         case Some(sender) =>
           println(s"${cacheParams.name} Prefetch Config: BOP + SMS receiver + SPP + SPP cross-level refill")
-          sender <> hybrid_pfts.io.hint2llc
+          sender <> 0.U.asTypeOf(io.hint2llc.get.cloneType) //hybrid_pfts.io.hint2llc
         case _ => println(s"${cacheParams.name} Prefetch Config: BOP + SMS receiver + SPP")
       }
-      hybrid_pfts.io.queue_used := pftQueue.io.used
-      hybrid_pfts.io.db_degree.valid := counterWrap
-      hybrid_pfts.io.db_degree.bits := pf_state
+      // hybrid_pfts.io.queue_used := pftQueue.io.used
+      // hybrid_pfts.io.db_degree.valid := counterWrap
+      // hybrid_pfts.io.db_degree.bits := pf_state
     case _ => assert(cond = false, "Unknown prefetcher")
   }
   val mbistPl = MBISTPipeline.PlaceMbistPipeline(2,
