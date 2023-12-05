@@ -107,7 +107,7 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val task_temp = WireInit(0.U.asTypeOf(io.task))
   val task_retry = WireInit(0.U.asTypeOf(io.task))
   val taskOutPipe = Queue(task_temp, entries = 1, pipe = true, flow = false) // for timing: mshrCtl <> sinkB <> reqArb
-  val taskRetryPipe = Queue(task_retry, entries = 1, pipe = true, flow = true)
+  val taskRetryPipe = Queue(task_retry, entries = 1, pipe = true, flow = false)
 
   val task_be_sent = Mux(taskRetryPipe.valid, taskRetryPipe.bits, task)
   val task_addrConflict = addrConflict(task_be_sent)
