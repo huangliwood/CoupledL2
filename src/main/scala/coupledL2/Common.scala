@@ -39,6 +39,24 @@ trait HasChannelBits { this: Bundle =>
   def fromC = channel(2).asBool
 }
 
+object PfSource extends Enumeration {
+  val bits = 3
+  val NONE    = "b000".U(bits.W)
+  val BOP     = "b001".U(bits.W)
+  val SPP     = "b010".U(bits.W)
+  val SMS     = "b100".U(bits.W)
+  val BOP_SPP = "b011".U(bits.W)
+
+}
+object PfVectorConst extends {
+  val BOP = 0
+  val SPP = 1
+  val SMS = 2
+
+  val bits = 3
+  val DEFAULT = 0.U(bits.W)
+}
+
 // We generate a Task for every TL request
 // this is the info that flows in Mainpipe
 class TaskBundle(implicit p: Parameters) extends L2Bundle with HasChannelBits {
@@ -61,8 +79,10 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle with HasChannelBits {
   val useProbeData = Bool()               // data source, true for ReleaseBuf and false for RefillBuf
 
   // For Intent
-  val fromL2pft = prefetchOpt.map(_ => Bool()) // Is the prefetch req from L2(BOP) or from L1 prefetch?
-                                          // If true, MSHR should send an ack to L2 prefetcher.
+  // val fromL2pft = prefetchOpt.map(_ => Bool()) 
+  // Is the prefetch req from L2(BOP) or from L1 prefetch?
+  // If true, MSHR should send an ack to L2 prefetcher.
+  val pfVec = prefetchOpt.map(_ => UInt(PfVectorConst.bits.W))
   val needHint = prefetchOpt.map(_ => Bool())
 
   // For DirtyKey in Release
@@ -89,6 +109,14 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle with HasChannelBits {
   val reqSource = UInt(MemReqSource.reqSourceBits.W)
 
   def hasData = opcode(0)
+  def isfromL2pft = if(prefetchOpt.isDefined) {(pfVec.get === PfSource.BOP || pfVec.get === PfSource.SPP || pfVec.get === PfSource.BOP_SPP)
+  }else{
+    false.B
+  }
+  def isfrompft = if(prefetchOpt.isDefined) {(pfVec.get =/= PfSource.NONE)
+  }else{
+    false.B
+  }
 }
 
 class PipeStatus(implicit p: Parameters) extends L2Bundle with HasChannelBits

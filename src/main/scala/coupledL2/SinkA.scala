@@ -58,7 +58,7 @@ class SinkA(implicit p: Parameters) extends L2Module with HasPerfLogging{
     task.mshrId := 0.U(mshrBits.W)
     task.aliasTask.foreach(_ := false.B)
     task.useProbeData := false.B
-    task.fromL2pft.foreach(_ := false.B)
+    task.pfVec.foreach(_ := PfSource.NONE)
     task.needHint.foreach(_ := a.data(0))
     task.dirty := false.B
     task.way := 0.U(wayBits.W)
@@ -92,7 +92,7 @@ class SinkA(implicit p: Parameters) extends L2Module with HasPerfLogging{
     task.mshrId := 0.U(mshrBits.W)
     task.aliasTask.foreach(_ := false.B)
     task.useProbeData := false.B
-    task.fromL2pft.foreach(_ := req.isBOP)
+    task.pfVec.foreach(_ := req.pfVec)
     task.needHint.foreach(_ := false.B)
     task.dirty := false.B
     task.way := 0.U(wayBits.W)
