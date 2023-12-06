@@ -616,15 +616,15 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
     case(source, sink) => sink := source
   }
 
-  // val idBits = 14
-  // val l3FrontendAXI4Node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
-  //   Seq(AXI4MasterParameters(
-  //     name = "dma",
-  //     id = IdRange(0, 1 << idBits),
-  //     maxFlight = Some(16)
-  //   ))
-  // )))
-//  l2xbar := TLBuffer() := AXI2TL(16, 16) := AXI4Fragmenter() := l3FrontendAXI4Node
+  val idBits = 14
+  val l3FrontendAXI4Node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
+    Seq(AXI4MasterParameters(
+      name = "dma",
+      id = IdRange(0, 1 << idBits),
+      maxFlight = Some(16)
+    ))
+  )))
+ l2xbar := TLBuffer() := AXI2TL(16, 16) := AXI4Fragmenter() := l3FrontendAXI4Node
 
   ram.node :=
     TLXbar() :=*
@@ -638,7 +638,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       case (node, i) =>
         node.makeIOs()(ValName(s"master_port_$i"))
     }
-    // l3FrontendAXI4Node.makeIOs()(ValName("dma_port"))
+    l3FrontendAXI4Node.makeIOs()(ValName("dma_port"))
     ctrl_node.makeIOs()(ValName("cmo_port"))
     l3_ecc_int_sink.makeIOs()(ValName("l3_int_port"))
     l3_reset_sink.makeIOs()(ValName("rst_port"))
