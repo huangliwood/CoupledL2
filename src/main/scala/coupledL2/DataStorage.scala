@@ -116,8 +116,13 @@ class DataStorage(parentName:String = "Unknown")(implicit p: Parameters) extends
       dsBlock
     }
 
-    io.error := Cat(Cat(dataEccErrVec) & ~Cat(dataEccCorrVec)).orR
-    io.rdata := toDSBlock(corrDataVec)
+    // io.error := Cat(Cat(dataEccErrVec) & ~Cat(dataEccCorrVec)).orR
+    // io.rdata := toDSBlock(corrDataVec)
+    
+    // ECC will not correct corrupt data, instead only generate error signal and pass out from the L2Cache
+    io.error := Cat(dataEccErrVec).orR
+    io.rdata := rdDataRaw
+
     when(~reset.asBool) {
       assert(RegNext(!io.error), "For now, we won't ECC error happen in DataStorage...")
     }
