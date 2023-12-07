@@ -107,7 +107,7 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val task_temp = WireInit(0.U.asTypeOf(io.task))
   val task_retry = WireInit(0.U.asTypeOf(io.task))
   val taskOutPipe = Queue(task_temp, entries = 1, pipe = true, flow = false) // for timing: mshrCtl <> sinkB <> reqArb
-  val taskRetryPipe = Queue(task_retry, entries = 1, pipe = true, flow = false)
+  val taskRetryPipe = Queue(task_retry, entries = 2, pipe = true, flow = false)
 
   val task_be_sent = Mux(taskRetryPipe.valid, taskRetryPipe.bits, task)
   val task_addrConflict = addrConflict(task_be_sent)
@@ -127,6 +127,7 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
   // retry
   task_retry.valid := io.task.valid && !io.task.ready
   task_retry.bits := taskOutPipe.bits
+  when(task_retry.valid){ assert(task_retry.ready, "taskRetryPipe can be full when enq.valid, no back pressure logic") }
   // task can pass (retry override io.b)
   val task_out_ready = task_mergeB || (task_temp.ready && !task_addrConflict && !task_replaceConflict && !task_s3AddrConflict)
   io.b.ready :=  task_out_ready && !taskRetryPipe.valid
@@ -168,6 +169,17 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
     dontTouch(s_mergeB)
     dontTouch(io_task_can_valid)
     dontTouch(io_bMergeTask_can_valid)
+  }
+
+  val task_retry_count = RegInit(0.U(12.W))
+  dontTouch(task_retry_count)
+  when(task_retry.valid) {
+    task_retry_count := task_retry_count + 1.U
+  }.elsewhen(io.task.fire) {
+    task_retry_count := 0.U
+  }
+  when(task_retry_count === 500.U) {
+    assert(false.B, "sinkB retry over 500")
   }
 
   if(cacheParams.enablePerf) {
