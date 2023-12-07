@@ -108,9 +108,13 @@ class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging wi
   val B_task = io.sinkB.bits
   val C_task = io.sinkC.bits
 
+  // B req cant input continuous
+  val block_B_continuous = RegInit(false.B)
+  block_B_continuous := io.sinkB.fire
+
   // block chnl
   val block_A = io.fromMSHRCtl.blockA_s1 || io.fromMainPipe.blockA_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockA_s1
-  val block_B = io.fromMSHRCtl.blockB_s1 || io.fromMainPipe.blockB_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockB_s1
+  val block_B = io.fromMSHRCtl.blockB_s1 || io.fromMainPipe.blockB_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockB_s1 || block_B_continuous
   val block_C = io.fromMSHRCtl.blockC_s1 || io.fromMainPipe.blockC_s1 || io.fromGrantBuffer.blockSinkReqEntrance.blockC_s1
 
   val sinkValids = VecInit(Seq(

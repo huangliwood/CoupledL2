@@ -99,6 +99,8 @@ class MSHRCtl(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val pipeReqCount = PopCount(Cat(io.pipeStatusVec.map(_.valid))) // TODO: consider add !mshrTask to optimize
   val mshrCount = PopCount(Cat(mshrs.map(_.io.status.valid)))
   val mshrWillUse = pipeReqCount + mshrCount
+  dontTouch(pipeReqCount)
+  dontTouch(mshrCount)
   dontTouch(mshrWillUse)
   val mshrSelector = Module(new MSHRSelector())
   mshrSelector.io.idle := mshrs.map(m => !m.io.status.valid)
@@ -137,9 +139,11 @@ class MSHRCtl(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val latency = 1 // stall latency cycle for timing
   val toReqArb = WireInit(0.U.asTypeOf((io.toReqArb)))
   toReqArb.blockC_s1 := false.B
-  toReqArb.blockB_s1 := Mux(!io.toReqArb.blockB_s1, mshrWillUse >= (mshrsAll-latency).U, mshrWillUse >= mshrsAll.U)
+//  toReqArb.blockB_s1 := Mux(!io.toReqArb.blockB_s1, mshrWillUse >= (mshrsAll-latency).U, mshrWillUse >= mshrsAll.U)
+  toReqArb.blockB_s1 := mshrWillUse >= mshrsAll.U
   toReqArb.blockA_s1 := Mux(!io.toReqArb.blockB_s1, mshrWillUse >= (mshrsAll-1-latency).U, mshrWillUse >= (mshrsAll-latency).U) // the last idle mshr should not be allocated for channel A req
   toReqArb.blockG_s1 := false.B
+  dontTouch(toReqArb)
 
   io.toReqArb := RegNext(toReqArb)
 
