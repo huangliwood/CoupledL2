@@ -463,7 +463,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   val isC_s4, isD_s4 = RegInit(false.B)
   task_s4.valid := task_s3.valid && !req_drop_s3
   when (task_s3.valid && !req_drop_s3) {
-    task_s4.bits := source_req_s3
+    task_s4.bits := Mux(sink_resp_s3.valid, source_req_s3, req_s3)
     task_s4.bits.mshrId := Mux(!task_s3.bits.mshrTask && need_mshr_s3, io.fromMSHRCtl.mshr_alloc_ptr, source_req_s3.mshrId)
     data_unready_s4 := data_unready_s3
     data_s4 := data_s3
