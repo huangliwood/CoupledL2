@@ -277,7 +277,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   }
 
   val source_req_s3 = Wire(new TaskBundle)
-  source_req_s3 := Mux(sink_resp_s3.valid, sink_resp_s3.bits, req_s3)
+  source_req_s3 := Mux(!mshr_req_s3, sink_resp_s3.bits, req_s3) // sink_req->resp, mshr_resp->resp
 
   //  TODO: debug address consider multi-bank
   def restoreAddr(set: UInt, tag: UInt) = {
