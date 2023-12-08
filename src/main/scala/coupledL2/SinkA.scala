@@ -115,8 +115,7 @@ class SinkA(implicit p: Parameters) extends L2Module with HasPerfLogging{
     pipe.io.in <> io.prefetchReq.get
     prefetchReq.get.valid := pipe.io.out.valid
     prefetchReq.get.bits := fromPrefetchReqtoTaskBundle(pipe.io.out.bits)
-    io.prefetchReq.get.ready := true.B
-    pipe.io.out.ready := true.B
+    pipe.io.out.ready := prefetchReq.get.ready
     fastArb(Seq(commonReq, prefetchReq.get), io.task)
   } else {
     io.task <> commonReq
