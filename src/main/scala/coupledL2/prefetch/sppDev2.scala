@@ -310,7 +310,7 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
   sTable.io.w.req.bits.setIdx := get_idx(s1_req.pageAddr)
   sTable.io.w.req.bits.data(0).valid := true.B
   sTable.io.w.req.bits.data(0).tag := get_tag(s1_req.pageAddr)
-  //TODO: there should hold strideMap-> delta signal!! fuck!!!
+  //TODO: there should hold strideMap -> delta signal!! fuck!!!
   //TODO: there should hold origin delta signal!!
   // sTable.io.w.req.bits.data(0).signature := makeSign(s1_oldSignature,strideMap(s1_newDelta))
   sTable.io.w.req.bits.data(0).signature := makeSign(s1_oldSignature,s1_newDelta)
@@ -1120,7 +1120,7 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
 
   val q_bop = Module(new ReplaceableQueueV2(chiselTypeOf(bop.io.req.bits), pfReqQueueEntries))
   val q_spp = Module(new ReplaceableQueueV2(chiselTypeOf(spp.io.req.bits), pfReqQueueEntries))
-  val q_sms = Module(new ReplaceableQueueV2(chiselTypeOf(spp.io.req.bits), pfReqQueueEntries))
+  val q_sms = Module(new ReplaceableQueueV2(chiselTypeOf(sms.io.req.bits), pfReqQueueEntries))
   // --------------------------------------------------------------------------------
   // train diverter queue
   // --------------------------------------------------------------------------------
@@ -1140,7 +1140,7 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
   spp.io.train.bits := train_spp_q.io.deq.bits
   train_spp_q.io.deq.ready := spp.io.train.ready
 
-  bop.io.resp.valid := io.resp.valid && io.resp.bits.hasBOP
+  bop.io.resp.valid := io.resp.valid //&& io.resp.bits.hasBOP
   bop.io.resp.bits := io.resp.bits
   io.resp.ready := bop.io.resp.ready
 
