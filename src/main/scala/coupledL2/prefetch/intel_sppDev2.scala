@@ -302,9 +302,9 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
   }
   
   //bp
-  val s1_bp_hit = RegEnable(s0_bp_hit,s1_valid)
-  val s1_bp_matched_sig = RegEnable(s0_bp_matched_sig,s1_valid)
-  val s1_bp_prePredicted_blkOff = RegEnable(s0_bp_prePredicted_blkOff,s1_valid)
+  val s1_bp_hit = RegEnable(s0_bp_hit,false.B,s1_valid)
+  val s1_bp_matched_sig = RegEnable(s0_bp_matched_sig,0.U(signatureBits.W),s1_valid)
+  val s1_bp_prePredicted_blkOff = RegEnable(s0_bp_prePredicted_blkOff,0.U(blkOffsetBits.W),s1_valid)
 
   sTable.io.w.req.valid := s1_valid && s1_newDelta =/= 0.S
   sTable.io.w.req.bits.setIdx := get_idx(s1_req.pageAddr)
@@ -639,7 +639,7 @@ class PatternTableTiming(parentName:String="Unkown")(implicit p: Parameters) ext
   s1_valid := RegNext(s0_valid ,false.B)
   s1_first_flag := RegNext(s0_first_flag,false.B)
   s1_lookCount := RegNext(s0_lookCount,0.U)
-  s1_current := RegEnable(s0_current,s0_valid)
+  s1_current := RegEnable(s0_current,0.U.asTypeOf(new SignatureTableResp),s0_valid)
 
 
   //directly calculate from sram 
@@ -708,11 +708,11 @@ class PatternTableTiming(parentName:String="Unkown")(implicit p: Parameters) ext
   }
   val write_hold = state === s_lookahead0
   pTable.io.w.req.valid := state === s_updateTable //&& !issueReq.isBP
-  pTable.io.w.req.bits.setIdx := RegEnable(get_idx(s0_current.signature),write_hold)
+  pTable.io.w.req.bits.setIdx := RegEnable(get_idx(s0_current.signature),0.U,write_hold)
   pTable.io.w.req.bits.data(0).valid := true.B
-  pTable.io.w.req.bits.data(0).deltaEntries := RegEnable(s1_wdeltaEntries,write_hold)
-  pTable.io.w.req.bits.data(0).count := RegEnable(s1_count,write_hold)
-  pTable.io.w.req.bits.data(0).tag := RegEnable(get_tag(s1_current.signature),write_hold)
+  pTable.io.w.req.bits.data(0).deltaEntries := RegEnable(s1_wdeltaEntries,0.U.asTypeOf(pTable.io.w.req.bits.data(0).deltaEntries.cloneType),write_hold)
+  pTable.io.w.req.bits.data(0).count := RegEnable(s1_count,0.U(4.W),write_hold)
+  pTable.io.w.req.bits.data(0).tag := RegEnable(get_tag(s1_current.signature),0.U,write_hold)
 
 
   //FSM
@@ -784,7 +784,7 @@ class Unpack(implicit p: Parameters) extends SPPModule {
   val q = Module(new ReplaceableQueueV2(chiselTypeOf(io.req.bits), unpackQueueEntries))
   q.io.enq <> io.req //change logic to replace the tail entry
 
-  val req = RegEnable(q.io.deq.bits, q.io.deq.fire)
+  val req = RegEnable(q.io.deq.bits,0.U.asTypeOf(new PatternTableResp), q.io.deq.fire)
   val req_deltas = Reg(Vec(pTableDeltaEntries, SInt((blkOffsetBits + 1).W)))
   val issue_finish = req_deltas.map(_ === 0.S).reduce(_ && _)
   q.io.deq.ready := !inProcess || issue_finish || endeq
@@ -994,8 +994,8 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     val s1_valid = VecInit.fill(dupNums)(RegNext(s0_valid,false.B));dontTouch(s1_valid)
     val s1_req = VecInit.fill(dupNums)(RegEnable(s0_req,0.U.asTypeOf(new PrefetchReq),s0_valid(0)));dontTouch(s1_req)
     val s1_result = VecInit.fill(dupNums)(RegEnable(s0_result,0.U.asTypeOf(fTableEntry()),s0_valid(0)));dontTouch(s1_result)
-    val s1_oldAddr = s1_req(1).addr
-    val s1_dup_offset = s1_req(1).set(dupOffsetBits-1+dupBits,dupOffsetBits-1)
+    val s1_oldAddr = WireInit(s1_req(1).addr);dontTouch(s1_oldAddr)
+    val s1_dup_offset = WireInit(s1_req(1).set(dupOffsetBits-1+dupBits-1,dupOffsetBits-1));dontTouch(s1_dup_offset)
 
     val s1_pageAddr = WireInit(s1_oldAddr(fullAddressBits - 1, pageOffsetBits));dontTouch(s1_pageAddr)
     val s1_blkOffset = WireInit(s1_oldAddr(pageOffsetBits - 1, offsetBits));dontTouch(s1_blkOffset)
