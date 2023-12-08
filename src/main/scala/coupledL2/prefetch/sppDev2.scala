@@ -172,11 +172,7 @@ trait HasSPPParams extends HasCoupledL2Parameters {
 
   val pageAddrBits = fullAddressBits - pageOffsetBits
   val blkOffsetBits = pageOffsetBits - offsetBits
-<<<<<<< HEAD
-  val sTagBits = pageAddrBits - log2Up(sTableEntries)
-=======
-  val sTagBits = signatureBits - log2Up(sTableEntries)
->>>>>>> pf_sppDev2
+  val sTagBits = 12//signatureBits - log2Up(sTableEntries)
   val pTagBits = signatureBits - log2Up(pTableEntries)
   val fTagBits = pageAddrBits - log2Up(fTableEntries)
   def makeSign(old_sig:UInt,new_delta:SInt)=(old_sig << 3) ^ new_delta.asUInt
@@ -1144,10 +1140,7 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
   spp.io.train.bits := train_spp_q.io.deq.bits
   train_spp_q.io.deq.ready := spp.io.train.ready
 
-<<<<<<< HEAD
-=======
   //TODO: need respALL ?
->>>>>>> pf_sppDev2
   bop.io.resp.valid := io.resp.valid //&& io.resp.bits.hasBOP
   bop.io.resp.bits := io.resp.bits
   io.resp.ready := bop.io.resp.ready
