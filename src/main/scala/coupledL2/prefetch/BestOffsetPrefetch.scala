@@ -259,6 +259,7 @@ class OffsetScoreTable(implicit p: Parameters) extends BOPModule with HasPerfLog
   io.test.req.bits.ptr := ptr
   io.test.resp.ready := true.B
 
+  XSPerfAccumulate("bop_test_hit", io.test.resp.fire && io.test.resp.bits.hit)
   for (off <- offsetList) {
     if (off < 0) {
       XSPerfAccumulate("best_offset_neg_" + (-off).toString + "_learning_phases",
@@ -292,7 +293,7 @@ class BestOffsetPrefetch(implicit p: Parameters) extends BOPModule with HasPerfL
   scoreTable.io.req.valid := io.train.valid
   scoreTable.io.req.bits := oldAddr
 
-  val req = Reg(new PrefetchReq)
+  val req = RegInit(0.U.asTypeOf(new PrefetchReq))
   val req_valid = RegInit(false.B)
   val crossPage = getPPN(newAddr) =/= getPPN(oldAddr) // unequal tags
   when(io.req.fire) {

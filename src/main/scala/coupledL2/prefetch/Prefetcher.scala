@@ -40,7 +40,6 @@ class PrefetchReq(implicit p: Parameters) extends PrefetchBundle {
   val set = UInt(setBits.W)
   val needT = Bool()
   val source = UInt(sourceIdBits.W)
-  val isBOP = Bool()
   val pfVec = UInt(PfVectorConst.bits.W)
   def addr = Cat(tag, set, 0.U(offsetBits.W))
   def tag_set = Cat(tag,set)
@@ -146,11 +145,11 @@ class PrefetchQueue(implicit p: Parameters) extends PrefetchModule with HasPerfL
 
   // The reqs that are discarded = enq - deq
   XSPerfAccumulate("prefetch_queue_enq", io.enq.fire)
-  XSPerfAccumulate("prefetch_queue_fromL1_enq", io.enq.fire && !io.enq.bits.isBOP)
-  XSPerfAccumulate("prefetch_queue_fromL2_enq", io.enq.fire && io.enq.bits.isBOP)
+  XSPerfAccumulate("prefetch_queue_fromL1_enq", io.enq.fire && !io.enq.bits.is_l1pf)
+  XSPerfAccumulate("prefetch_queue_fromL2_enq", io.enq.fire && io.enq.bits.is_l2pf)
   XSPerfAccumulate("prefetch_queue_deq", io.deq.fire)
-  XSPerfAccumulate("prefetch_queue_fromL1_deq", io.deq.fire && !io.enq.bits.isBOP)
-  XSPerfAccumulate("prefetch_queue_fromL2_enq", io.deq.fire && io.enq.bits.isBOP)
+  XSPerfAccumulate("prefetch_queue_fromL1_deq", io.deq.fire && !io.deq.bits.is_l1pf)
+  XSPerfAccumulate("prefetch_queue_fromL2_deq", io.deq.fire && io.deq.bits.is_l2pf)
   XSPerfHistogram("prefetch_queue_entry", PopCount(valids.asUInt),
     true.B, 0, inflightEntries, 1)
 }
@@ -240,14 +239,13 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
       hasSpp = true
       val hybrid_pfts = Module(new HyperPrefetchDev2(parentName + "hpft_"))
       val pftQueue = Module(new PrefetchQueue)
-      val pipe = Module(new Pipeline(io.req.bits.cloneType, 1))
+      val delayQ = Module(new Queue(io.req.bits.cloneType, entries = 1, pipe = true, flow = false))
       hybrid_pfts.io.train <> io.train
       hybrid_pfts.io.resp <> io.resp
       hybrid_pfts.io.recv_addr := ValidIODelay(io.recv_addr, 2)
       pftQueue.io.enq <> hybrid_pfts.io.req
-      pipe.io.in <> pftQueue.io.deq
-      io.req <> pipe.io.out
-      pipe.io.out.ready := true.B
+      delayQ.io.enq <> pftQueue.io.deq
+      io.req <> delayQ.io.deq
       io.evict match {
         case Some(evict) =>
         hybrid_pfts.io.evict <> evict
