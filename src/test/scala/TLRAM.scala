@@ -383,7 +383,7 @@ class TLRAM(
         mem.wen   := wen
       }
       val rdata = mems.map {mem => mem.rdata}
-      Cat(rdata.reverse).asTypeOf(r_raw_data.cloneType)
+      RegNext(Cat(rdata.reverse).asTypeOf(r_raw_data.cloneType))
     }
 
     // Tie off unused channels
