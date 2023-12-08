@@ -120,7 +120,7 @@ case class L2Param
   // Signature Path Prefetch multi-level cache refill support option
   sppMultiLevelRefill : Option[PrefetchParameters] = None,
   // Performance analysis
-  enablePerf: Boolean = false,
+  enablePerf: Boolean = true,
   // Assert enable (we should disable assertion if we want to collect coverage info while simulating)
   enableAssert: Boolean = true,
   // Monitor
