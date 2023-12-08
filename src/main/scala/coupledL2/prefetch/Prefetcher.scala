@@ -157,8 +157,9 @@ class PrefetchQueue(implicit p: Parameters) extends PrefetchModule with HasPerfL
 class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends PrefetchModule with HasPerfLogging{
   val io = IO(new PrefetchIO)
   val io_l2_pf_en = IO(Input(Bool()))
-  val io_l2_pf_ctrl = IO(Input(UInt(2.W)))
-
+  val io_l2_pf_ctrl = IO(Input(UInt(Csr_PfCtrlBits.W)))
+  
+  dontTouch(io_l2_pf_en)
   dontTouch(io_l2_pf_ctrl)
 
   val (counterValue, counterWrap) = Counter(true.B, 1024)
