@@ -371,7 +371,7 @@ class TLRAM(
 
     val split = beatBytes / 8 // for beatByte = 32-byte ==> split = 4
     val bankByte = 64 // 64-bit
-    r_raw_data := {
+    r_raw_data := RegNext({
       val mems = (0 until split).map {_ => Module(new RAMHelper(bankByte))}
       mems.zipWithIndex map { case (mem, i) =>
         mem.clk   := clock
@@ -384,7 +384,7 @@ class TLRAM(
       }
       val rdata = mems.map {mem => mem.rdata}
       Cat(rdata.reverse).asTypeOf(r_raw_data.cloneType)
-    } holdUnless RegNext(ren)
+    }) holdUnless RegNext(ren)
 
     // Tie off unused channels
     in.b.valid := false.B
