@@ -29,7 +29,7 @@ case class BOPParameters(
   rrTableEntries: Int = 256,
   rrTagBits:      Int = 12,
   scoreBits:      Int = 5,
-  roundMax:       Int = 50,
+  roundMax:       Int = 40,
   badScore:       Int = 1,
   offsetList: Seq[Int] = Seq(
     -32, -30, -27, -25, -24, -20, -18, -16, -15,
@@ -245,7 +245,7 @@ class OffsetScoreTable(implicit p: Parameters) extends BOPModule with HasPerfLog
       val renewOffset = newScore > bestScore
       bestOffset := Mux(renewOffset, offset, bestOffset)
       bestScore := Mux(renewOffset, newScore, bestScore)
-      // (1) one of the score equals SCOREMAX
+      // (1) one of the score equals SCOREMAXbestOffset
       when(newScore >= scoreMax.U) {
         state := s_idle
       }
@@ -260,6 +260,7 @@ class OffsetScoreTable(implicit p: Parameters) extends BOPModule with HasPerfLog
   io.test.req.bits.ptr := ptr
   io.test.resp.ready := true.B
 
+  XSPerfAccumulate("bop_test_hit", io.test.resp.fire && io.test.resp.bits.hit)
   for (off <- offsetList) {
     if (off < 0) {
       XSPerfAccumulate("best_offset_learning_phases_neg_" + (-off).toString,
@@ -305,6 +306,7 @@ class BestOffsetPrefetch(implicit p: Parameters) extends BOPModule with HasPerfL
     req.set := parseFullAddress(newAddr)._2
     req.needT := io.train.bits.needT
     req.source := io.train.bits.source
+    req.pfVec := PfSource.BOP
     req_valid := !crossPage // stop prefetch when prefetch req crosses pages
   }
 

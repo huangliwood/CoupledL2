@@ -1,4 +1,4 @@
-package coupledL2.prefetch.intel_spp
+package coupledL2.prefetch.intel_sppDev1
 
 import org.chipsalliance.cde.config.Parameters
 import chisel3._

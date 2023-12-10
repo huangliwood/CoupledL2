@@ -69,6 +69,7 @@ trait HasCoupledL2Parameters {
 
   // Prefetch
   val prefetchOpt = cacheParams.prefetch
+  val Csr_PfCtrlBits = cacheParams.Csr_PfCtrlBits
   val sppMultiLevelRefillOpt = cacheParams.sppMultiLevelRefill
   val hasPrefetchBit = prefetchOpt.nonEmpty && prefetchOpt.get.hasPrefetchBit
   val hasPrefetchSrc = prefetchOpt.nonEmpty && prefetchOpt.get.hasPrefetchSrc

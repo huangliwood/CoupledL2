@@ -498,7 +498,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
   var master_nodes: Seq[TLClientNode] = Seq() // TODO
   val NumCores=2
   // val nullNode = LazyModule(new SppSenderNull)
-  val l1_sms_send_0_node = (0 until nrL2).map{i =>LazyModule(new PrefetchSmsOuterNode)}
+  val l1_sms_send_0_node =(0 until nrL2).map{i =>LazyModule(new PrefetchSmsOuterNode)}
   // val sms_sink = BundleBridgeSink(Some(() => new coupledL2.PrefetchRecv()))
   val l2List = (0 until nrL2).map{i =>
     val l1d = createClientNode(s"l1d$i", 32)
@@ -522,9 +522,10 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
         // sets = 256,
         clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
         echoField = Seq(huancun.DirtyField()),
-        prefetch = Some(PrefetchReceiverParams()),
+        // prefetch = Some(PrefetchReceiverParams()),
+        // prefetch = Some(MCLPPrefetchParams()),
         // prefetch = Some(coupledL2.prefetch.MCLPPrefetchParams()),
-        // prefetch = Some(intel_spp.HyperPrefetchParams()),
+        prefetch = Some(intel_spp.HyperPrefetchParams()),
         /* del L2 prefetche recv option, move into: prefetch =  PrefetchReceiverParams
         prefetch options:
           SPPParameters          => spp only
@@ -534,7 +535,8 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
           MCLPPrefetchParams     => sms+bop+sms
         */
         sppMultiLevelRefill = None,//Some(coupledL2.prefetch.PrefetchReceiverParams()),
-        respKey =  Seq(PrefetchKey)
+        respKey =  Seq(PrefetchKey),
+        enablePerf = true
         /*must has spp, otherwise Assert Fail
         sppMultiLevelRefill options:
         PrefetchReceiverParams() => spp has cross level refill

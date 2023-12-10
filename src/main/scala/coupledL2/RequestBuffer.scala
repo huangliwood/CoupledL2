@@ -132,8 +132,8 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
     )
   ).asUInt
 
-  val dup        = io.in.fire && isPrefetch && dupMask.orR // open latePf dup
-//  val dup        = false.B // close latePf dup
+  // val dup        = io.in.fire && isPrefetch && dupMask.orR // open latePf dup
+ val dup        = false.B // close latePf dup
   io.hintDup.valid := dup
   io.hintDup.bits.tag := io.in.bits.tag
   io.hintDup.bits.set := io.in.bits.set
@@ -283,18 +283,17 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   io.out.bits.wayMask := Fill(cacheParams.ways, 1.U(1.W))
 
   // add XSPerf to see how many cycles the req is held in Buffer
-  XSPerfAccumulate("drop_prefetch", dup) // this also serves as late prefetch
-  if(cacheParams.enablePerf) {
-    
+  if(cacheParams.enablePerf) { 
     if(flow){
       XSPerfAccumulate("req_buffer_flow", io.in.valid && doFlow)
     }
     XSPerfAccumulate("req_buffer_alloc", alloc)
-    XSPerfAccumulate("req_buffer_full", full)
+    XSPerfAccumulate("req_buffer_full", io.in.valid && full)
     XSPerfAccumulate("recv_prefetch", io.in.fire && isPrefetch)
     XSPerfAccumulate("recv_normal", io.in.fire && !isPrefetch)
     XSPerfAccumulate("chosenQ_cancel", chosenQValid && cancel)
     XSPerfAccumulate("reqBuffer_latePrefetch", io.hasLatePF)
+    XSPerfAccumulate("drop_prefetch", dup) // this also serves as late prefetch
     // TODO: count conflict
     for(i <- 0 until entries){
       val cntEnable = PopCount(buffer.map(_.valid)) === i.U

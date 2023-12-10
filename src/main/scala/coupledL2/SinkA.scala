@@ -147,8 +147,10 @@ class SinkA(entries: Int)(implicit p: Parameters) extends L2Module with HasPerfL
     prefetchOpt.foreach {
       _ =>
         XSPerfAccumulate("sinkA_prefetch_req", io.prefetchReq.get.fire)
-        XSPerfAccumulate("sinkA_prefetch_from_l2", io.prefetchReq.get.bits.is_l1pf && io.prefetchReq.get.fire)
-        XSPerfAccumulate("sinkA_prefetch_from_l1", !io.prefetchReq.get.bits.is_l2pf && io.prefetchReq.get.fire)
+        XSPerfAccumulate("sinkA_prefetch_from_l1", io.prefetchReq.get.bits.is_l1pf && io.prefetchReq.get.fire)
+        XSPerfAccumulate("sinkA_prefetch_from_l2", io.prefetchReq.get.bits.is_l2pf && io.prefetchReq.get.fire)
+        XSPerfAccumulate("sinkA_prefetch_from_bop", io.prefetchReq.get.bits.hasBOP && io.prefetchReq.get.fire)
+        XSPerfAccumulate("sinkA_prefetch_from_spp", io.prefetchReq.get.bits.hasSPP && io.prefetchReq.get.fire)
     }
 
     def mshrSameAddr(a: TaskBundle, b: MSHRInfo): Bool = Cat(a.tag, a.set) === Cat(b.reqTag, b.set)

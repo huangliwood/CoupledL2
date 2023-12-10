@@ -177,18 +177,17 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
             val set = UInt(setBits.W)
             val pfVec = prefetchOpt.map(_ => UInt(PfVectorConst.bits.W))
           },
-      entries = 32))
+      entries = 8))
 
-    latePftRespQueue.io.enq.valid := io.hintDup.valid
+    latePftRespQueue.io.enq.valid := false.B//io.hintDup.valid
     latePftRespQueue.io.enq.bits.tag := io.hintDup.bits.tag
     latePftRespQueue.io.enq.bits.set := io.hintDup.bits.set
     latePftRespQueue.io.enq.bits.pfVec.get := io.hintDup.bits.pfVec.get
 
-    pftRespQueue.io.enq.valid := io.d_task.valid && dtaskOpcode === HintAck &&
-      io.d_task.bits.task.isfromL2pft
+    pftRespQueue.io.enq.valid := io.d_task.valid && dtaskOpcode === HintAck && io.d_task.bits.task.isfromL2pft
     pftRespQueue.io.enq.bits.tag := io.d_task.bits.task.tag
     pftRespQueue.io.enq.bits.set := io.d_task.bits.task.set
-    pftRespQueue.io.enq.bits.pfVec := io.d_task.bits.task.pfVec.getOrElse(PfSource.NONE)
+    pftRespQueue.io.enq.bits.pfVec := PfSource.BOP
 
     val toPftArb = Module(new FastArbiter(new Bundle() {
       val tag = UInt(tagBits.W)
