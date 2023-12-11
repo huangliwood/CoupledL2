@@ -74,6 +74,7 @@ class PrefetchTrain(implicit p: Parameters) extends PrefetchBundle {
   val state = UInt(AccessState.bits.W)
   val pfVec = UInt(PfVectorConst.bits.W)
   def addr = Cat(tag, set, 0.U(offsetBits.W))
+  def blkAddr = addr(fullAddressBits-1,offsetBits)
   def hasSMS =  (pfVec & PfSource.SMS) === PfSource.SMS
   def hasBOP = (pfVec & PfSource.BOP) === PfSource.BOP
   def hasSPP = (pfVec & PfSource.SPP) === PfSource.SPP
