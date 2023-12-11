@@ -14,6 +14,7 @@ import xs.utils.SRAMQueue
 import xs.utils.OneHot
 import xs.utils.HighestBit
 import xs.utils.ParallelPriorityMux
+import xs.utils.RegNextN
 
 object PfSource extends Enumeration {
   val bits = 3
@@ -290,16 +291,11 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
   val s1_entryData    = WireInit(0.U.asTypeOf(sTableEntry()));dontTouch(s1_entryData)
   val s1_hit          = WireInit(false.B);dontTouch(s1_hit)
   val s1_newDelta     = WireInit(Mux(s1_hit, s1_req.blkOffset.asSInt - s1_entryData.lastBlock.asSInt, s1_req.blkOffset.asSInt))
-  val s1_oldSignature = WireInit(Mux(s1_hit, s1_entryData.signature, 0.U))
-  val s1_newBlkAddr  = s1_req.get_blkAddr
+  val s1_oldSignature = WireInit(s1_entryData.signature)
+  val s1_newBlkAddr   = s1_req.get_blkAddr
 
-  when(s1_valid){
-    s1_hit := s1_entryData.tag === get_tag(s1_req.pageAddr)
-    s1_entryData := sTable.io.r.resp.data(0)
-  }.otherwise{
-    s1_hit := false.B
-    s1_entryData := 0.U.asTypeOf(sTableEntry())
-  }
+  s1_entryData := sTable.io.r.resp.data(0)
+  s1_hit := s1_entryData.tag === get_tag(s1_req.pageAddr)
   
   //bp
   val s1_bp_hit = RegEnable(s0_bp_hit,false.B,s1_valid)
@@ -602,7 +598,7 @@ class PatternTableTiming(parentName:String="Unkown")(implicit p: Parameters) ext
     s0_current := issueReq
   }
 
-  val s0_bp_update = WireInit(s0_lookCount >= 3.U && s0_valid)
+  val s0_bp_update = WireInit(state === s_lookahead && s0_lookCount >= 3.U && s0_valid)
   io.pt2st_bp.valid := ENABLE_BP.asBool &&  s0_bp_update
   io.pt2st_bp.bits.pageAddr := s0_current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits)
   io.pt2st_bp.bits.parent_sig(0) := s0_current.signature
@@ -644,11 +640,6 @@ class PatternTableTiming(parentName:String="Unkown")(implicit p: Parameters) ext
   val s1_hit = WireInit(s1_readResult.valid && get_tag(s1_current.signature) === s1_readResult.tag)
   // val s1_hit = WireInit(s1_readResult.valid)
 
-  val s1_count = WireInit(0.U(4.W));dontTouch(s1_count)
-  val s1_exist = s1_readResult.deltaEntries.map(_.delta === s1_current.delta).reduce(_ || _)
-  val s1_temp = s1_readResult.deltaEntries.map(x => Mux(x.delta === s1_current.delta, (new DeltaEntry).apply(s1_current.delta, x.cDelta + 1.U), x))
-  val s1_smallest: SInt = s1_readResult.deltaEntries.reduce((a, b) => Mux(a.cDelta < b.cDelta, a, b)).delta
-  val s1_replaceIdx: UInt = s1_readResult.deltaEntries.indexWhere(a => a.delta === s1_smallest)
   //predict
   val s1_issued = s1_delta_list_checked.map(a => Mux(a =/= 0.S, 1.U, 0.U)).reduce(_ +& _)
   s1_testOffset := Mux(s1_issued =/= 0.U,(s1_current.block.asSInt + s1_maxEntry.delta).asUInt,s1_current.block)
@@ -668,45 +659,7 @@ class PatternTableTiming(parentName:String="Unkown")(implicit p: Parameters) ext
   val s1_delta_list_nl = s1_delta_list.map(_ => Mux(enprefetchnl, 1.S((blkOffsetBits + 1).W), 0.S((blkOffsetBits + 1).W)))
 
   s1_continue := enprefetch && (s1_maxEntry.cDelta >= s0_miniCount)
-  // --------------------------------------------------------------------------------
-  // update paternTable
-  // --------------------------------------------------------------------------------
-  //write pTable
-  //hold needed write sig when fisrt read sram index
-  //1. when leave lookahead0,hold needed writing data
-  val s1_wdeltaEntries = WireInit(VecInit(Seq.fill(pTableDeltaEntries)(0.U.asTypeOf(new DeltaEntry()))))
-  val s1_wEntry = WireInit(0.U.asTypeOf(new pTableEntry()))
-  when(s1_hit) {
-    when(s1_exist) {
-      //counter overflow --- only considering count overflow
-      when(s1_readResult.count + 1.U === ((1.U << s1_count.getWidth).asUInt - 1.U)) {
-        s1_wdeltaEntries := s1_temp.map(x => (new DeltaEntry).apply(x.delta, x.cDelta >> 1.asUInt))
-      } .otherwise {
-        s1_wdeltaEntries := s1_temp
-      }
-    } .otherwise {
-      //to do replacement
-      s1_wdeltaEntries := VecInit.tabulate(s1_readResult.deltaEntries.length) { i =>
-        Mux((i.U === s1_replaceIdx), (new DeltaEntry).apply(s1_current.delta, 1.U), s1_readResult.deltaEntries(i))
-      }
-    }
-    s1_count := s1_wdeltaEntries.map(_.cDelta).reduce(_ + _) //todo: must be optimized!
-    //to consider saturate here
-  } .otherwise {
-    s1_wdeltaEntries(0).delta := issueReq.delta
-    s1_wdeltaEntries(0).cDelta := 1.U
-    s1_count := 1.U
-  }
-  val write_hold = state === s_lookahead0
-  s1_wEntry.tag := RegEnable(get_tag(issueReq.signature),0.U,write_hold)
-  s1_wEntry.valid := true.B
-  s1_wEntry.deltaEntries := RegEnable(s1_wdeltaEntries,write_hold)
-  s1_wEntry.count := RegEnable(s1_count,0.U(4.W),write_hold)
-
-  pTable.io.w.req.valid := RegNext(state === s_lookahead0) //&& !issueReq.isBP
-  pTable.io.w.req.bits.setIdx := RegEnable(get_idx(issueReq.signature),0.U,write_hold)
-  pTable.io.w.req.bits.data(0) := s1_wEntry
-
+  
   //FSM
   switch(state) {
     is(s_idle) {
@@ -736,6 +689,63 @@ class PatternTableTiming(parentName:String="Unkown")(implicit p: Parameters) ext
   // io.resp.bits.degree := s1_lookCount
   io.resp.bits.source := s1_current.source
   io.resp.bits.needT := s1_current.needT
+
+  val s1_can_go_s2 = WireInit(state === s_lookahead0)
+  // --------------------------------------------------------------------------------
+  // stage 2
+  // -------------------------------------------------------------------------------
+  //update paternTable
+  //hold needed write sig when fisrt read sram index
+  //1. when leave lookahead0,hold needed writing data
+  val s2_write_valid = RegNext(s1_can_go_s2,false.B)
+  //these should hold
+  val s2_hit = RegEnable(s1_hit,s1_can_go_s2)
+  val s2_current = RegEnable(s1_current,s1_can_go_s2)
+  val s2_readResult = RegEnable(s1_readResult,s1_can_go_s2)
+
+  val s2_smallest: SInt = s2_readResult.deltaEntries.reduce((a, b) => Mux(a.cDelta < b.cDelta, a, b)).delta
+  val s2_replaceIdx: UInt = s2_readResult.deltaEntries.indexWhere(a => a.delta === s2_smallest)
+  val s2_exist = s2_readResult.deltaEntries.map(_.delta === s2_current.delta).reduce(_ || _)
+  val s2_temp = s2_readResult.deltaEntries.map(x => Mux(x.delta === s2_current.delta, (new DeltaEntry).apply(s2_current.delta, x.cDelta + 1.U), x))
+  val s2_wdeltaEntries = WireInit(VecInit(Seq.fill(pTableDeltaEntries)(0.U.asTypeOf(new DeltaEntry()))));dontTouch(s2_wdeltaEntries)
+  val s2_wEntry = WireInit(0.U.asTypeOf(new pTableEntry()))
+  val s2_wCount = WireInit(0.U(4.W));dontTouch(s2_wCount)
+    // calculate needed writing delta counters
+  when(s2_hit) {
+    when(s2_exist) {
+      //counter overflow --- only considering count overflow
+      when(s2_readResult.count + 1.U === ((1.U << s2_readResult.count.getWidth).asUInt - 1.U)) {
+        s2_wdeltaEntries := s2_temp.map(x => (new DeltaEntry).apply(x.delta, x.cDelta >> 1.asUInt))
+      } .otherwise {
+        s2_wdeltaEntries := s2_temp
+      }
+    } .otherwise {
+      //to do replacement
+      s2_wdeltaEntries := VecInit.tabulate(s2_readResult.deltaEntries.length) { i =>
+        Mux((i.U === s2_replaceIdx), (new DeltaEntry).apply(s2_current.delta, 1.U), s2_readResult.deltaEntries(i))
+      }
+    }
+    //to consider saturate here
+  } .otherwise {
+    s2_wdeltaEntries(0).delta := issueReq.delta
+    s2_wdeltaEntries(0).cDelta := 1.U
+  }
+  // calculate count counters
+  when(s2_hit){
+    s2_wCount := s2_wdeltaEntries.map(_.cDelta).reduce(_ + _) //todo: must be optimized!  
+  } .otherwise {
+    s2_wCount := 1.U
+  }
+
+  s2_wEntry.tag := get_tag(issueReq.signature)
+  s2_wEntry.valid := true.B
+  s2_wEntry.deltaEntries := s2_wdeltaEntries
+  s2_wEntry.count := s2_wCount
+
+
+  pTable.io.w.req.valid := RegNextN(s2_write_valid,1) //&& !issueReq.isBP
+  pTable.io.w.req.bits.setIdx := RegEnable(get_idx(issueReq.signature),0.U,s2_write_valid)
+  pTable.io.w.req.bits.data(0) := s2_wEntry
 
   //perf
   XSPerfAccumulate("spp_pt_bp_nums",io.pt2st_bp.valid)
