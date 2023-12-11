@@ -277,6 +277,7 @@ class BestOffsetPrefetch(implicit p: Parameters) extends BOPModule with HasPerfL
     val train = Flipped(DecoupledIO(new PrefetchTrain))
     val req = DecoupledIO(new PrefetchReq)
     val resp = Flipped(DecoupledIO(new PrefetchResp))
+    val shareBO = Output(SInt(offsetWidth.W))
   })
 
   val rrTable = Module(new RecentRequestTable)
@@ -312,6 +313,7 @@ class BestOffsetPrefetch(implicit p: Parameters) extends BOPModule with HasPerfL
   io.req.bits.pfVec := PfSource.BOP
   io.train.ready := scoreTable.io.req.ready && (!req_valid || io.req.ready)
   io.resp.ready := true.B;dontTouch(io.resp.ready)
+  io.shareBO := RegNext(prefetchOffset.asSInt,0.S)
   respQueue.io.deq.ready := rrTable.io.w.ready
 
   for (off <- offsetList) {
