@@ -154,10 +154,8 @@ class TestTop_fullSys_1Core()(implicit p: Parameters) extends LazyModule {
     )))
 
   val l3_ecc_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
-  val l3_reset_sink = BundleBridgeSink(Some(() => Reset()))
   l3.ctlnode.foreach(_ := TLBuffer() := ctrl_node)
   l3.intnode.foreach(l3_ecc_int_sink := _)
-  l3.rst_nodes.foreach(_.foreach(l3_reset_sink := _))
 
   val l2_ecc_int_sinks = Seq.fill(nrL2)(IntSinkNode(IntSinkPortSimple(1, 1)))
   l2List.map(_.intNode).zip(l2_ecc_int_sinks).foreach{ 
@@ -179,7 +177,6 @@ class TestTop_fullSys_1Core()(implicit p: Parameters) extends LazyModule {
     // l3FrontendAXI4Node.makeIOs()(ValName("dma_port"))
     ctrl_node.makeIOs()(ValName("cmo_port"))
     l3_ecc_int_sink.makeIOs()(ValName("l3_int_port"))
-    l3_reset_sink.makeIOs()(ValName("rst_port"))
 
     l2_ecc_int_sinks.zipWithIndex.foreach{ case(sink, i) => sink.makeIOs()(ValName("l2_int_port_"+i))}
 
