@@ -244,6 +244,7 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
       hybrid_pfts.io.recv_addr := ValidIODelay(io.recv_addr, 2)
     
       pftQueue.io.enq <> hybrid_pfts.io.req
+      hybrid_pfts.io.req.ready := io.req.ready 
       delayQ.io.enq <> pftQueue.io.deq
       io.req <> delayQ.io.deq
 

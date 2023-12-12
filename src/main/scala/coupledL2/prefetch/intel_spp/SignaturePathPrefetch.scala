@@ -18,6 +18,7 @@ import coupledL2.prefetch.AccessState
 
 case class SPPParameters(
   sTableEntries: Int = 256,
+  bpTableEntries: Int = 64,
   sTagBits: Int = 12,
   pTableEntries: Int = 512,
   pTableDeltaEntries: Int = 4,
@@ -46,7 +47,7 @@ trait HasSPPParams extends HasPrefetchParameters {
   val lookCountBits = sppParams.lookCountBits
   val unpackQueueEntries = sppParams.unpackQueueEntries
   val fTableEntries = sppParams.fTableEntries
-  val bpTableEntries = 256
+  val bpTableEntries = sppParams.bpTableEntries
 
   val pageAddrBits = fullAddressBits - pageOffsetBits
   val blkAddrBits = fullAddressBits - offsetBits
@@ -130,6 +131,7 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
   def hash1(addr:    UInt) = addr(log2Up(sTableEntries) - 1, 0)
   def hash2(addr:    UInt) = addr(2 * log2Up(sTableEntries) - 1, log2Up(sTableEntries))
   def get_idx(addr:      UInt) = hash1(addr) ^ hash2(addr)
+  def get_bpIdx(addr: UInt) = addr(log2Up(bpTableEntries) - 1, 0) ^ addr(2 * log2Up(bpTableEntries) - 1, log2Up(bpTableEntries))
   def get_tag(addr:      UInt) = addr(sTagBits + log2Up(sTableEntries) - 1, log2Up(sTableEntries))
   def sTableEntry() = new Bundle {
     val valid = Bool()
@@ -153,7 +155,7 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
     val pre_blkAddr = UInt(blkAddrBits.W)
     val parent_sig = Vec(1, UInt(signatureBits.W))
   }
-  val bpTable = RegInit(VecInit(Seq.fill(bpTableEntries)(0.U.asTypeOf(breakPointEntry()))))
+  val bpTable = if(ENABLE_BP)Some(RegInit(VecInit(Seq.fill(bpTableEntries)(0.U.asTypeOf(breakPointEntry()))))) else None
 
   // --------------------------------------------------------------------------------
   // stage 0
@@ -164,17 +166,17 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
   val s0_req = io.req.bits
   sTable.io.r.req.valid       := s0_valid
   sTable.io.r.req.bits.setIdx := get_idx(s0_req.get_pageAddr)
-
-  // val s0_bp_page = io.s0_bp_update.bits.get_pageAddr
-  // val s0_bp_wIdx = WireInit(get_idx(s0_bp_page)) 
-  // when(io.s0_bp_update.valid){
-  //   bpTable(s0_bp_wIdx).valid := true.B
-  //   bpTable(get_idx(s0_bp_wIdx)).pre_blkAddr := io.s0_bp_update.bits.blkAddr
-  //   for( i <- 0 until(io.s0_bp_update.bits.parent_sig.length)){
-  //       bpTable(get_idx(s0_bp_wIdx)).parent_sig(i) := io.s0_bp_update.bits.parent_sig(i)
-  //   }
-  // }
-
+  if(bpTable.isDefined){
+    val s0_bp_page = io.s0_bp_update.bits.get_pageAddr
+    val s0_bp_wIdx = WireInit(get_bpIdx(s0_bp_page));dontTouch(s0_bp_wIdx)
+    when(io.s0_bp_update.valid){
+      bpTable.get(s0_bp_wIdx).valid := true.B
+      bpTable.get(s0_bp_wIdx).pre_blkAddr := io.s0_bp_update.bits.blkAddr
+      for( i <- 0 until(io.s0_bp_update.bits.parent_sig.length)){
+          bpTable.get(s0_bp_wIdx).parent_sig(i) := io.s0_bp_update.bits.parent_sig(i)
+      }
+    }
+  }
   // --------------------------------------------------------------------------------
   //TODO : need remove this process when timing passed?
   // stage 1
@@ -186,22 +188,13 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
   val s1_req = RegEnable(s0_req,s0_valid)
   val s1_entryData = sTable.io.r.resp.data(0)
   // bp read
-  val s1_bp_rIdx = WireInit(get_idx(s1_req.get_pageAddr))
+  val s1_bp_rIdx = WireInit(get_bpIdx(s1_req.get_pageAddr))
   val s1_bp_hit = WireInit(false.B)
   val s1_bp_mask = WireInit(VecInit(Seq.fill(4)(false.B)))
   val s1_bp_blkAddr = WireInit(0.U(blkOffsetBits.W))
   val s1_bp_matched_sig = WireInit(0.U(signatureBits.W))
   val rotate_sig = VecInit(Seq.fill(4)(0.U(signatureBits.W)));dontTouch(rotate_sig)
 
-  for (i <- 0 until (4)) {
-    rotate_sig(i) := CircularShift(bpTable(s1_bp_rIdx).parent_sig.head).left(3 * i)
-    s1_bp_mask(i) := rotate_sig(i) === s1_entryData.signature
-  }
-  s1_bp_blkAddr := bpTable(s1_bp_rIdx).pre_blkAddr
-  s1_bp_hit := ENABLE_BP.asBool && s1_valid && s1_bp_mask.reduce(_ || _)
-  //TODO: there should set offset for matchedIndex?
-  val s1_bp_matchedIdx = WireInit(OneHot.OH1ToUInt(HighestBit(s1_bp_mask.asUInt,4)));dontTouch(s1_bp_matchedIdx)
-  s1_bp_matched_sig := rotate_sig(s1_bp_matchedIdx)
   // --------------------------------------------------------------------------------
   // stage 2
   // --------------------------------------------------------------------------------
@@ -428,7 +421,6 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   s1_maxEntry := s1_readResult.deltaEntries.reduce((a, b) => Mux(a.cDelta >= b.cDelta, a, b))
   //set output
   val s1_delta_list = s1_readResult.deltaEntries.map(x => Mux(x.cDelta > s0_miniCount.asUInt, x.delta, 0.S))
-  val s1_delta_list_nl = s1_delta_list.map(_ => 1.S((blkOffsetBits + 1).W))
   val s1_delta_list_checked = s1_delta_list.map(x =>
     Mux((s1_current.block.asSInt + x).asUInt(pageAddrBits + blkOffsetBits - 1, blkOffsetBits) === s1_current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits),
       x, 0.S))
@@ -449,6 +441,8 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   // enable prefetch
   enprefetch :=  !s0_first_flag && s1_valid && s1_hit && s1_issued =/= 0.U && state === s_lookahead && s1_samePage
   // enable nextline when
+  val s1_delta_list_nl = s1_delta_list.map(_ => 1.S((blkOffsetBits + 1).W))
+
   when(!s0_valid && s1_valid && s1_lookCount === 1.U && state === s_lookahead && !enprefetch) {
     val s1_testOffset = s1_current.block + 1.U
     when(s1_testOffset(pageAddrBits + blkOffsetBits - 1, blkOffsetBits) === s1_current.block(pageAddrBits + blkOffsetBits - 1, blkOffsetBits)) {
