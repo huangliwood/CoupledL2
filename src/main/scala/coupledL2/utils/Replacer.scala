@@ -24,7 +24,6 @@ import chisel3.util._
 import chisel3.util.random.LFSR
 import freechips.rocketchip.util.{Random, UIntToAugmentedUInt}
 import freechips.rocketchip.util.property.cover
-import Chisel.BlackBox
 
 abstract class ReplacementPolicy {
   def nBits: Int
@@ -65,7 +64,7 @@ object ReplacementPolicy {
 
 class RandomReplacement(n_ways: Int) extends ReplacementPolicy {
   private val replace = Wire(Bool())
-  replace := false.B
+  replace := true.B
   def nBits = 16
   def perSet = false
   private val lfsr = LFSR(nBits, replace)

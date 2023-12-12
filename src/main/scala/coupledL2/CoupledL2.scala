@@ -21,15 +21,18 @@ package coupledL2
 
 import chisel3._
 import chisel3.util._
-import utility.{FastArbiter, Pipeline}
+import xs.utils.{DFTResetSignals, FastArbiter, ModuleNode, Pipeline, ResetGen, ResetGenNode}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.util._
-import chipsalliance.rocketchip.config.Parameters
-import scala.math.max
+import org.chipsalliance.cde.config.Parameters
 import coupledL2.prefetch._
-import coupledL2.utils.XSPerfAccumulate
+import xs.utils.mbist.{MBISTInterface, MBISTPipeline}
+import xs.utils.perf.{DebugOptionsKey, HasPerfLogging}
+import xs.utils.sram.SRAMTemplate
+import coupledL2.utils.HasPerfEvents
+import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 
 trait HasCoupledL2Parameters {
   val p: Parameters
@@ -47,24 +50,29 @@ trait HasCoupledL2Parameters {
   val stateBits = MetaData.stateBits
   val aliasBitsOpt = if(cacheParams.clientCaches.isEmpty) None
                   else cacheParams.clientCaches.head.aliasBitsOpt
+  val vaddrBitsOpt = if(cacheParams.clientCaches.isEmpty) None
+                  else cacheParams.clientCaches.head.vaddrBitsOpt
   val pageOffsetBits = log2Ceil(cacheParams.pageBytes)
 
-  val bufBlocks = 8 // hold data that flows in MainPipe
+  val bufBlocks = 8 // hold data that flows in MainPipe (4)
   val bufIdxBits = log2Up(bufBlocks)
+
+  val enableClockGate = cacheParams.enableClockGate
+
+  val dataEccCode = cacheParams.dataEccCode
+  val dataEccEnable = dataEccCode != None && dataEccCode != Some("none")
 
   // 1 cycle for sram read, and latch for another cycle
   val sramLatency = 2
 
-  val releaseBufWPorts = 3 // sinkC and mainpipe s5, s6
-  
+  val releaseBufWPorts = 3 // sinkC & mainPipe s5 & mainPipe s3 (nested)
+
   // Prefetch
   val prefetchOpt = cacheParams.prefetch
+  val Csr_PfCtrlBits = cacheParams.Csr_PfCtrlBits
+  val sppMultiLevelRefillOpt = cacheParams.sppMultiLevelRefill
   val hasPrefetchBit = prefetchOpt.nonEmpty && prefetchOpt.get.hasPrefetchBit
   val topDownOpt = if(cacheParams.elaboratedTopDown) Some(true) else None
-
-  val useFIFOGrantBuffer = true
-
-  val hintCycleAhead = 3 // how many cycles the hint will send before grantData
 
   lazy val edgeIn = p(EdgeInKey)
   lazy val edgeOut = p(EdgeOutKey)
@@ -81,6 +89,9 @@ trait HasCoupledL2Parameters {
   // id of 0XXXX refers to mshrId
   // id of 1XXXX refers to reqs that do not enter mshr
   // require(isPow2(idsAll))
+
+  val grantBufSize = mshrsAll
+  val grantBufInflightSize = mshrsAll //TODO: lack or excessive? !! WARNING
 
   // width params with bank idx (used in prefetcher / ctrl unit)
   lazy val fullAddressBits = edgeOut.bundle.addressBits
@@ -152,7 +163,7 @@ trait HasCoupledL2Parameters {
   }
 }
 
-class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Parameters {
+class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyModule with HasCoupledL2Parameters {
 
   val xfer = TransferSizes(blockBytes, blockBytes)
   val atom = TransferSizes(1, cacheParams.channelBytes.d.get)
@@ -165,7 +176,15 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
         supports = TLSlaveToMasterTransferSizes(
           probe = xfer
         ),
-        sourceId = IdRange(0, idsAll)
+        sourceId = {
+          println(s"[Diplomacy stage] ${cacheParams.name} client num: ${m.masters.length}")
+          println(s"[Diplomacy stage] ${cacheParams.name} client sourceId:")
+          m.masters.zipWithIndex.foreach{case(m, i) => println(s"[Diplomacy stage] \t[${i}]${m.name} => start: ${m.sourceId.start} end: ${m.sourceId.end}")}
+          val idEnd = 64 // TODO：Parameterize
+          println(s"[Diplomacy stage] ${cacheParams.name} sourceId idRange(0, ${idEnd})\n")
+          IdRange(0, 64)
+        }
+        
       )
     ),
     channelBytes = cacheParams.channelBytes,
@@ -204,17 +223,36 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
     managerFn = managerPortParams
   )
 
-  val pf_recv_node: Option[BundleBridgeSink[PrefetchRecv]] = prefetchOpt match {
-    case Some(_: PrefetchReceiverParams) =>
-      Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
-    case _ => None
-  }
+ val pf_recv_node: Option[BundleBridgeSink[PrefetchRecv]] = prefetchOpt match {
+  case Some(receive: PrefetchReceiverParams) => Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
+  case Some(sms_sender_hyper: HyperPrefetchParams) => Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
+  case _ => None
+}
 
-  lazy val module = new LazyModuleImp(this) {
+  val spp_send_node: Option[BundleBridgeSource[LlcPrefetchRecv]] = prefetchOpt match {
+    case Some(hyper_pf: HyperPrefetchParams) =>
+      sppMultiLevelRefillOpt match{
+        case Some(receive: PrefetchReceiverParams) =>
+          Some(BundleBridgeSource(() => new LlcPrefetchRecv()))
+        case _ => None
+      }
+    case Some(spp_only: SPPParameters) =>
+      sppMultiLevelRefillOpt match{
+        case Some(receive: PrefetchReceiverParams) => 
+          Some(BundleBridgeSource(Some(() => new LlcPrefetchRecv())))
+        case _ => None
+      }
+    case _ => None //Spp not exist, can not use multl-level refill
+  }
+  val device = new SimpleDevice("l2", Seq("xiangshan,cpl2"))
+  val intNode = IntSourceNode(IntSourcePortSimple(resources = device.int))
+
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) with HasPerfLogging with HasPerfEvents{
     val banks = node.in.size
     val bankBits = if (banks == 1) 0 else log2Up(banks)
     val io = IO(new Bundle {
-      val l2_hint = Valid(UInt(32.W))
+      val dfx_reset = Input(new DFTResetSignals())
     })
 
     // Display info
@@ -252,26 +290,48 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
       case EdgeOutKey => node.out.head._2
       case BankBitsKey => bankBits
     }
-    val prefetcher = prefetchOpt.map(_ => Module(new Prefetcher()(pftParams)))
+    val prefetcher = prefetchOpt.map(_ => Module(new Prefetcher(parentName + "pft_")(pftParams)))
     val prefetchTrains = prefetchOpt.map(_ => Wire(Vec(banks, DecoupledIO(new PrefetchTrain()(pftParams)))))
     val prefetchResps = prefetchOpt.map(_ => Wire(Vec(banks, DecoupledIO(new PrefetchResp()(pftParams)))))
+    val prefetchEvicts = prefetchOpt.map({
+      case hyper : HyperPrefetchParams =>
+        Some( Wire(Vec(banks, DecoupledIO(new PrefetchEvict()(pftParams)))))
+      case _ => None
+    })
     val prefetchReqsReady = WireInit(VecInit(Seq.fill(banks)(false.B)))
     prefetchOpt.foreach {
       _ =>
         fastArb(prefetchTrains.get, prefetcher.get.io.train, Some("prefetch_train"))
         prefetcher.get.io.req.ready := Cat(prefetchReqsReady).orR
         fastArb(prefetchResps.get, prefetcher.get.io.resp, Some("prefetch_resp"))
+        prefetchEvicts.foreach({
+          case Some(evict_wire) => 
+            fastArb(evict_wire, prefetcher.get.io.evict.get, Some("prefetch_evict"))
+          case None =>
+        })
     }
+
     pf_recv_node match {
       case Some(x) =>
         prefetcher.get.io.recv_addr.valid := x.in.head._1.addr_valid
         prefetcher.get.io.recv_addr.bits := x.in.head._1.addr
         prefetcher.get.io_l2_pf_en := x.in.head._1.l2_pf_en
+        prefetcher.get.io_l2_pf_ctrl := x.in.head._1.l2_pf_ctrl
       case None =>
         prefetcher.foreach(_.io.recv_addr := 0.U.asTypeOf(ValidIO(UInt(64.W))))
         prefetcher.foreach(_.io_l2_pf_en := false.B)
+        prefetcher.foreach(_.io_l2_pf_ctrl := 0.U(2.W))
     }
 
+
+    spp_send_node match{
+      case Some(sender) =>
+        sender.out.head._1.addr       := prefetcher.get.io.hint2llc.get.bits.addr
+        sender.out.head._1.addr_valid := prefetcher.get.io.hint2llc.get.valid
+        sender.out.head._1.needT      := prefetcher.get.io.hint2llc.get.bits.needT
+        sender.out.head._1.source     := prefetcher.get.io.hint2llc.get.bits.source
+      case None =>
+    }
     def restoreAddress(x: UInt, idx: Int) = {
       restoreAddressUInt(x, idx.U)
     }
@@ -288,18 +348,22 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
       if(bankBits == 0) true.B else set(bankBits - 1, 0) === bankId.U
     }
 
+    def RegNextN[T <: Data](data: T, n: Int): T = {
+      if(n == 1)
+        RegNext(data)
+      else
+        RegNextN(data, n - 1)
+    }
+
     val slices = node.in.zip(node.out).zipWithIndex.map {
       case (((in, edgeIn), (out, edgeOut)), i) =>
         require(in.params.dataBits == out.params.dataBits)
-        val rst_L2 = reset
-        val slice = withReset(rst_L2) { 
-          Module(new Slice()(p.alterPartial {
-            case EdgeInKey  => edgeIn
-            case EdgeOutKey => edgeOut
-            case BankBitsKey => bankBits
-            case SliceIdKey => i
-          })) 
-        }
+        val slice = Module(new Slice(parentName = parentName + s"slice${i}_")(p.alterPartial {
+          case EdgeInKey  => edgeIn
+          case EdgeOutKey => edgeOut
+          case BankBitsKey => bankBits
+          case SliceIdKey => i
+        }))
         slice.io.in <> in
         in.b.bits.address := restoreAddress(slice.io.in.b.bits.address, i)
         out <> slice.io.out
@@ -309,6 +373,10 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
 
         slice.io.prefetch.zip(prefetcher).foreach {
           case (s, p) =>
+            s.hint2llc match{
+              case Some(x) => x := DontCare
+              case _ => None
+            }
             s.req.valid := p.io.req.valid && bank_eq(p.io.req.bits.set, i, bankBits)
             s.req.bits := p.io.req.bits
             prefetchReqsReady(i) := s.req.ready && bank_eq(p.io.req.bits.set, i, bankBits)
@@ -316,6 +384,20 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
             val resp = Pipeline(s.resp)
             prefetchTrains.get(i) <> train
             prefetchResps.get(i) <> resp
+            prefetchEvicts.foreach({
+                  case Some(evict_wire) => 
+                    val s_evict = Pipeline(s.evict.get)
+                    evict_wire(i) <> s_evict
+                    if(bankBits != 0){
+                      val evict_full_addr = Cat(
+                        s_evict.bits.tag, s_evict.bits.set, i.U(bankBits.W), 0.U(offsetBits.W)
+                      )
+                      val (evict_tag, evict_set, _) = s.parseFullAddress(evict_full_addr)
+                      evict_wire(i).bits.tag := evict_tag
+                      evict_wire(i).bits.set := evict_set
+                    }
+                  case None =>
+                })
             // restore to full address
             if(bankBits != 0){
               val train_full_addr = Cat(
@@ -330,25 +412,58 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
               prefetchTrains.get(i).bits.set := train_set
               prefetchResps.get(i).bits.tag := resp_tag
               prefetchResps.get(i).bits.set := resp_set
+              // prefetchEvicts match {
+              //   case Some(evict_wire) => 
+              //     val s_evict = Pipeline(s.evict.get)
+              //     val evict_full_addr = Cat(
+              //       s_evict.bits.tag, s_evict.bits.set, i.U(bankBits.W), 0.U(offsetBits.W)
+              //     )
+              //     val (evict_tag, evict_set, _) = s.parseFullAddress(evict_full_addr)
+              //     evict_wire(i).bits.tag := evict_tag
+              //     evict_wire(i).bits.set := evict_set
+              //   case None =>
+              // }
             }
         }
 
         slice
     }
-    val l1Hint_arb = Module(new Arbiter(new L2ToL1Hint(), slices.size))
-    val slices_l1Hint = slices.zipWithIndex.map {
-      case (s, i) => Pipeline(s.io.l1Hint, depth = 1, pipe = false, name = Some(s"l1Hint_buffer_$i"))
+
+    // TODO: config reg for ECC (enable or disable)
+    val slicesECC = VecInit(slices.map( s => RegNext(s.io.eccError)))
+    val hasECCError = Cat(slicesECC.asUInt).orR
+    intNode.out.foreach(int => int._1.foreach(_ := hasECCError))
+    intNode.out.foreach(i => dontTouch(i._1))
+
+    private val mbistPl = MBISTPipeline.PlaceMbistPipeline(Int.MaxValue,
+      s"${parentName}_mbistPipe",
+      cacheParams.hasMbist && cacheParams.hasShareBus
+    )
+
+    private val sigFromSrams = if (cacheParams.hasMbist) Some(SRAMTemplate.genBroadCastBundleTop()) else None
+    val dft = if (cacheParams.hasMbist) Some(IO(sigFromSrams.get.cloneType)) else None
+    if (cacheParams.hasMbist) {
+      dft.get <> sigFromSrams.get
+      dontTouch(dft.get)
     }
-    val (client_sourceId_match_oh, client_sourceId_start) = node.in.head._2.client.clients
-                                                          .map(c => {
-                                                                (c.sourceId.contains(l1Hint_arb.io.out.bits.sourceId).asInstanceOf[Bool], c.sourceId.start.U)
-                                                              })
-                                                          .unzip
-    l1Hint_arb.io.in <> VecInit(slices_l1Hint)
-    io.l2_hint.valid := l1Hint_arb.io.out.fire()
-    io.l2_hint.bits := l1Hint_arb.io.out.bits.sourceId - Mux1H(client_sourceId_match_oh, client_sourceId_start)
-    // always ready for grant hint
-    l1Hint_arb.io.out.ready := true.B
+
+    private val l2MbistIntf = if (cacheParams.hasMbist && cacheParams.hasShareBus) {
+      val params = mbistPl.get.nodeParams
+      val intf = Some(Module(new MBISTInterface(
+        params = Seq(params),
+        ids = Seq(mbistPl.get.childrenIds),
+        name = s"MBIST_intf_l2",
+        pipelineNum = 1
+      )))
+      intf.get.toPipeline.head <> mbistPl.get.mbist
+      if (cacheParams.hartIds.head == 0) mbistPl.get.genCSV(intf.get.info, "MBIST_L2")
+      intf.get.mbist := DontCare
+      dontTouch(intf.get.mbist)
+      //TODO: add mbist controller connections here
+      intf
+    } else {
+      None
+    }
 
     val topDown = topDownOpt.map(_ => Module(new TopDownMonitor()(p.alterPartial {
       case EdgeInKey => node.in.head._2
@@ -366,12 +481,28 @@ class CoupledL2(implicit p: Parameters) extends LazyModule with HasCoupledL2Para
       }
     }
 
-    XSPerfAccumulate(cacheParams, "hint_fire", io.l2_hint.valid)
-    val grant_fire = slices.map{ slice => {
-                        val (_, _, grant_fire_last, _) = node.in.head._2.count(slice.io.in.d)
-                        slice.io.in.d.fire() && grant_fire_last && slice.io.in.d.bits.opcode === GrantData
-                      }}
-    XSPerfAccumulate(cacheParams, "grant_data_fire", PopCount(VecInit(grant_fire)))
-  }
+    if(cacheParams.enablePerf) {
+      val grant_fire = slices.map{ slice => {
+                          val (_, _, grant_fire_last, _) = node.in.head._2.count(slice.io.in.d)
+                          slice.io.in.d.fire && grant_fire_last && slice.io.in.d.bits.opcode === GrantData
+                        }}
+      XSPerfAccumulate("grant_data_fire", PopCount(VecInit(grant_fire)))
+    }
 
+    // TODO: perfEvents
+    val allPerfEvents = slices.flatMap(_.getPerfEvents)
+    for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
+      println(cacheParams.name+" perfEvents Set ", name, inc, i)
+    }
+    println(cacheParams.name+" perfEvents All: "+cacheParams.getPCntAll)
+    val perfEvents = allPerfEvents
+    generatePerfEvent()
+
+    val prefetcherSeq = if(prefetcher.isDefined) Seq(ModuleNode(prefetcher.get)) else Seq()
+    val mbistSeq = if(mbistPl.isDefined) Seq(ModuleNode(mbistPl.get)) else Seq()
+    private val resetTree = ResetGenNode(
+      slices.map(s => ResetGenNode(Seq(ModuleNode(s)))) ++ prefetcherSeq ++ mbistSeq
+    )
+    ResetGen(resetTree, reset, Some(io.dfx_reset), !p(DebugOptionsKey).FPGAPlatform)
+  }
 }

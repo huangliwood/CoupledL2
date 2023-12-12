@@ -19,12 +19,12 @@ package coupledL2
 
 import chisel3._
 import chisel3.util._
-import utility._
-import chipsalliance.rocketchip.config.Parameters
+import xs.utils._
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import coupledL2.prefetch.PrefetchTrain
-import coupledL2.utils.{XSPerfAccumulate, XSPerfHistogram, XSPerfMax}
+import xs.utils.perf.HasPerfLogging
 
 class MSHRSelector(implicit p: Parameters) extends L2Module {
   val io = IO(new Bundle() {
@@ -37,12 +37,9 @@ class MSHRSelector(implicit p: Parameters) extends L2Module {
   })
 }
 
-class MSHRCtl(implicit p: Parameters) extends L2Module {
+class MSHRCtl(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val io = IO(new Bundle() {
-    /* interact with req arb */
-    val fromReqArb = Input(new Bundle() {
-      val status_s1 = new PipeEntranceStatus
-    })
+
     val toReqArb = Output(new BlockInfo())
 
     /* interact with mainpipe */
@@ -61,7 +58,7 @@ class MSHRCtl(implicit p: Parameters) extends L2Module {
     val sourceA = DecoupledIO(new TLBundleA(edgeOut.bundle))
     val sourceB = DecoupledIO(new TLBundleB(edgeIn.bundle))
     // val prefetchTrain = prefetchOpt.map(_ => DecoupledIO(new PrefetchTrain))
-    val grantStatus = Input(Vec(sourceIdAll, new GrantStatus))
+    val grantStatus = Input(Vec(grantBufInflightSize, new GrantStatus))
 
     /* receive resps */
     val resps = Input(new Bundle() {
@@ -77,15 +74,17 @@ class MSHRCtl(implicit p: Parameters) extends L2Module {
     val nestedwb = Input(new NestedWriteback)
     val nestedwbDataId = Output(ValidIO(UInt(mshrBits.W)))
 
-    /* read putBuffer */
-    val pbRead = DecoupledIO(new PutBufferRead)
-    val pbResp = Flipped(ValidIO(new PutBufferEntry))
-
     /* status of s2 and s3 */
     val pipeStatusVec = Flipped(Vec(2, ValidIO(new PipeStatus)))
 
-    /* to ReqBuffer, to solve conflict */
-    val toReqBuf = Vec(mshrsAll, ValidIO(new MSHRBlockAInfo))
+    /* MSHR info to Sinks */
+    /* to ReqBuffer, to calculate conflict */
+    /* to SinkB, to merge nested B req */
+    val msInfo = Vec(mshrsAll, ValidIO(new MSHRInfo))
+    val bMergeTask = Flipped(ValidIO(new BMergeTask))
+
+    /* refill read replacer result */
+    val replResp = Flipped(ValidIO(new ReplacerResult))
 
     /* for TopDown Monitor */
     val msStatus = topDownOpt.map(_ => Vec(mshrsAll, ValidIO(new MSHRStatus)))
@@ -96,18 +95,20 @@ class MSHRCtl(implicit p: Parameters) extends L2Module {
 
   val pipeReqCount = PopCount(Cat(io.pipeStatusVec.map(_.valid))) // TODO: consider add !mshrTask to optimize
   val mshrCount = PopCount(Cat(mshrs.map(_.io.status.valid)))
-  val mshrFull = pipeReqCount + mshrCount >= mshrsAll.U
-  val a_mshrFull = pipeReqCount + mshrCount >= (mshrsAll-1).U // the last idle mshr should not be allocated for channel A req
+  val mshrWillUse = pipeReqCount + mshrCount
+  dontTouch(pipeReqCount)
+  dontTouch(mshrCount)
+  dontTouch(mshrWillUse)
   val mshrSelector = Module(new MSHRSelector())
   mshrSelector.io.idle := mshrs.map(m => !m.io.status.valid)
   val selectedMSHROH = mshrSelector.io.out.bits
   io.toMainPipe.mshr_alloc_ptr := OHToUInt(selectedMSHROH)
 
-  val resp_sinkC_match_vec = mshrs.map(mshr =>
-    mshr.io.status.valid && mshr.io.status.bits.w_c_resp &&
-    io.resps.sinkC.set === mshr.io.status.bits.set &&
-    io.resps.sinkC.tag === mshr.io.status.bits.tag
-  )
+  val resp_sinkC_match_vec = mshrs.map { mshr =>
+    val status = mshr.io.status.bits
+    val tag = Mux(status.needsRepl, status.metaTag, status.reqTag)
+    mshr.io.status.valid && status.w_c_resp && io.resps.sinkC.set === status.set && io.resps.sinkC.tag === tag
+  }
 
   mshrs.zipWithIndex.foreach {
     case (m, i) =>
@@ -123,24 +124,31 @@ class MSHRCtl(implicit p: Parameters) extends L2Module {
       m.io.resps.sink_e.bits := io.resps.sinkE.respInfo
       m.io.resps.source_c.valid := m.io.status.valid && io.resps.sourceC.valid && io.resps.sourceC.mshrId === i.U
       m.io.resps.source_c.bits := io.resps.sourceC.respInfo
-      
-      m.io.nestedwb := io.nestedwb
+      m.io.replResp.valid := io.replResp.valid && io.replResp.bits.mshrId === i.U
+      m.io.replResp.bits := io.replResp.bits
 
-      io.toReqBuf(i) := m.io.toReqBuf
+      io.msInfo(i) := m.io.msInfo
+      m.io.nestedwb := io.nestedwb
+      m.io.bMergeTask.valid := io.bMergeTask.valid && io.bMergeTask.bits.id === i.U
+      m.io.bMergeTask.bits := io.bMergeTask.bits
   }
 
-  val setMatchVec_b = mshrs.map(m => m.io.status.valid && m.io.status.bits.set === io.fromReqArb.status_s1.b_set)
-  val setConflictVec_b = (setMatchVec_b zip mshrs.map(_.io.status.bits.nestB)).map(x => x._1 && !x._2)
-  io.toReqArb.blockC_s1 := false.B
-  io.toReqArb.blockB_s1 := mshrFull || Cat(setConflictVec_b).orR
-  io.toReqArb.blockA_s1 := a_mshrFull // conflict logic moved to ReqBuf
+  val latency = 1 // stall latency cycle for timing
+  val toReqArb = WireInit(0.U.asTypeOf((io.toReqArb)))
+  toReqArb.blockC_s1 := false.B
+//  toReqArb.blockB_s1 := Mux(!io.toReqArb.blockB_s1, mshrWillUse >= (mshrsAll-latency).U, mshrWillUse >= mshrsAll.U)
+  toReqArb.blockB_s1 := mshrWillUse >= mshrsAll.U
+  toReqArb.blockA_s1 := Mux(!io.toReqArb.blockB_s1, mshrWillUse >= (mshrsAll-1-latency).U, mshrWillUse >= (mshrsAll-latency).U) // the last idle mshr should not be allocated for channel A req
+  toReqArb.blockG_s1 := false.B
+  dontTouch(toReqArb)
+
+  io.toReqArb := RegNext(toReqArb)
+
 
   /* Acquire downwards */
   val acquireUnit = Module(new AcquireUnit())
   fastArb(mshrs.map(_.io.tasks.source_a), acquireUnit.io.task, Some("source_a"))
   io.sourceA <> acquireUnit.io.sourceA
-  io.pbRead <> acquireUnit.io.pbRead
-  io.pbResp <> acquireUnit.io.pbResp
 
   /* Probe upwards */
   val sourceB = Module(new SourceB())
@@ -163,6 +171,7 @@ class MSHRCtl(implicit p: Parameters) extends L2Module {
   io.nestedwbDataId.bits := ParallelPriorityMux(mshrs.zipWithIndex.map {
     case (mshr, i) => (mshr.io.nestedwbData, i.U)
   })
+  if(cacheParams.enableAssert) assert(RegNext(PopCount(mshrs.map(_.io.nestedwbData)) <= 1.U), "should only be one nestedwbData")
 
   dontTouch(io.sourceA)
 
@@ -172,16 +181,14 @@ class MSHRCtl(implicit p: Parameters) extends L2Module {
     }
   )
   // Performance counters
-  XSPerfAccumulate(cacheParams, "capacity_conflict_to_sinkA", a_mshrFull)
-  XSPerfAccumulate(cacheParams, "capacity_conflict_to_sinkB", mshrFull)
-  //  XSPerfAccumulate(cacheParams, "set_conflict_to_sinkA", Cat(setMatchVec_a).orR) //TODO: move this to ReqBuf
-  XSPerfAccumulate(cacheParams, "set_conflict_to_sinkB", Cat(setConflictVec_b).orR)
-  XSPerfHistogram(cacheParams, "mshr_alloc", io.toMainPipe.mshr_alloc_ptr,
+  XSPerfAccumulate("capacity_conflict_to_sinkA", io.toReqArb.blockA_s1)
+  XSPerfAccumulate("capacity_conflict_to_sinkB", io.toReqArb.blockB_s1)
+  XSPerfHistogram("mshr_alloc", io.toMainPipe.mshr_alloc_ptr,
     enable = io.fromMainPipe.mshr_alloc_s3.valid,
     start = 0, stop = mshrsAll, step = 1)
   // prefetchOpt.foreach {
   //   _ =>
-  //     XSPerfAccumulate(cacheParams, "prefetch_trains", io.prefetchTrain.get.fire())
+  //     XSPerfAccumulate("prefetch_trains", io.prefetchTrain.get.fire)
   // }
   
   if (cacheParams.enablePerf) {
@@ -196,9 +203,9 @@ class MSHRCtl(implicit p: Parameters) extends L2Module {
     val release_period_en = io.resps.sinkD.valid && io.resps.sinkD.respInfo.opcode === ReleaseAck
     val probe_period_en = io.resps.sinkC.valid &&
       (io.resps.sinkC.respInfo.opcode === ProbeAck || io.resps.sinkC.respInfo.opcode === ProbeAckData)
-    XSPerfHistogram(cacheParams, "acquire_period", acquire_period, acquire_period_en, start, stop, step)
-    XSPerfHistogram(cacheParams, "release_period", release_period, release_period_en, start, stop, step)
-    XSPerfHistogram(cacheParams, "probe_period", probe_period, probe_period_en, start, stop, step)
+    XSPerfHistogram("acquire_period", acquire_period, acquire_period_en, start, stop, step)
+    XSPerfHistogram("release_period", release_period, release_period_en, start, stop, step)
+    XSPerfHistogram("probe_period", probe_period, probe_period_en, start, stop, step)
 
     val timers = RegInit(VecInit(Seq.fill(mshrsAll)(0.U(64.W))))
     for (((timer, m), i) <- timers.zip(mshrs).zipWithIndex) {
@@ -208,9 +215,9 @@ class MSHRCtl(implicit p: Parameters) extends L2Module {
         timer := timer + 1.U
       }
       val enable = m.io.status.valid && m.io.status.bits.will_free
-      XSPerfHistogram(cacheParams, "mshr_latency_" + Integer.toString(i, 10),
+      XSPerfHistogram("mshr_latency_" + Integer.toString(i, 10),
         timer, enable, 0, 300, 10)
-      XSPerfMax(cacheParams, "mshr_latency", timer, enable)
+      XSPerfMax("mshr_latency", timer, enable)
     }
   }
 }

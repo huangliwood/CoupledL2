@@ -1,0 +1,11 @@
+{
+    "workbench.colorCustomizations": {
+        "activityBar.background": "#2B300B",
+        "titleBar.activeBackground": "#3C430F",
+        "titleBar.activeForeground": "#FAFCF0"
+    },
+    "files.watcherExclude": {
+        "**/target": true
+    },
+    "editor.tabSize": 2
+}

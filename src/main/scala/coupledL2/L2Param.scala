@@ -22,11 +22,10 @@ import chisel3.util.log2Ceil
 import freechips.rocketchip.diplomacy.BufferParams
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
-import chipsalliance.rocketchip.config.Field
+import org.chipsalliance.cde.config.Field
 import huancun.CacheParameters
 import coupledL2.prefetch._
-import MemReqSource._
-import utility.ReqSourceKey
+import xs.utils.tl.{MemReqSource, ReqSourceKey}
 
 // General parameter key of CoupledL2
 case object L2ParamKey extends Field[L2Param](L2Param())
@@ -39,6 +38,7 @@ case class L1Param
   ways: Int = 8,
   blockBytes: Int = 64,
   aliasBitsOpt: Option[Int] = None,
+  vaddrBitsOpt: Option[Int] = None
 ) {
   val capacity = sets * ways * blockBytes
   val setBits = log2Ceil(sets)
@@ -48,42 +48,25 @@ case class L1Param
 
 // Indicate alias bit of upper level cache
 case object AliasKey extends ControlKey[UInt]("alias")
-case class AliasField(width: Int) extends BundleField(AliasKey) {
-  override def data: UInt = Output(UInt(width.W))
-  override def default(x: UInt): Unit = {
-    x := 0.U(width.W)
-  }
-}
+case class AliasField(width: Int) extends BundleField[UInt](AliasKey, Output(UInt(width.W)), _ := 0.U(width.W))
+
+// Pass virtual address of upper level cache
+case object VaddrKey extends ControlKey[UInt]("vaddr")
+case class VaddrField(width: Int) extends BundleField[UInt](VaddrKey, Output(UInt(width.W)), _ := 0.U(width.W))
 
 // Indicate whether Hint is needed by upper level cache
 case object PrefetchKey extends ControlKey[Bool](name = "needHint")
-case class PrefetchField() extends BundleField(PrefetchKey) {
-  override def data: Bool = Output(Bool())
-  override def default(x: Bool): Unit = {
-    x := false.B
-  }
-}
+case class PrefetchField() extends BundleField[Bool](PrefetchKey, Output(Bool()), _ := false.B)
 
 case object IsHitKey extends ControlKey[Bool](name = "isHitInL3")
 
-case class IsHitField() extends BundleField(IsHitKey) {
-  override def data: Bool = Output(Bool())
-
-  override def default(x: Bool): Unit = {
-    x := true.B
-  }
-}
+case class IsHitField() extends BundleField[Bool](IsHitKey, Output(Bool()), _ := true.B)
 
 // Indicate whether this block is dirty or not (only used in handle Release/ReleaseData)
 // Now it only works for non-inclusive cache (ignored in inclusive cache)
 case object DirtyKey extends ControlKey[Bool](name = "blockisdirty")
 
-case class DirtyField() extends BundleField(DirtyKey) {
-  override def data: Bool = Output(Bool())
-  override def default(x: Bool): Unit = {
-    x := true.B
-  }
-}
+case class DirtyField() extends BundleField[Bool](DirtyKey, Output(Bool()), _ := true.B)
 
 case class L2Param
 (
@@ -91,12 +74,15 @@ case class L2Param
   ways: Int = 4,
   sets: Int = 128,
   dirNBanks: Int = 8,
+  dsNBanks: Int = 8,
   blockBytes: Int = 64,
   pageBytes: Int = 4096,
   channelBytes: TLChannelBeatBytes = TLChannelBeatBytes(32),
   clientCaches: Seq[L1Param] = Nil,
   replacement: String = "plru",
   mshrs: Int = 16,
+  enableClockGate: Boolean = true,
+  dataEccCode: Option[String] = Some("secded"), // Option: "none", "identity", "parity", "sec", "secded"
   releaseData: Int = 3,
   /* 0 for dirty alone
    * 1 for dirty and accessed
@@ -109,7 +95,8 @@ case class L2Param
   reqField: Seq[BundleFieldBase] = Nil, 
   respKey: Seq[BundleKeyBase] = Seq(IsHitKey),
   // Manager
-  reqKey: Seq[BundleKeyBase] = Seq(AliasKey, PrefetchKey, ReqSourceKey),
+  // reqKey: Seq[BundleKeyBase] = Seq(AliasKey, PrefetchKey, ReqSourceKey),
+  reqKey: Seq[BundleKeyBase] = Seq(AliasKey, PrefetchKey),
   respField: Seq[BundleFieldBase] = Nil,
 
   innerBuf: TLBufferParams = TLBufferParams(),
@@ -120,16 +107,29 @@ case class L2Param
     d = BufferParams.default,
     e = BufferParams.default
   ),
+  hasMbist: Boolean = false,
+  hasShareBus: Boolean = false,
+
+  // Numbers of Performance Counter in <xxx submodule>
+  numPCntMP: Int = 11,
+  numPCntReqArb: Int = 0,
 
   hartIds: Seq[Int] = Seq[Int](),
   // Prefetch
   prefetch: Option[PrefetchParameters] = None,
+  Csr_PfCtrlBits: Int = 16,
+  // Signature Path Prefetch multi-level cache refill support option
+  sppMultiLevelRefill : Option[PrefetchParameters] = None,
   // Performance analysis
   enablePerf: Boolean = true,
+  // Assert enable (we should disable assertion if we want to collect coverage info while simulating)
+  enableAssert: Boolean = true,
   // Monitor
   enableMonitor: Boolean = true,
   // TopDown
-  elaboratedTopDown: Boolean = true
+  elaboratedTopDown: Boolean = true,
+  // env
+  FPGAPlatform: Boolean = false
 ) {
   def toCacheParams: CacheParameters = CacheParameters(
     name = name,
@@ -138,6 +138,8 @@ case class L2Param
     blockGranularity = log2Ceil(sets),
     blockBytes = blockBytes
   )
+
+  def getPCntAll: Int = numPCntMP + numPCntReqArb
 }
 
 case object EdgeInKey extends Field[TLEdgeIn]

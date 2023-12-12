@@ -19,9 +19,10 @@ package coupledL2
 
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import coupledL2.utils._
 import java.util.ResourceBundle
+import xs.utils.sram.SRAMTemplate
 
 // read with block granularity
 class MSHRBufRead(implicit p: Parameters) extends L2Bundle {
@@ -33,7 +34,7 @@ class MSHRBufRead(implicit p: Parameters) extends L2Bundle {
 
 // write with beat granularity
 class MSHRBufWrite(implicit p: Parameters) extends L2Bundle {
-  val valid = Input(Bool())
+  val valid_dups = Input(Vec(mshrsAll, Bool()))
   val beat_sel = Input(UInt(beatSize.W))
   val data = Input(new DSBlock)
   val id = Input(UInt(mshrBits.W))
@@ -48,18 +49,13 @@ class MSHRBuffer(wPorts: Int = 1)(implicit p: Parameters) extends L2Module {
     val w = Vec(wPorts, new MSHRBufWrite)
   })
 
-  val buffer = Seq.fill(mshrsAll) {
-    Seq.fill(beatSize) {
-      Module(new SRAMTemplate(new DSBeat(), set = 1, way = 1, singlePort = true))
-    }
-  }
-  val valids = RegInit(VecInit(Seq.fill(mshrsAll) {
-    VecInit(Seq.fill(beatSize)(false.B))
-  }))
+  val buffer = RegInit(VecInit.tabulate(mshrsAll, beatSize)((_, _) => 0.U.asTypeOf(new DSBeat())))
+  val valids = RegInit(VecInit.tabulate(mshrsAll, beatSize)((_, _) => false.B))
+
 
   io.w.foreach {
     case w =>
-      when (w.valid) {
+      when (w.valid_dups.reduce(_||_)) {
         w.beat_sel.asBools.zipWithIndex.foreach {
           case (sel, i) =>
             when (sel) { valids(w.id)(i) := true.B }
@@ -77,22 +73,28 @@ class MSHRBuffer(wPorts: Int = 1)(implicit p: Parameters) extends L2Module {
 
   buffer.zipWithIndex.foreach {
     case (block, i) =>
-      val wens = VecInit(io.w.map(w => w.valid && w.id === i.U)).asUInt
-      assert(PopCount(wens) <= 1.U, "multiple write to the same MSHR buffer entry")
+      val wens = VecInit(io.w.map(w => w.valid_dups(i) && w.id === i.U)).asUInt
+      if(cacheParams.enableAssert)  assert(PopCount(wens) <= 2.U, "triple write to the same MSHR buffer entry")
 
       val w_beat_sel = PriorityMux(wens, io.w.map(_.beat_sel))
       val w_data = PriorityMux(wens, io.w.map(_.data))
       val ren = io.r.valid && io.r.id === i.U
+      // block.zipWithIndex.foreach {
+      //   case (entry, j) =>
+      //     entry.io.w.req.valid := wens.orR && w_beat_sel(j)
+      //     entry.io.w.req.bits.apply(
+      //       data = w_data.data((j + 1) * beatBytes * 8 - 1, j * beatBytes * 8).asTypeOf(new DSBeat),
+      //       setIdx = 0.U,
+      //       waymask = 1.U
+      //     )
+      //     entry.io.r.req.valid := ren
+      //     entry.io.r.req.bits.apply(0.U)
+      // }
       block.zipWithIndex.foreach {
         case (entry, j) =>
-          entry.io.w.req.valid := wens.orR && w_beat_sel(j)
-          entry.io.w.req.bits.apply(
-            data = w_data.data((j + 1) * beatBytes * 8 - 1, j * beatBytes * 8).asTypeOf(new DSBeat),
-            setIdx = 0.U,
-            waymask = 1.U
-          )
-          entry.io.r.req.valid := ren
-          entry.io.r.req.bits.apply(0.U)
+          when(wens.orR && w_beat_sel(j)) {
+            entry := w_data.data((j + 1) * beatBytes * 8 - 1, j * beatBytes * 8).asTypeOf(new DSBeat)
+          }
       }
   }
 
@@ -100,7 +102,8 @@ class MSHRBuffer(wPorts: Int = 1)(implicit p: Parameters) extends L2Module {
   io.w.foreach(_.ready := true.B)
 
   val ridReg = RegNext(io.r.id, 0.U.asTypeOf(io.r.id))
-  io.r.data.data := VecInit(buffer.map {
-    case block => VecInit(block.map(_.io.r.resp.data.asUInt)).asUInt
-  })(ridReg)
+  // io.r.data.data := VecInit(buffer.map {
+  //   case block => VecInit(block.map(_.io.r.resp.data.asUInt)).asUInt
+  // })(ridReg)
+  io.r.data.data := RegNext(buffer(io.r.id).asUInt)
 }

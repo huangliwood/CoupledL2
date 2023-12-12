@@ -4,3 +4,7 @@ out/
 .idea_modules/
 test_run_dir/
 build/
+.metals/
+.vscode/
+.bloop/
+coupledL3-bak/

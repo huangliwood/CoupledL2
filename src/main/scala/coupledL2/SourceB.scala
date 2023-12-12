@@ -22,8 +22,9 @@ import chisel3._
 import chisel3.util._
 import coupledL2.utils._
 import freechips.rocketchip.tilelink._
-import chipsalliance.rocketchip.config.Parameters
-import utility._
+import org.chipsalliance.cde.config.Parameters
+import xs.utils._
+import xs.utils.perf.HasPerfLogging
 
 class GrantStatus(implicit p: Parameters) extends L2Bundle {
   val valid  = Bool()
@@ -40,11 +41,11 @@ class ProbeEntry(implicit p: Parameters) extends L2Bundle {
 
 // send B reqs to upper level cache
 // Attention! We stall Probes if there is same-addr Grant not received GrantAck
-class SourceB(implicit p: Parameters) extends L2Module {
+class SourceB(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val io = IO(new Bundle() {
     val sourceB = DecoupledIO(new TLBundleB(edgeIn.bundle))
     val task = Flipped(DecoupledIO(new SourceBReq))
-    val grantStatus = Input(Vec(sourceIdAll, new GrantStatus))
+    val grantStatus = Input(Vec(grantBufInflightSize, new GrantStatus))
   })
 
   def toTLBundleB(task: SourceBReq) = {
@@ -78,21 +79,19 @@ class SourceB(implicit p: Parameters) extends L2Module {
   val conflict     = Cat(conflictMask).orR
 
   val noReadyEntry = Wire(Bool())
-  val canFlow      = noReadyEntry && !conflict
-  val flow         = canFlow && io.sourceB.ready
 
   /* ======== Alloc ======== */
-  io.task.ready   := !full || flow
+  io.task.ready   := !full
 
   val insertIdx = PriorityEncoder(probes.map(!_.valid))
-  val alloc     = !full && io.task.valid && !flow
+  val alloc     = !full && io.task.valid
   when(alloc) {
     val p = probes(insertIdx)
     p.valid := true.B
     p.rdy   := !conflict
     p.waitG := OHToUInt(conflictMask)
     p.task  := io.task.bits
-    assert(PopCount(conflictMask) <= 1.U)
+    if(cacheParams.enableAssert) assert(PopCount(conflictMask) <= 1.U)
   }
 
   /* ======== Issue ======== */
@@ -116,14 +115,14 @@ class SourceB(implicit p: Parameters) extends L2Module {
   }
 
   /* ======== Output ======== */
-  io.sourceB.valid := issueArb.io.out.valid || (io.task.valid && canFlow)
-  io.sourceB.bits  := toTLBundleB(
-    Mux(canFlow, io.task.bits, issueArb.io.out.bits)
-  )
+  io.sourceB.valid := issueArb.io.out.valid
+  io.sourceB.bits  := toTLBundleB(issueArb.io.out.bits)
 
   /* ======== Perf ======== */
-  for(i <- 0 until entries){
-    val update = PopCount(probes.map(_.valid)) === i.U
-    XSPerfAccumulate(cacheParams, s"probe_buffer_util_$i", update)
+  if(cacheParams.enablePerf) {
+    for(i <- 0 until entries){
+      val update = PopCount(probes.map(_.valid)) === i.U
+      XSPerfAccumulate(s"probe_buffer_util_$i", update)
+    }
   }
 }

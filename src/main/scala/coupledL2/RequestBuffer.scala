@@ -1,11 +1,12 @@
 package coupledL2
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink.TLMessages._
 import chisel3._
 import chisel3.util._
 import coupledL2.utils._
-import utility._
+import xs.utils._
+import xs.utils.perf.HasPerfLogging
 
 class ReqEntry(entries: Int = 4)(implicit p: Parameters) extends L2Bundle() {
   val valid    = Bool()
@@ -36,8 +37,6 @@ class ReqEntry(entries: Int = 4)(implicit p: Parameters) extends L2Bundle() {
   */
 //  val depMask = Vec(entries, Bool())
 
-  /* ways in the set that are occupied by unfinished MSHR task */
-  val occWays = UInt(cacheParams.ways.W)
 }
 
 class ChosenQBundle(idWIdth: Int = 2)(implicit p: Parameters) extends L2Bundle {
@@ -45,27 +44,40 @@ class ChosenQBundle(idWIdth: Int = 2)(implicit p: Parameters) extends L2Bundle {
   val id = UInt(idWIdth.W)
 }
 
-class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Parameters) extends L2Module {
+class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Parameters) extends L2Module with HasPerfLogging{
 
   val io = IO(new Bundle() {
     val in          = Flipped(DecoupledIO(new TaskBundle))
     val out         = DecoupledIO(new TaskBundle)
-    val mshrStatus  = Vec(mshrsAll, Flipped(ValidIO(new MSHRBlockAInfo)))
-    val mainPipeBlock = Input(Vec(2, Bool()))
+    val mshrInfo  = Vec(mshrsAll, Flipped(ValidIO(new MSHRInfo)))
 
-    val ATag        = Output(UInt(tagBits.W))
     val ASet        = Output(UInt(setBits.W))
 
-    // when Probe/Release enters MainPipe, we need also to block A req
-    val sinkEntrance = Flipped(ValidIO(new L2Bundle {
+    val mpInfo = Vec(2, Flipped(ValidIO(new Bundle() {
       val tag = UInt(tagBits.W)
       val set = UInt(setBits.W)
+      val mshrTask = Bool()
+      val metaWen = Bool()
+    })))
+
+    // when Probe/Release/MSHR enters MainPipe, we need also to block A req
+    val s1Entrance = Flipped(ValidIO(new L2Bundle {
+      val set = UInt(setBits.W)
     }))
+
+    val hasLatePF = Output(Bool())
   })
+
+  /* ======== mp s2 and s3 block A req ======== */
+  val mp_blockA = Wire(Vec(2, Bool()))
+  io.mpInfo.zip(mp_blockA).foreach {
+    case (mp, blockA) =>
+      blockA := mp.valid && mp.bits.set === io.in.bits.set && !(mp.bits.mshrTask && !mp.bits.metaWen)
+  }
+  val mp_blockA_s1 = mp_blockA(0) || mp_blockA(1)
 
   /* ======== Data Structure ======== */
 
-  io.ATag := io.in.bits.tag
   io.ASet := io.in.bits.set
 
   val buffer = RegInit(VecInit(Seq.fill(entries)(0.U.asTypeOf(new ReqEntry))))
@@ -77,45 +89,45 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   val NWay = cacheParams.ways
   // count conflict
   def sameAddr(a: TaskBundle, b: TaskBundle):     Bool = Cat(a.tag, a.set) === Cat(b.tag, b.set)
-  def sameAddr(a: TaskBundle, b: MSHRBlockAInfo): Bool = Cat(a.tag, a.set) === Cat(b.reqTag, b.set)
+  def sameAddr(a: TaskBundle, b: MSHRInfo): Bool = Cat(a.tag, a.set) === Cat(b.reqTag, b.set)
   def sameSet (a: TaskBundle, b: TaskBundle):     Bool = a.set === b.set
-  def sameSet (a: TaskBundle, b: MSHRBlockAInfo): Bool = a.set === b.set
-  def addrConflict(a: TaskBundle, s: MSHRBlockAInfo): Bool = {
+  def sameSet (a: TaskBundle, b: MSHRInfo): Bool = a.set === b.set
+  def addrConflict(a: TaskBundle, s: MSHRInfo): Bool = {
     a.set === s.set && (a.tag === s.reqTag || a.tag === s.metaTag && s.needRelease)
   }
-  def conflictMask(a: TaskBundle): UInt = VecInit(io.mshrStatus.map(s =>
+  def conflictMask(a: TaskBundle): UInt = VecInit(io.mshrInfo.map(s =>
     s.valid && addrConflict(a, s.bits) && !s.bits.willFree)).asUInt
   def conflict(a: TaskBundle): Bool = conflictMask(a).orR
 
-  // count ways
-  def countWaysOH(cond: (MSHRBlockAInfo => Bool)): UInt = {
-    VecInit(io.mshrStatus.map(s =>
-      Mux(
-        s.valid && cond(s.bits),
-        UIntToOH(s.bits.way, NWay),
-        0.U(NWay.W)
-      )
-    )).reduceTree(_ | _)
-  }
-  def occWays     (a: TaskBundle): UInt = countWaysOH(s => !s.willFree && sameSet(a, s))
-  def willFreeWays(a: TaskBundle): UInt = countWaysOH(s =>  s.willFree && sameSet(a, s))
+  def latePrefetch(a: TaskBundle): Bool = VecInit(io.mshrInfo.map(s =>
+    s.valid && s.bits.isPrefetch && sameAddr(a, s.bits) && !s.bits.willFree &&
+    a.fromA && (a.opcode === AcquireBlock || a.opcode === AcquirePerm)
+  )).asUInt.orR
 
-  def noFreeWay(a: TaskBundle): Bool = !Cat(~occWays(a)).orR
-  def noFreeWay(occWays: UInt): Bool = !Cat(~occWays).orR
+  // count ways
+//  def countWaysOH(cond: (MSHRInfo => Bool)): UInt = {
+//    VecInit(io.mshrInfo.map(s =>
+//      Mux(
+//        s.valid && cond(s.bits),
+//        UIntToOH(s.bits.way, NWay),
+//        0.U(NWay.W)
+//      )
+//    )).reduceTree(_ | _)
+//  }
 
   // other flags
   val in      = io.in.bits
   val full    = Cat(buffer.map(_.valid)).andR
   // flow not allowed when full, or entries might starve
-  val canFlow = flow.B && !full &&
-    !conflict(in) && !chosenQValid && !Cat(io.mainPipeBlock).orR && !noFreeWay(in)
+  val canFlow = flow.B && !full && !conflict(in) && !chosenQValid && mp_blockA_s1
   val doFlow  = canFlow && io.out.ready
+  io.hasLatePF := latePrefetch(in) && io.in.valid && !sameAddr(in, RegNext(in))
 
   //  val depMask    = buffer.map(e => e.valid && sameAddr(io.in.bits, e.task))
   // remove duplicate prefetch if same-addr A req in MSHR or ReqBuf
   val isPrefetch = in.fromA && in.opcode === Hint
   val dupMask    = VecInit(
-    io.mshrStatus.map(s =>
+    io.mshrInfo.map(s =>
       s.valid && s.bits.isAcqOrPrefetch && sameAddr(in, s.bits)) ++
     buffer.map(e =>
       e.valid && sameAddr(in, e.task)
@@ -132,25 +144,24 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   val alloc = !full && io.in.valid && !doFlow && !dup
   when(alloc){
     val entry = buffer(insertIdx)
-    val mpBlock = Cat(io.mainPipeBlock).orR
+    val mpBlock = mp_blockA_s1
     val pipeBlockOut = io.out.fire && sameSet(in, io.out.bits)
-    val probeBlock   = io.sinkEntrance.valid && io.sinkEntrance.bits.set === in.set // wait for same-addr req to enter MSHR
+    val probeBlock   = io.s1Entrance.valid && io.s1Entrance.bits.set === in.set // wait for same-addr req to enter MSHR
     val s1Block      = pipeBlockOut || probeBlock
 
     entry.valid   := true.B
     // when Addr-Conflict / Same-Addr-Dependent / MainPipe-Block / noFreeWay-in-Set, entry not ready
-    entry.rdy     := !conflict(in) && !mpBlock && !noFreeWay(in) && !s1Block // && !Cat(depMask).orR
+    entry.rdy     := !conflict(in) && !mpBlock && !s1Block // && !Cat(depMask).orR
     entry.task    := io.in.bits
     entry.waitMP  := Cat(
       s1Block,
-      io.mainPipeBlock(0),
-      io.mainPipeBlock(1),
+      mp_blockA(0),
+      mp_blockA(1),
       0.U(1.W))
     entry.waitMS  := conflictMask(in)
-    entry.occWays := Mux(mpBlock, 0.U, occWays(in))
 
 //    entry.depMask := depMask
-    assert(PopCount(conflictMask(in)) <= 2.U)
+    if(cacheParams.enableAssert) assert(PopCount(conflictMask(in)) <= 2.U)
   }
 
   /* ======== Issue ======== */
@@ -172,20 +183,15 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   chosenQ.io.enq.bits.id := issueArb.io.chosen
   issueArb.io.out.ready := chosenQ.io.enq.ready
 
-  //TODO: if i use occWays when update,
-  // does this mean that every entry has occWays logic?
-
   /* ======== Update rdy and masks ======== */
   for (e <- buffer) {
     when(e.valid) {
       val waitMSUpdate  = WireInit(e.waitMS)
 //      val depMaskUpdate = WireInit(e.depMask)
-      val occWaysUpdate = WireInit(e.occWays)
 
-      // when mshr will_free, clear it in other reqs' waitMS and occWays
-      val willFreeMask = VecInit(io.mshrStatus.map(s => s.valid && s.bits.willFree)).asUInt
+      // when mshr will_free, clear it in other reqs' waitMS
+      val willFreeMask = VecInit(io.mshrInfo.map(s => s.valid && s.bits.willFree)).asUInt
       waitMSUpdate  := e.waitMS  & (~willFreeMask).asUInt
-      occWaysUpdate := e.occWays & (~willFreeWays(e.task)).asUInt
 
       // Initially,
       //    waitMP(2) = s2 blocking, wait 2 cycles
@@ -197,7 +203,6 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
       e.waitMP := e.waitMP >> 1.U
       when(e.waitMP(1) === 0.U && e.waitMP(0) === 1.U) {
         waitMSUpdate  := conflictMask(e.task)
-        occWaysUpdate := occWays(e.task)
       }
 
       // when request is sent, clear it in other reqs' depMask
@@ -207,7 +212,7 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
 
       // set waitMP if fired-s1-req is the same set
       val s1A_Block = io.out.fire && sameSet(e.task, io.out.bits)
-      val s1B_Block = io.sinkEntrance.valid && io.sinkEntrance.bits.set === e.task.set
+      val s1B_Block = io.s1Entrance.valid && io.s1Entrance.bits.set === e.task.set
       val s1_Block  = s1A_Block || s1B_Block
       when(s1_Block) {
         e.waitMP := e.waitMP | "b0100".U // fired-req at s2 next cycle
@@ -216,8 +221,7 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
       // update info
       e.waitMS  := waitMSUpdate
 //      e.depMask := depMaskUpdate
-      e.occWays := occWaysUpdate
-      e.rdy     := !waitMSUpdate.orR && !e.waitMP && !noFreeWay(occWaysUpdate) && !s1_Block
+      e.rdy     := !waitMSUpdate.orR && !e.waitMP && !s1_Block
     }
   }
 
@@ -225,45 +229,62 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
   // when entry.rdy is no longer true,
   // we cancel req in chosenQ, with the entry still held in buffer to issue later
 //  val cancel = (canFlow && sameSet(chosenQ.io.deq.bits.bits.task, io.in.bits)) || !buffer(chosenQ.io.deq.bits.id).rdy
-  val cancel = !buffer(chosenQ.io.deq.bits.id).rdy
+  val buffer_read_id = WireInit(0.U.asTypeOf(chosenQ.io.deq.bits.id))
+  when(chosenQ.io.deq.valid){
+    buffer_read_id := chosenQ.io.deq.bits.id
+  }otherwise{
+    buffer_read_id := 0.U
+  }
+  val cancel = !buffer(buffer_read_id).rdy
+  // val cancel = !buffer(chosenQ.io.deq.bits.id).rdy
+
+  dontTouch(cancel)
 
   chosenQ.io.deq.ready := io.out.ready || cancel
   io.out.valid := chosenQValid && !cancel || io.in.valid && canFlow
-  io.out.bits  := Mux(canFlow, io.in.bits, chosenQ.io.deq.bits.bits.task)
+  val deq_task = WireInit(0.U.asTypeOf(new TaskBundle()))
+  when(chosenQ.io.deq.valid){
+    deq_task := chosenQ.io.deq.bits.bits.task
+  }otherwise{
+    deq_task := 0.U.asTypeOf(new TaskBundle())
+  }
+  io.out.bits  := Mux(canFlow, io.in.bits, deq_task)
 
   when(chosenQ.io.deq.fire && !cancel) {
     buffer(chosenQ.io.deq.bits.id).valid := false.B
   }
 
-  // for Dir to choose a way not occupied by some unfinished MSHR task
-  io.out.bits.wayMask := Mux(canFlow, ~occWays(io.in.bits), ~chosenQ.io.deq.bits.bits.occWays)
+  // for Dir to choose a free way
+  io.out.bits.wayMask := Fill(cacheParams.ways, 1.U(1.W))
 
   // add XSPerf to see how many cycles the req is held in Buffer
   if(cacheParams.enablePerf) {
-    XSPerfAccumulate(cacheParams, "drop_prefetch", dup)
     if(flow){
-      XSPerfAccumulate(cacheParams, "req_buffer_flow", doFlow)
+      XSPerfAccumulate("req_buffer_flow", io.in.valid && doFlow)
     }
-    XSPerfAccumulate(cacheParams, "req_buffer_alloc", alloc)
-    XSPerfAccumulate(cacheParams, "req_buffer_full", full)
-    XSPerfAccumulate(cacheParams, "recv_prefetch", io.in.fire && isPrefetch)
-    XSPerfAccumulate(cacheParams, "recv_normal", io.in.fire && !isPrefetch)
-    XSPerfAccumulate(cacheParams, "chosenQ_cancel", chosenQValid && cancel)
+    XSPerfAccumulate("req_buffer_alloc", alloc)
+    XSPerfAccumulate("req_buffer_full", io.in.valid && full)
+    XSPerfAccumulate("recv_prefetch", io.in.fire && isPrefetch)
+    XSPerfAccumulate("recv_normal", io.in.fire && !isPrefetch)
+    XSPerfAccumulate("chosenQ_cancel", chosenQValid && cancel)
+    XSPerfAccumulate("reqBuffer_latePrefetch", io.hasLatePF)
+    XSPerfAccumulate("drop_prefetch", dup) // this also serves as late prefetch
+    // TODO: count conflict
     for(i <- 0 until entries){
       val cntEnable = PopCount(buffer.map(_.valid)) === i.U
-      XSPerfAccumulate(cacheParams, s"req_buffer_util_$i", cntEnable)
+      XSPerfAccumulate(s"req_buffer_util_$i", cntEnable)
     }
     val bufferTimer = RegInit(VecInit(Seq.fill(entries)(0.U(16.W))))
     buffer zip bufferTimer map {
       case (e, t) =>
         when(e.valid) { t := t + 1.U }
         when(RegNext(RegNext(e.valid) && !e.valid)) { t := 0.U }
-        assert(t < 10000.U, "ReqBuf Leak")
+        if(cacheParams.enableAssert) assert(t < 20000.U, "ReqBuf Leak")
 
         val enable = RegNext(e.valid) && !e.valid
-        XSPerfHistogram(cacheParams, "reqBuf_timer", t, enable, 0, 20, 1, right_strict = true)
-        XSPerfHistogram(cacheParams, "reqBuf_timer", t, enable, 20, 400, 20, left_strict = true)
-        XSPerfMax(cacheParams, "max_reqBuf_timer", t, enable)
+        XSPerfHistogram("reqBuf_timer", t, enable, 0, 20, 1, right_strict = true)
+        XSPerfHistogram("reqBuf_timer", t, enable, 20, 400, 20, left_strict = true)
+        XSPerfMax("max_reqBuf_timer", t, enable)
 
         // assert !(all entries occupied for 100 cycles)
     }

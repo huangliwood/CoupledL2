@@ -17,12 +17,12 @@
 
 package coupledL2.prefetch
 
-import utility.SRAMTemplate
-import chipsalliance.rocketchip.config.Parameters
+import xs.utils.sram.{SRAMReadBus, SRAMTemplate, SRAMWriteBus}
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import coupledL2.HasCoupledL2Parameters
-import coupledL2.utils.XSPerfAccumulate
+import xs.utils.perf.HasPerfLogging
 
 case class BOPParameters(
   rrTableEntries: Int = 256,
@@ -133,9 +133,26 @@ class RecentRequestTable(implicit p: Parameters) extends BOPModule {
     val tag = UInt(rrTagBits.W)
   }
 
-  val rrTable = Module(
-    new SRAMTemplate(rrTableEntry(), set = rrTableEntries, way = 1, shouldReset = true, singlePort = true)
-  )
+  class RRTable(implicit p: Parameters) extends BOPModule {
+    val io = IO(new Bundle {
+      val r = Flipped(new SRAMReadBus(rrTableEntry(), rrTableEntries, 1))
+      val w = Flipped(new SRAMWriteBus(rrTableEntry(), rrTableEntries, 1))
+    })
+    // private val tags = Mem(rrTableEntries, UInt(rrTagBits.W))
+    private val tags = RegInit(VecInit(Seq.fill(rrTableEntries)(0.U(rrTagBits.W))))
+    private val valids = RegInit(VecInit(Seq.fill(rrTagBits)(false.B)))
+    io.w.req.ready := true.B
+    when(io.w.req.valid){
+      tags(io.w.req.bits.setIdx) := io.w.req.bits.data.head.tag
+      valids(io.w.req.bits.setIdx) := io.w.req.bits.data.head.valid
+    }
+    io.r.req.ready := !io.w.req.valid
+
+    io.r.resp.data.head.valid := RegEnable(valids(io.r.req.bits.setIdx), io.r.req.fire)
+    io.r.resp.data.head.tag := RegEnable(tags(io.r.req.bits.setIdx), io.r.req.fire)
+  }
+
+  val rrTable = Module(new RRTable)
 
   val wAddr = io.w.bits
   rrTable.io.w.req.valid := io.w.valid && !io.r.req.valid
@@ -145,21 +162,21 @@ class RecentRequestTable(implicit p: Parameters) extends BOPModule {
 
   val rAddr = io.r.req.bits.addr - signedExtend((io.r.req.bits.testOffset << offsetBits), fullAddressBits)
   val rData = Wire(rrTableEntry())
-  rrTable.io.r.req.valid := io.r.req.fire()
+  rrTable.io.r.req.valid := io.r.req.fire
   rrTable.io.r.req.bits.setIdx := idx(rAddr)
   rData := rrTable.io.r.resp.data(0)
 
-  assert(!RegNext(io.w.fire() && io.r.req.fire()), "single port SRAM should not read and write at the same time")
+  if(cacheParams.enableAssert) assert(!RegNext(io.w.fire && io.r.req.fire), "single port SRAM should not read and write at the same time")
 
   io.w.ready := rrTable.io.w.req.ready && !io.r.req.valid
   io.r.req.ready := true.B
-  io.r.resp.valid := RegNext(rrTable.io.r.req.fire(), false.B)
+  io.r.resp.valid := RegNext(rrTable.io.r.req.fire, false.B)
   io.r.resp.bits.ptr := RegNext(io.r.req.bits.ptr)
   io.r.resp.bits.hit := rData.valid && rData.tag === RegNext(tag(rAddr))
 
 }
 
-class OffsetScoreTable(implicit p: Parameters) extends BOPModule {
+class OffsetScoreTable(implicit p: Parameters) extends BOPModule with HasPerfLogging{
   val io = IO(new Bundle {
     val req = Flipped(DecoupledIO(UInt(fullAddressBits.W)))
     val prefetchOffset = Output(UInt(offsetWidth.W))
@@ -170,7 +187,7 @@ class OffsetScoreTable(implicit p: Parameters) extends BOPModule {
   // score table
   // val st = RegInit(VecInit(offsetList.map(off => (new ScoreTableEntry).apply(off.U, 0.U))))
   val st = RegInit(VecInit(Seq.fill(scores)((new ScoreTableEntry).apply(0.U))))
-  val offList = WireInit(VecInit(offsetList.map(off => off.S(offsetWidth.W).asUInt())))
+  val offList = WireInit(VecInit(offsetList.map(off => off.S(offsetWidth.W).asUInt)))
   val ptr = RegInit(0.U(scoreTableIdxBits.W))
   val round = RegInit(0.U(roundBits.W))
 
@@ -207,7 +224,7 @@ class OffsetScoreTable(implicit p: Parameters) extends BOPModule {
   // (1) one of the score equals SCOREMAX, or
   // (2) the number of rounds equals ROUNDMAX.
   when(state === s_learn) {
-    when(io.test.req.fire()) {
+    when(io.test.req.fire) {
       val roundFinish = ptr === (scores - 1).U
       ptr := Mux(roundFinish, 0.U, ptr + 1.U)
       round := Mux(roundFinish, round + 1.U, round)
@@ -218,7 +235,7 @@ class OffsetScoreTable(implicit p: Parameters) extends BOPModule {
       state := s_idle
     }
 
-    when(io.test.resp.fire() && io.test.resp.bits.hit) {
+    when(io.test.resp.fire && io.test.resp.bits.hit) {
       val oldScore = st(io.test.resp.bits.ptr).score
       val newScore = oldScore + 1.U
       val offset = offList(io.test.resp.bits.ptr)
@@ -242,45 +259,48 @@ class OffsetScoreTable(implicit p: Parameters) extends BOPModule {
   io.test.req.bits.ptr := ptr
   io.test.resp.ready := true.B
 
+  XSPerfAccumulate("bop_test_hit", io.test.resp.fire && io.test.resp.bits.hit)
   for (off <- offsetList) {
     if (off < 0) {
-      XSPerfAccumulate(cacheParams, "best_offset_neg_" + (-off).toString + "_learning_phases",
+      XSPerfAccumulate("best_offset_neg_" + (-off).toString + "_learning_phases",
         Mux(state === s_idle, (bestOffset === off.S(offsetWidth.W).asUInt).asUInt, 0.U))
     } else {
-      XSPerfAccumulate(cacheParams, "best_offset_pos_" + off.toString + "_learning_phases",
+      XSPerfAccumulate("best_offset_pos_" + off.toString + "_learning_phases",
         Mux(state === s_idle, (bestOffset === off.U).asUInt, 0.U))
     }
   }
 
 }
 
-class BestOffsetPrefetch(implicit p: Parameters) extends BOPModule {
+class BestOffsetPrefetch(implicit p: Parameters) extends BOPModule with HasPerfLogging{
   val io = IO(new Bundle() {
     val train = Flipped(DecoupledIO(new PrefetchTrain))
     val req = DecoupledIO(new PrefetchReq)
     val resp = Flipped(DecoupledIO(new PrefetchResp))
+    val shareBO = Output(SInt(offsetWidth.W))
   })
 
   val rrTable = Module(new RecentRequestTable)
   val scoreTable = Module(new OffsetScoreTable)
-
+  val respQueue = Module(new Queue(new PrefetchResp, 16, flow=true))
   val prefetchOffset = scoreTable.io.prefetchOffset
   val oldAddr = io.train.bits.addr
   val newAddr = oldAddr + signedExtend((prefetchOffset << offsetBits), fullAddressBits)
 
   rrTable.io.r <> scoreTable.io.test
-  rrTable.io.w.valid := io.resp.valid
-  rrTable.io.w.bits := Cat(Cat(io.resp.bits.tag, io.resp.bits.set) - signedExtend(prefetchOffset, setBits + fullTagBits), 0.U(offsetBits.W))
+  respQueue.io.enq <> io.resp
+  rrTable.io.w.valid := respQueue.io.deq.valid
+  rrTable.io.w.bits := Cat(Cat(respQueue.io.deq.bits.tag, respQueue.io.deq.bits.set) - signedExtend(prefetchOffset, setBits + fullTagBits), 0.U(offsetBits.W))
   scoreTable.io.req.valid := io.train.valid
   scoreTable.io.req.bits := oldAddr
 
-  val req = Reg(new PrefetchReq)
+  val req = RegInit(0.U.asTypeOf(new PrefetchReq))
   val req_valid = RegInit(false.B)
   val crossPage = getPPN(newAddr) =/= getPPN(oldAddr) // unequal tags
-  when(io.req.fire()) {
+  when(io.req.fire) {
     req_valid := false.B
   }
-  when(scoreTable.io.req.fire()) {
+  when(scoreTable.io.req.fire) {
     req.tag := parseFullAddress(newAddr)._1
     req.set := parseFullAddress(newAddr)._2
     req.needT := io.train.bits.needT
@@ -290,19 +310,21 @@ class BestOffsetPrefetch(implicit p: Parameters) extends BOPModule {
 
   io.req.valid := req_valid
   io.req.bits := req
-  io.req.bits.isBOP := true.B
+  io.req.bits.pfVec := PfSource.BOP
   io.train.ready := scoreTable.io.req.ready && (!req_valid || io.req.ready)
-  io.resp.ready := rrTable.io.w.ready
+  io.resp.ready := true.B;dontTouch(io.resp.ready)
+  io.shareBO := RegNext(prefetchOffset.asSInt,0.S)
+  respQueue.io.deq.ready := rrTable.io.w.ready
 
   for (off <- offsetList) {
     if (off < 0) {
-      XSPerfAccumulate(cacheParams, "best_offset_neg_" + (-off).toString, prefetchOffset === off.S(offsetWidth.W).asUInt)
+      XSPerfAccumulate("best_offset_neg_" + (-off).toString, prefetchOffset === off.S(offsetWidth.W).asUInt)
     } else {
-      XSPerfAccumulate(cacheParams, "best_offset_pos_" + off.toString, prefetchOffset === off.U)
+      XSPerfAccumulate("best_offset_pos_" + off.toString, prefetchOffset === off.U)
     }
   }
-  XSPerfAccumulate(cacheParams, "bop_req", io.req.fire())
-  XSPerfAccumulate(cacheParams, "bop_train", io.train.fire())
-  XSPerfAccumulate(cacheParams, "bop_train_stall_for_st_not_ready", io.train.valid && !scoreTable.io.req.ready)
-  XSPerfAccumulate(cacheParams, "bop_cross_page", scoreTable.io.req.fire() && crossPage)
+  XSPerfAccumulate("bop_req", io.req.fire)
+  XSPerfAccumulate("bop_train", io.train.fire)
+  XSPerfAccumulate("bop_train_stall_for_st_not_ready", io.train.valid && !scoreTable.io.req.ready)
+  XSPerfAccumulate("bop_cross_page", scoreTable.io.req.fire && crossPage)
 }
