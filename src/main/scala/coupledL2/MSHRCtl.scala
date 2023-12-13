@@ -180,17 +180,7 @@ class MSHRCtl(implicit p: Parameters) extends L2Module with HasPerfLogging{
       case (in, s) => in := s.io.status
     }
   )
-  // Performance counters
-  XSPerfAccumulate("capacity_conflict_to_sinkA", io.toReqArb.blockA_s1)
-  XSPerfAccumulate("capacity_conflict_to_sinkB", io.toReqArb.blockB_s1)
-  XSPerfHistogram("mshr_alloc", io.toMainPipe.mshr_alloc_ptr,
-    enable = io.fromMainPipe.mshr_alloc_s3.valid,
-    start = 0, stop = mshrsAll, step = 1)
-  // prefetchOpt.foreach {
-  //   _ =>
-  //     XSPerfAccumulate("prefetch_trains", io.prefetchTrain.get.fire)
-  // }
-  
+  // Performance counters  
   if (cacheParams.enablePerf) {
     val start = 0
     val stop = 100
@@ -219,5 +209,15 @@ class MSHRCtl(implicit p: Parameters) extends L2Module with HasPerfLogging{
         timer, enable, 0, 300, 10)
       XSPerfMax("mshr_latency", timer, enable)
     }
+    
+    XSPerfAccumulate("capacity_conflict_to_sinkA", io.toReqArb.blockA_s1)
+    XSPerfAccumulate("capacity_conflict_to_sinkB", io.toReqArb.blockB_s1)
+    XSPerfHistogram("mshr_alloc", io.toMainPipe.mshr_alloc_ptr,
+      enable = io.fromMainPipe.mshr_alloc_s3.valid,
+      start = 0, stop = mshrsAll, step = 1)
+    // prefetchOpt.foreach {
+    //   _ =>
+    //     XSPerfAccumulate("prefetch_trains", io.prefetchTrain.get.fire)
+    // }
   }
 }
