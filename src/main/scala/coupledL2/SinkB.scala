@@ -122,7 +122,7 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
   task_temp.bits := task_be_sent
   // task_out
   io.task.valid := taskOutPipe.valid
-  io.task.bits := taskOutPipe.bits
+  io.task.bits := Mux(taskOutPipe.valid, taskOutPipe.bits, 0.U.asTypeOf(taskOutPipe.bits))
   taskOutPipe.ready := true.B
   // retry
   task_retry.valid := io.task.valid && !io.task.ready
@@ -142,7 +142,7 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
   bMergeTask.bits.task := task
   val bMergeTaskOutPipe = Queue(bMergeTask, entries = 1, pipe = true, flow = false) // for timing: mshrCtl <> sinkB <> mshrCtl
   io.bMergeTask.valid := bMergeTaskOutPipe.valid
-  io.bMergeTask.bits := bMergeTaskOutPipe.bits
+  io.bMergeTask.bits := Mux(bMergeTaskOutPipe.valid, bMergeTaskOutPipe.bits, 0.U.asTypeOf(bMergeTaskOutPipe.bits))
   bMergeTaskOutPipe.ready := true.B
 
   //--------------------------------- assert ----------------------------------------//
