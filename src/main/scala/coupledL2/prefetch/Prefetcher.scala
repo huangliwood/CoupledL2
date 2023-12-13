@@ -103,7 +103,7 @@ class PrefetchIO(implicit p: Parameters) extends PrefetchBundle {
   val hint2llc = if(sppMultiLevelRefillOpt.nonEmpty)  Some(ValidIO(new PrefetchReq)) else None
 }
 
-class PrefetchQueue(implicit p: Parameters) extends PrefetchModule with HasPerfLogging{
+class PrefetchQueue(inflightEntries:Int = 32)(implicit p: Parameters) extends PrefetchModule with HasPerfLogging{
   val io = IO(new Bundle {
     val enq = Flipped(DecoupledIO(new PrefetchReq))
     val deq = DecoupledIO(new PrefetchReq)
@@ -162,36 +162,6 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
   
   dontTouch(io_l2_pf_en)
   dontTouch(io_l2_pf_ctrl)
-
-  val (counterValue, counterWrap) = Counter(true.B, 1024)
-  val deadPfEviction = RegInit(0.U(13.W))
-  val issued = RegInit(0.U(16.W))
-  val pf_state = WireInit(0.U(2.W))
-  dontTouch(pf_state)
-  io.evict match {
-    case Some(evict) =>
-    when(evict.valid && evict.bits.is_prefetch) {
-      deadPfEviction := deadPfEviction + 1.U
-    }
-    case None =>
-  }
-  when(io.req.fire) {
-    issued := issued + 1.U
-  }
-  when(counterWrap) {
-    deadPfEviction := 0.U
-    issued := 0.U
-    // deadPfEviction/issued > 0.75, 
-    when((deadPfEviction << 2) > issued + issued + issued) {
-      pf_state := 3.U
-    } .elsewhen((deadPfEviction << 1) > issued) {
-      pf_state := 2.U
-    } .elsewhen((deadPfEviction << 2) > issued) {
-      pf_state := 1.U
-    } .otherwise {
-      pf_state := 0.U
-    }
-  }
   var hasSpp = false
   prefetchOpt.get match {
     case bop: BOPParameters => // case bop only
@@ -240,14 +210,10 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
     case hyperPf: HyperPrefetchParams => // case spp +  bop + smsReceiver
       hasSpp = true
       val hybrid_pfts = Module(new HyperPrefetchDev2(parentName + "hpft_"))
-      val pftQueue = Module(new PrefetchQueue)
-      val delayQ = Module(new Queue(io.req.bits.cloneType, entries = 1, pipe = true, flow = false))
       hybrid_pfts.io.train <> io.train
       hybrid_pfts.io.resp <> io.resp
       hybrid_pfts.io.recv_addr := ValidIODelay(io.recv_addr, 2)
-      pftQueue.io.enq <> hybrid_pfts.io.req
-      delayQ.io.enq <> pftQueue.io.deq
-      io.req <> delayQ.io.deq
+      io.req <> hybrid_pfts.io.req
       io.evict match {
         case Some(evict) =>
         hybrid_pfts.io.evict <> evict
@@ -275,6 +241,4 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
   XSPerfAccumulate("prefetch_train_on_pf_hit", io.train.fire && io.train.bits.state === AccessState.PREFETCH_HIT)
   XSPerfAccumulate("prefetch_train_on_cache_hit", io.train.fire && io.train.bits.state === AccessState.HIT)
   XSPerfAccumulate("prefetch_send2_pfq", io.req.fire)
-  XSPerfHistogram("prefetch_dead_block", deadPfEviction, counterWrap, 0, 200, 5)
-  XSPerfHistogram("prefetch_dead_ratio", pf_state, counterWrap, 0, 4, 1)
 }
