@@ -120,7 +120,7 @@ class DataStorage(parentName:String = "Unknown")(implicit p: Parameters) extends
     // io.rdata := toDSBlock(corrDataVec)
     
     // ECC will not correct corrupt data, instead only generate error signal and pass out from the L2Cache
-    io.error := Cat(dataEccErrVec).orR
+    io.error := Mux(!reset.asBool, Cat(dataEccErrVec).orR, false.B)
     io.rdata := rdDataRaw
 
     when(~reset.asBool) {
