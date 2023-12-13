@@ -339,10 +339,12 @@ class Directory(parentName: String = "Unknown")(implicit p: Parameters) extends 
     resetIdx := resetIdx - 1.U
   }
 
-  XSPerfAccumulate("dirRead_cnt", io.read.fire)
-  XSPerfAccumulate("choose_busy_way", reqValid_s3 && !req_s3.wayMask(chosenWay))
-  XSPerfAccumulate("dirWrite_all",io.metaWReq.valid && io.metaWReq.bits.fromA)
-  if(hasPrefetchBit){
-      XSPerfAccumulate("dirWrite_fromPrefetch",io.metaWReq.valid && io.metaWReq.bits.fromA && io.metaWReq.bits.wmeta.prefetch.get)
+  if (cacheParams.enablePerf) {
+    XSPerfAccumulate("dirRead_cnt", io.read.fire)
+    XSPerfAccumulate("choose_busy_way", reqValid_s3 && !req_s3.wayMask(chosenWay))
+    XSPerfAccumulate("dirWrite_all",io.metaWReq.valid && io.metaWReq.bits.fromA)
+    if(hasPrefetchBit){
+        XSPerfAccumulate("dirWrite_fromPrefetch",io.metaWReq.valid && io.metaWReq.bits.fromA && io.metaWReq.bits.wmeta.prefetch.get)
+    }
   }
 }

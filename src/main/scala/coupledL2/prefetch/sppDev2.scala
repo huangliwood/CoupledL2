@@ -18,6 +18,7 @@ import xs.utils.RegNextN
 import xs.utils.CircularShift
 import java.lang
 import coupledL2.prefetch.AccessState
+import coupledL2.prefetch.PrefetchQueue
 
 object PfSource extends Enumeration {
   val bits = 3
@@ -690,8 +691,8 @@ class PatternTableTiming(parentName:String="Unkown")(implicit p: Parameters) ext
 
   // enable prefetch
   s1_enprefetch := s1_valid && s1_hit && s1_issued =/= 0.U && state === s_lookahead && s1_is_samePage(s1_testOffset)
-  // enable nextline when
-  when(s1_lookCount === 0.U && state === s_lookahead && !s1_enprefetch) {
+  // enable nextline
+  when(s1_valid && s1_lookCount === 0.U && state === s_lookahead && !s1_enprefetch) {
     val s1_testOffset_NL = s1_current.block + 1.U
     s1_enprefetchnl := ENABLE_NL.B && s1_is_samePage(s1_testOffset_NL)
   }
@@ -1036,7 +1037,7 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     val s0_blkOffset = WireInit(s0_oldAddr(pageOffsetBits - 1, offsetBits));dontTouch(s0_blkOffset)
 
     s0_valid := io.req.fire
-    s0_req := Mux(s0_valid,io.req.bits,0.U.asTypeOf(new PrefetchReq))
+    s0_req := io.req.bits
     when(s0_valid){
         s0_result := consensusTable(get_idx(s0_pageAddr))
     }.otherwise{
@@ -1048,8 +1049,8 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     // calculate
     // send out prefetch request
     val s1_valid = VecInit.fill(dupNums)(RegNext(s0_valid,false.B));dontTouch(s1_valid)
-    val s1_req = VecInit.fill(dupNums)(RegEnable(s0_req,0.U.asTypeOf(new PrefetchReq),s0_valid(0)));dontTouch(s1_req)
-    val s1_result = VecInit.fill(dupNums)(RegEnable(s0_result,0.U.asTypeOf(fTableEntry()),s0_valid(0)));dontTouch(s1_result)
+    val s1_req = VecInit.fill(dupNums)(RegEnable(s0_req,0.U.asTypeOf(new PrefetchReq),s0_valid));dontTouch(s1_req)
+    val s1_result = VecInit.fill(dupNums)(RegEnable(s0_result,0.U.asTypeOf(fTableEntry()),s0_valid));dontTouch(s1_result)
     val s1_oldAddr = WireInit(s1_req(1).addr);dontTouch(s1_oldAddr)
     val s1_dup_offset = WireInit(s1_req(1).set(dupOffsetBits-1+dupBits-1,dupOffsetBits-1));dontTouch(s1_dup_offset)
 
@@ -1102,6 +1103,7 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     io.req.ready := io.resp.ready
     io.resp.valid := s1_valid(s1_dup_offset) && s1_can_send2_pfq(s1_dup_offset)
     io.resp.bits := s1_req(s1_dup_offset)
+    io.resp.bits.pfVec := s1_next_VecState(s1_dup_offset)
     // --------------------------------------------------------------------------------
     // stage 2
     // --------------------------------------------------------------------------------
@@ -1122,7 +1124,7 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     // --------------------------------------------------------------------------------
     // evict operation
     // --------------------------------------------------------------------------------
-    evict_q.io.enq.valid := s1_valid(s1_dup_offset) && s1_can_send2_pfq.reduce(_ ||_ ) // if spp2llc , don't enq
+    evict_q.io.enq.valid := s1_valid(s1_dup_offset) && s1_can_send2_pfq(s1_dup_offset) // if spp2llc , don't enq
     evict_q.io.enq.bits := get_blockAddr(req_dups(s1_dup_offset).bits.addr)
     val isqFull = evict_q.io.count === (fTableQueueEntries-1).U
     evict_q.io.deq.ready := isqFull;dontTouch(evict_q.io.deq.ready)
@@ -1147,7 +1149,7 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     }
     io.evict.ready := true.B
 
-  XSPerfAccumulate("hyper_filter_nums",s1_valid(s1_dup_offset) && !io.resp.valid)
+  XSPerfAccumulate("hyper_filter_nums",s1_valid(s1_dup_offset) && s1_can_send2_pfq(s1_dup_offset))
   XSPerfAccumulate("hyper_filter_input",io.req.valid)
   XSPerfAccumulate("hyper_filter_input_sms",io.req.valid && io.req.bits.pfVec === FitlerVecState.SMS)
   XSPerfAccumulate("hyper_filter_input_bop",io.req.valid && io.req.bits.pfVec === FitlerVecState.BOP)
@@ -1332,9 +1334,16 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
   q_bop.io.deq.ready := fTable.io.req.ready && !q_sms.io.deq.valid
   q_spp.io.deq.ready := fTable.io.req.ready && !q_sms.io.deq.valid && !q_bop.io.deq.valid
 
-  io.req <> fTable.io.resp
+  //send to prefetchQueue
+  val pftQueue = Module(new PrefetchQueue(inflightEntries = 32))
+  val req_pipe = Module(new Pipeline(new PrefetchReq, 1, pipe = true))
+  req_pipe.io.in <> pftQueue.io.deq
+  pftQueue.io.enq <> fTable.io.resp
+  // fTable.io.resp.ready := io.req.ready //cannot back pressure
+  io.req.valid := req_pipe.io.out.valid
+  io.req.bits := Mux(req_pipe.io.out.valid,req_pipe.io.out.bits,0.U.asTypeOf(new PrefetchReq))
+  req_pipe.io.out.ready := io.req.ready
 
-  // io.req <> q_bop.io.deq
   fTable.io.evict.valid := false.B//io.evict.valid
   fTable.io.evict.bits := io.evict.bits
   io.evict.ready := fTable.io.evict.ready
