@@ -318,9 +318,13 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     !mshr_req_s3,
     c_releaseData_s3, // Among all sinkTasks, only C-Release writes DS
     Mux(
-      req_s3.useProbeData,
-      io.releaseBufResp_s3.bits.data,
-      io.refillBufResp_s3.bits.data
+      req_s3.fromA && req_s3.opcode === Grant, // When Grant need refill DS, set data = 0 for reset to avoid X
+      0.U,
+      Mux(
+        req_s3.useProbeData,
+        io.releaseBufResp_s3.bits.data,
+        io.refillBufResp_s3.bits.data
+      )
     )
   )
 

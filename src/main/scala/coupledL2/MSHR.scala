@@ -67,6 +67,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
   val gotT = RegInit(false.B) // L3 might return T even though L2 wants B
   val gotDirty = RegInit(false.B)
   val gotGrantData = RegInit(false.B)
+  val gotGrant = RegInit(false.B)
   val probeDirty = RegInit(false.B)
   val probeGotN = RegInit(false.B)
 
@@ -93,6 +94,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
     gotT        := false.B
     gotDirty    := false.B
     gotGrantData := false.B
+    gotGrant := false.B
     probeDirty  := false.B
     probeGotN   := false.B
     timer       := 1.U
@@ -407,7 +409,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
     )
     mp_grant.metaWen := true.B
     mp_grant.tagWen := !dirResult.hit
-    mp_grant.dsWen := (!dirResult.hit || gotDirty) && gotGrantData || probeDirty && (req_get || req.aliasTask.getOrElse(false.B))
+    mp_grant.dsWen := (!dirResult.hit || gotDirty) && (gotGrantData || gotGrant) || probeDirty && (req_get || req.aliasTask.getOrElse(false.B))
     mp_grant.pfVec.foreach(_ := req.pfVec.get)
     mp_grant.needHint.foreach(_ := false.B)
     mp_grant.replTask := !dirResult.hit // Get and Alias are hit that does not need replacement
@@ -495,6 +497,9 @@ class MSHR(implicit p: Parameters) extends L2Module {
     }
     when(d_resp.bits.opcode === GrantData) {
       gotGrantData := true.B
+    }
+    when(d_resp.bits.opcode === Grant) {
+      gotGrant := true.B
     }
     when(d_resp.bits.opcode === ReleaseAck) {
       state_dups.foreach(_.w_releaseack := true.B)
