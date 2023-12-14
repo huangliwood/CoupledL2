@@ -692,7 +692,7 @@ class PatternTableTiming(parentName:String="Unkown")(implicit p: Parameters) ext
   // enable prefetch
   s1_enprefetch := s1_valid && s1_hit && s1_issued =/= 0.U && state === s_lookahead && s1_is_samePage(s1_testOffset)
   // enable nextline
-  when(s1_valid && s1_lookCount === 0.U && state === s_lookahead && !s1_enprefetch) {
+  when((true.B || s1_valid) && s1_lookCount === 0.U && state === s_lookahead && !s1_enprefetch) {
     val s1_testOffset_NL = s1_current.block + 1.U
     s1_enprefetchnl := ENABLE_NL.B && s1_is_samePage(s1_testOffset_NL)
   }
