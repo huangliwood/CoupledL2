@@ -52,18 +52,38 @@ class PrefetchReceiver()(implicit p: Parameters) extends PrefetchModule {
 
 }
 
-// fake sms send node fo TL_Test / Cocotb
+// // fake sms send node fo TL_Test / Cocotb
 class PrefetchSmsOuterNode(val clientNum:Int=2)(implicit p: Parameters) extends LazyModule{
   val outNode = BundleBridgeSource(Some(() => new coupledL2.PrefetchRecv()))
-  lazy val module = new LazyModuleImp(this){
-    val prefetchRecv = outNode.out.head._1
-    val (counterValue, counterWrap) = Counter(true.B, 200)
-    val tmp = RegEnable(0x8000_0000L.U + counterValue,counterWrap)
-    prefetchRecv.addr_valid := false.B//counterValue <= 50.U
-    prefetchRecv.addr := tmp + counterValue << 6.U
-    prefetchRecv.l2_pf_en := true.B
+  lazy val module = new SmsOuterImpl
+  class SmsOuterImpl extends LazyModuleImp(this){
+    val io = IO(new Bundle() {
+      val pf_en = Input(Bool())
+      val pf_ctrl = Input(UInt(16.W))
+      val addr = Flipped(Valid(UInt(64.W)))
+    })
+    dontTouch(io)
+    dontTouch(outNode.out.head._1)
+    outNode.out.head._1.l2_pf_en := io.pf_en
+    outNode.out.head._1.l2_pf_ctrl := io.pf_ctrl
+    outNode.out.head._1.addr_valid := io.addr.valid
+    outNode.out.head._1.addr := io.addr.bits
   }
 }
+
+// class PrefetchSmsOuterNode(val clientNum:Int=1)(implicit p: Parameters) extends LazyModule{
+//   val inNode = Seq.fill(clientNum)(BundleBridgeSink(Some(() => new coupledL2.PrefetchRecv)))
+//   val outNode = BundleBridgeSource(Some(() => new coupledL2.PrefetchRecv()))
+//   lazy val module = new LazyModuleImp(this){
+//     val io = inNode(0).makeIOs
+//     for (i <- 0 until clientNum) {
+//       outNode.out.head._1.addr_valid := inNode(i).out.head._1.addr_valid
+//       outNode.out.head._1.addr       := inNode(i).out.head._1.addr
+//       outNode.out.head._1.l2_pf_en   := inNode(i).out.head._1.l2_pf_en
+//       outNode.out.head._1.l2_pf_ctrl := inNode(i).out.head._1.l2_pf_ctrl
+//     }
+//   }
+// }
 
 // null node
 class SppSenderNull(val clientNum:Int=2)(implicit p: Parameters) extends LazyModule{

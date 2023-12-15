@@ -498,7 +498,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
   var master_nodes: Seq[TLClientNode] = Seq() // TODO
   val NumCores=2
   // val nullNode = LazyModule(new SppSenderNull)
-  val l1_sms_send_0_node =(0 until nrL2).map{i =>LazyModule(new PrefetchSmsOuterNode)}
+  val l1_sms_send_node =(0 until nrL2).map{i =>LazyModule(new PrefetchSmsOuterNode)}
   // val sms_sink = BundleBridgeSink(Some(() => new coupledL2.PrefetchRecv()))
   val l2List = (0 until nrL2).map{i =>
     val l1d = createClientNode(s"l1d$i", 32)
@@ -534,9 +534,10 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
           HyperPrefetchParams    => spp+bop+sms
           MCLPPrefetchParams     => sms+bop+sms
         */
-        sppMultiLevelRefill = None,//Some(coupledL2.prefetch.PrefetchReceiverParams()),
         respKey =  Seq(PrefetchKey),
-        enablePerf = true
+        enablePerf = true,
+        // sppMultiLevelRefill = None,
+        sppMultiLevelRefill = Some(coupledL2.prefetch.PrefetchReceiverParams()),
         /*must has spp, otherwise Assert Fail
         sppMultiLevelRefill options:
         PrefetchReceiverParams() => spp has cross level refill
@@ -547,11 +548,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
     })))
     l1xbar := TLBuffer() := l1i
     l1xbar := TLBuffer() := l1d
-    l2node.pf_recv_node match{
-      case Some(l2Recv) => 
-        l2Recv := l1_sms_send_0_node(i).outNode
-      case None =>
-    }
+
     l2xbar := TLBuffer() := l2node.node := l1xbar
     l2node // return l2 list
   }
@@ -571,8 +568,8 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       simulation = true,
       hasMbist = false,
       prefetch = None,
-      // prefetchRecv = Some(huancun.prefetch.PrefetchReceiverParams()),
-      prefetchRecv =  None,
+      prefetchRecv = Some(huancun.prefetch.PrefetchReceiverParams()),
+      // prefetchRecv = None,
       tagECC = Some("secded"),
       dataECC = Some("secded"),
       ctrl = Some(huancun.CacheCtrl(
@@ -582,9 +579,15 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
     )
     case DebugOptionsKey => DebugOptions()
   })))
-
+  
+  for(i <- 0 until nrL2){
+    if(l2List(i).pf_recv_node.isDefined){
+      println("connecting fake l1_sms_sender to coupedL2 prefetcher")
+      l2List(i).pf_recv_node.get := l1_sms_send_node(i).outNode
+    }
+  }
   println(f"pf_l3recv_node connecting to l3pf_RecvXbar out")
-  val sppHasCrossLevelRefillOpt = p(L2ParamKey).sppMultiLevelRefill
+  val sppHasCrossLevelRefillOpt = l2List.head.cacheParams.sppMultiLevelRefill
   println(f"SPP cross level refill: ${sppHasCrossLevelRefillOpt} ")
   sppHasCrossLevelRefillOpt match{
     case Some(x) =>
@@ -617,7 +620,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
   l3.ctlnode.foreach(_ := TLBuffer() := ctrl_node)
   l3.intnode.foreach(ecc_int_sink := _)
   l3.rst_nodes.foreach(_.foreach(l3_reset_sink := _))
-  // l1_sms_send_0_node.foreach(sms_sink := _.outNode )
+  // l1_sms_send_node.foreach(sms_sink := _.outNode )
 
   val idBits = 14
   val l3FrontendAXI4Node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
@@ -649,12 +652,20 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
     val io = IO(new Bundle{
       val perfClean = Input(Bool())
       val perfDump = Input(Bool())
+      val pf_en = Input(Bool())
+      val pf_ctrl = Input(UInt(16.W))
+      val pf_addr = Flipped(Valid(UInt(64.W)))
     })
-
+    dontTouch(io)
     l2List.foreach(_.module.io.dfx_reset.scan_mode := false.B)
     l2List.foreach(_.module.io.dfx_reset.lgc_rst_n := true.B.asAsyncReset)
     l2List.foreach(_.module.io.dfx_reset.mode := false.B)
-    
+    l1_sms_send_node.foreach(x => {
+      x.module.io.pf_en := io.pf_en
+      x.module.io.pf_ctrl := io.pf_ctrl
+      x.module.io.addr := io.pf_addr
+    })
+     
     val logTimestamp = WireInit(0.U(64.W))
     val perfClean = WireInit(false.B)
     val perfDump = WireInit(false.B)

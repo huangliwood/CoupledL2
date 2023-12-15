@@ -18,6 +18,42 @@ import xs.utils.RegNextN
 import xs.utils.CircularShift
 import java.lang
 import coupledL2.prefetch.AccessState
+import coupledL2.prefetch.PrefetchQueue
+
+object PfCtrlConst{
+  object Switch{
+    val BOP = 0
+    val SPP = 1
+    val SMS = 2
+
+    val bits = 3
+    def get_fields(x:UInt):UInt = {
+      val fields = WireInit(x(bits-1,0));dontTouch(fields)
+      fields
+    }
+  }
+  object SppConfig{
+    val bits = 3
+    def get_fields(x:UInt):UInt = {
+      val fields = WireInit(x(Switch.bits+bits-1,Switch.bits));dontTouch(fields)
+      fields
+    }
+  }
+  object FitlerTableConfig{
+    val bits = 2
+    def get_fields(x:UInt):UInt = {
+      val fields = WireInit(x(Switch.bits+SppConfig.bits+bits-1,Switch.bits+SppConfig.bits));dontTouch(fields)
+      fields
+    }
+  }
+  // val DEFAULT = 0.U(bits.W)
+  // val SMS_BOP_SPP = "b000".U(bits.W)
+  // val SMS_BOP     = "b001".U(bits.W)
+  // val SMS_SPP     = "b010".U(bits.W)
+  // val SMS         = "b011".U(bits.W)
+  // val BOP         = "b101".U(bits.W)
+  // val SPP         = "b110".U(bits.W)
+}
 
 object PfSource extends Enumeration {
   val bits = 3
@@ -348,7 +384,7 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
   //TODO: there should hold origin delta signal!!
   // sTable.io.w.req.bits.data(0).signature := makeSign(s1_oldSignature,strideMap(s1_newDelta))
   sTable.io.w.req.bits.data(0).signature := makeSign(s1_oldSignature,s1_newDelta)
-  sTable.io.w.req.bits.data(0).lastBlock := s1_newBlkAddr
+  sTable.io.w.req.bits.data(0).lastBlock := s1_newBlkAddr(blkOffsetBits-1,0)
 
   // send response to paternTable
   io.resp.valid := s1_newDelta =/= 0.S && s1_hit && s1_valid
@@ -691,7 +727,7 @@ class PatternTableTiming(parentName:String="Unkown")(implicit p: Parameters) ext
   // enable prefetch
   s1_enprefetch := s1_valid && s1_hit && s1_issued =/= 0.U && state === s_lookahead && s1_is_samePage(s1_testOffset)
   // enable nextline when
-  when(s1_lookCount === 0.U && state === s_lookahead && !s1_enprefetch) {
+  when(s1_valid && s1_lookCount === 0.U && state === s_lookahead && !s1_enprefetch) {
     val s1_testOffset_NL = s1_current.block + 1.U
     s1_enprefetchnl := ENABLE_NL.B && s1_is_samePage(s1_testOffset_NL)
   }
@@ -934,7 +970,7 @@ class SignaturePathPrefetch(implicit p: Parameters) extends SPPModule {
 }
 
 case class HyperPrefetchParams(
-  fTableEntries: Int = 32,
+  fTableEntries: Int = 64,
   pTableQueueEntries: Int = 2,
   fTableQueueEntries: Int = 256
 )
@@ -1036,7 +1072,7 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     val s0_blkOffset = WireInit(s0_oldAddr(pageOffsetBits - 1, offsetBits));dontTouch(s0_blkOffset)
 
     s0_valid := io.req.fire
-    s0_req := Mux(s0_valid,io.req.bits,0.U.asTypeOf(new PrefetchReq))
+    s0_req := io.req.bits
     when(s0_valid){
         s0_result := consensusTable(get_idx(s0_pageAddr))
     }.otherwise{
@@ -1048,8 +1084,8 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     // calculate
     // send out prefetch request
     val s1_valid = VecInit.fill(dupNums)(RegNext(s0_valid,false.B));dontTouch(s1_valid)
-    val s1_req = VecInit.fill(dupNums)(RegEnable(s0_req,0.U.asTypeOf(new PrefetchReq),s0_valid(0)));dontTouch(s1_req)
-    val s1_result = VecInit.fill(dupNums)(RegEnable(s0_result,0.U.asTypeOf(fTableEntry()),s0_valid(0)));dontTouch(s1_result)
+    val s1_req = VecInit.fill(dupNums)(RegEnable(s0_req,0.U.asTypeOf(new PrefetchReq),s0_valid));dontTouch(s1_req)
+    val s1_result = VecInit.fill(dupNums)(RegEnable(s0_result,0.U.asTypeOf(fTableEntry()),s0_valid));dontTouch(s1_result)
     val s1_oldAddr = WireInit(s1_req(1).addr);dontTouch(s1_oldAddr)
     val s1_dup_offset = WireInit(s1_req(1).set(dupOffsetBits-1+dupBits-1,dupOffsetBits-1));dontTouch(s1_dup_offset)
 
@@ -1100,16 +1136,17 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
         }
     }
     io.req.ready := io.resp.ready
-    io.resp.valid := s1_valid(s1_dup_offset) && s1_can_send2_pfq(s1_dup_offset)
+    io.resp.valid := s1_valid.reduce(_ | _) && s1_can_send2_pfq.reduce(_ | _)
     io.resp.bits := s1_req(s1_dup_offset)
+    io.resp.bits.pfVec := s1_next_VecState(s1_dup_offset)
     // --------------------------------------------------------------------------------
     // stage 2
     // --------------------------------------------------------------------------------
     // update consensusTable
-    val s2_valid = RegNext(s1_valid(s1_dup_offset),false.B)
+    val s2_valid = RegNext(s1_valid.reduce(_ || _),false.B)
     val s2_hit = RegNext(s1_hit(s1_dup_offset),false.B)
-    val s2_req = RegEnable(s1_req(s1_dup_offset),s1_valid(s1_dup_offset))
-    val s2_wData = RegEnable(s1_wData(s1_dup_offset),s1_valid(s1_dup_offset));dontTouch(s2_wData)
+    val s2_req = RegEnable(s1_req(s1_dup_offset),s1_valid.reduce(_ || _))
+    val s2_wData = RegEnable(s1_wData(s1_dup_offset),s1_valid.reduce(_ || _));dontTouch(s2_wData)
     val s2_widx = WireInit(get_idx(s2_req.addr(fullAddressBits - 1, pageOffsetBits)(log2Up(fTableEntries)-1,0)));dontTouch(s2_widx)
 
     when(s2_valid) {
@@ -1122,7 +1159,7 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     // --------------------------------------------------------------------------------
     // evict operation
     // --------------------------------------------------------------------------------
-    evict_q.io.enq.valid := s1_valid(s1_dup_offset) && s1_can_send2_pfq.reduce(_ ||_ ) // if spp2llc , don't enq
+    evict_q.io.enq.valid := s1_valid.reduce(_ || _) && s1_can_send2_pfq.reduce(_ || _) // if spp2llc , don't enq
     evict_q.io.enq.bits := get_blockAddr(req_dups(s1_dup_offset).bits.addr)
     val isqFull = evict_q.io.count === (fTableQueueEntries-1).U
     evict_q.io.deq.ready := isqFull;dontTouch(evict_q.io.deq.ready)
@@ -1147,7 +1184,7 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     }
     io.evict.ready := true.B
 
-  XSPerfAccumulate("hyper_filter_nums",s1_valid(s1_dup_offset) && !io.resp.valid)
+  XSPerfAccumulate("hyper_filter_nums",s1_valid(s1_dup_offset) && s1_can_send2_pfq(s1_dup_offset))
   XSPerfAccumulate("hyper_filter_input",io.req.valid)
   XSPerfAccumulate("hyper_filter_input_sms",io.req.valid && io.req.bits.pfVec === FitlerVecState.SMS)
   XSPerfAccumulate("hyper_filter_input_bop",io.req.valid && io.req.bits.pfVec === FitlerVecState.BOP)
@@ -1163,13 +1200,34 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
 //Only used for hybrid spp and bop
 class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) extends HyperPrefetchDev2Module {
   val io = IO(new Bundle() {
+    val l2_pf_en = Input(Bool())
+    val l2_pf_ctrl = Input(UInt(Csr_PfCtrlBits.W))
     val train = Flipped(DecoupledIO(new PrefetchTrain))
     val req = DecoupledIO(new PrefetchReq)
     val resp = Flipped(DecoupledIO(new PrefetchResp))
     val evict = Flipped(DecoupledIO(new PrefetchEvict))
     val recv_addr = Flipped(ValidIO(UInt(64.W)))
+    val hint2llc = ValidIO(new PrefetchReq)
   })
+  // --------------------------------------------------------------------------------
+  // csr pf ctrl
+  // --------------------------------------------------------------------------------
+  // csrt[0, 1, 2,  3, 4, 5,  6, 7, 8, ...]
+  //      |     |   |     |  |   |
+  //      ------    ------   ----
+  //        |         |       |
+  //  ctrlSwitch  sppConfig  FTConfig
+  val ctrlSwitch = WireInit(~(PfCtrlConst.Switch.get_fields(io.l2_pf_ctrl)));dontTouch(ctrlSwitch)
+  val crtl_SMSen = WireInit(ctrlSwitch(PfCtrlConst.Switch.SMS));dontTouch(crtl_SMSen)
+  val crtl_SPPen = WireInit(ctrlSwitch(PfCtrlConst.Switch.SPP));dontTouch(crtl_SPPen)
+  val crtl_BOPen = WireInit(ctrlSwitch(PfCtrlConst.Switch.BOP));dontTouch(crtl_BOPen)
 
+  val crtl_sppConfig = WireInit(PfCtrlConst.SppConfig.get_fields(io.l2_pf_ctrl));dontTouch(crtl_sppConfig)
+  val crtl_fitlerTableConfig = WireInit(PfCtrlConst.FitlerTableConfig.get_fields(io.l2_pf_ctrl));dontTouch(crtl_fitlerTableConfig)
+  
+  // --------------------------------------------------------------------------------
+  // instance each algorithm moudle
+  // --------------------------------------------------------------------------------
   val fTable = Module(new FilterTable)
 
   val spp = Module(new SignaturePathPrefetch()(p.alterPartial({
@@ -1332,9 +1390,20 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
   q_bop.io.deq.ready := fTable.io.req.ready && !q_sms.io.deq.valid
   q_spp.io.deq.ready := fTable.io.req.ready && !q_sms.io.deq.valid && !q_bop.io.deq.valid
 
-  io.req <> fTable.io.resp
+  //send to prefetchQueue
+  val pftQueue = Module(new PrefetchQueue(inflightEntries = hyperParams.inflightEntries))
+  val req_pipe = Module(new Pipeline(new PrefetchReq, 1, pipe = true))
+  pftQueue.io.enq <> fTable.io.resp
+  //fTable.io.resp.ready := io.req.ready //cannot back pressure
+  req_pipe.io.in <> pftQueue.io.deq
 
-  // io.req <> q_bop.io.deq
+  io.req.valid := req_pipe.io.out.valid && io.l2_pf_en
+  io.req.bits := req_pipe.io.out.bits
+  req_pipe.io.out.ready := io.req.ready
+
+  //hint to llc
+  io.hint2llc := 0.U.asTypeOf(io.hint2llc.cloneType)
+
   fTable.io.evict.valid := false.B//io.evict.valid
   fTable.io.evict.bits := io.evict.bits
   io.evict.ready := fTable.io.evict.ready

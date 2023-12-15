@@ -321,8 +321,10 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
 
     pf_recv_node match {
       case Some(x) =>
-        prefetcher.get.io.recv_addr.valid := x.in.head._1.addr_valid
-        prefetcher.get.io.recv_addr.bits := x.in.head._1.addr
+        println("coupledL2 initialize pf recv node")
+        dontTouch(x.in.head._1)
+        prefetcher.get.io.recv_addr.valid := x.in.head._1.addr_valid//csrPfRecv.addr.valid
+        prefetcher.get.io.recv_addr.bits := x.in.head._1.addr//csrPfRecv.addr.bits
         prefetcher.get.io_l2_pf_en := x.in.head._1.l2_pf_en
         prefetcher.get.io_l2_pf_ctrl := x.in.head._1.l2_pf_ctrl
       case None =>
@@ -412,9 +414,7 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
                 train.bits.tag, train.bits.set, i.U(bankBits.W), 0.U(offsetBits.W)
               )
               val (train_tag, train_set, _) = s.parseFullAddress(train_full_addr)
-              val resp_full_addr = Cat(
-                resp.bits.tag, resp.bits.set, i.U(bankBits.W), 0.U(offsetBits.W)
-              )
+              val resp_full_addr = Cat(resp.bits.tag, resp.bits.set, i.U(bankBits.W), 0.U(offsetBits.W))
               val (resp_tag, resp_set, _) = s.parseFullAddress(resp_full_addr)
               prefetchTrains.get(i).bits.tag := train_tag
               prefetchTrains.get(i).bits.set := train_set

@@ -282,10 +282,10 @@ class NestedWriteback(implicit p: Parameters) extends L2Bundle {
 }
 
 class PrefetchRecv(implicit p: Parameters) extends L2Bundle {
-  val addr = UInt(64.W)
-  val addr_valid = Bool()
   val l2_pf_en = Bool()
   val l2_pf_ctrl = UInt(Csr_PfCtrlBits.W)
+  val addr = UInt(64.W)
+  val addr_valid = Bool()
 }
 
 class LlcPrefetchRecv extends Bundle{
