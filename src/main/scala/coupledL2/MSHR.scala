@@ -560,12 +560,14 @@ class MSHR(implicit p: Parameters) extends L2Module {
   val mergeB = !state_dups(2).s_release
   // alias: should protect meta from being accessed or occupied
   val releaseNotSent = !state_dups(3).s_release || !state_dups(2).s_merge_probeack || io.bMergeTask.valid
+  // if releaseTask is already in mainpipe_s1/s2, while a refillTask in mainpipe_s3, the refill should also be blocked and retry
+  val blockRefill = releaseNotSent || RegNext(releaseNotSent, false.B) || RegNext(RegNext(releaseNotSent, false.B), false.B)
   io.status.valid := req_valid_dups(2)
   io.status.bits.channel := req.channel
   io.status.bits.set := req_set_dups(4)
   io.status.bits.reqTag := req.tag
   io.status.bits.metaTag := dirResult_tag_dups(2)
-  io.status.bits.needsRepl := releaseNotSent
+  io.status.bits.needsRepl := blockRefill
   // wait for resps, high as valid
   io.status.bits.w_c_resp := !state_dups(3).w_rprobeacklast || !state_dups(3).w_pprobeacklast || !state_dups(0).w_pprobeack
   io.status.bits.w_d_resp := !state_dups(0).w_grantlast || !state_dups(0).w_grant || !state_dups(0).w_releaseack
@@ -580,7 +582,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
   io.msInfo.bits.way := dirResult.way
   io.msInfo.bits.reqTag := req.tag
   io.msInfo.bits.needRelease := !state_dups(0).w_releaseack
-  io.msInfo.bits.releaseNotSent := releaseNotSent
+  io.msInfo.bits.blockRefill := blockRefill
   io.msInfo.bits.dirHit := dirResult.hit
   io.msInfo.bits.metaTag := dirResult_tag_dups(3)
   io.msInfo.bits.willFree := will_free
