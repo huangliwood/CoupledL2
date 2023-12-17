@@ -112,6 +112,7 @@ class PrefetchQueue(inflightEntries:Int = 32)(implicit p: Parameters) extends Pr
     val enq = Flipped(DecoupledIO(new PrefetchReq))
     val deq = DecoupledIO(new PrefetchReq)
     val full = Output(Bool())
+    val queue_used = Output(UInt(log2Ceil(inflightEntries).W))
   })
   /*  Here we implement a queue that
    *  1. is pipelined  2. flows
@@ -145,7 +146,7 @@ class PrefetchQueue(inflightEntries:Int = 32)(implicit p: Parameters) extends Pr
   io.enq.ready := true.B
   io.deq.valid := !empty || io.enq.valid
   io.deq.bits := Mux(empty, io.enq.bits, queue(head))
-
+  io.queue_used := RegEnable(PopCount(valids.asUInt),io.enq.valid)
   io.full := full
 
   // The reqs that are discarded = enq - deq
