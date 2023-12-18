@@ -45,10 +45,11 @@ class PrefetchReq(implicit p: Parameters) extends PrefetchBundle {
   val pfVec = UInt(PfVectorConst.bits.W)
   def addr = Cat(tag, set, 0.U(offsetBits.W))
   def tag_set = Cat(tag,set)
-  def hasBOP = (pfVec & PfSource.BOP) === PfSource.BOP
-  def hasSPP = (pfVec & PfSource.SPP) === PfSource.SPP
-  def is_l1pf = pfVec === PfSource.SMS
-  def is_l2pf = (pfVec & (PfSource.BOP | PfSource.SPP)).orR
+  def hasSMS =  pfVec(PfVectorConst.SMS)
+  def hasBOP =  pfVec(PfVectorConst.BOP)
+  def hasSPP =  pfVec(PfVectorConst.SPP)
+  def is_l1pf = pfVec(PfVectorConst.SMS)
+  def is_l2pf = pfVec(PfVectorConst.BOP) | pfVec(PfVectorConst.SPP)
 }
 
 class PrefetchResp(implicit p: Parameters) extends PrefetchBundle {
@@ -57,11 +58,12 @@ class PrefetchResp(implicit p: Parameters) extends PrefetchBundle {
   val set = UInt(setBits.W)
   val pfVec = UInt(PfVectorConst.bits.W)
   def addr = Cat(tag, set, 0.U(offsetBits.W))
-  def hasBOP = (pfVec & PfSource.BOP) === PfSource.BOP
-  def hasSPP = (pfVec & PfSource.SPP) === PfSource.SPP
+  def hasSMS =  pfVec(PfVectorConst.SMS)
+  def hasBOP =  pfVec(PfVectorConst.BOP)
+  def hasSPP =  pfVec(PfVectorConst.SPP)
+  def is_l1pf = pfVec(PfVectorConst.SMS)
+  def is_l2pf = pfVec(PfVectorConst.BOP) | pfVec(PfVectorConst.SPP)
   def hasSPPBOP = pfVec === PfSource.BOP_SPP
-  def is_l1pf = pfVec === PfSource.SMS
-  def is_l2pf = (pfVec & (PfSource.BOP | PfSource.SPP)).orR  
 }
 
 class PrefetchTrain(implicit p: Parameters) extends PrefetchBundle {
@@ -78,12 +80,12 @@ class PrefetchTrain(implicit p: Parameters) extends PrefetchBundle {
   val pfVec = UInt(PfVectorConst.bits.W)
   def addr = Cat(tag, set, 0.U(offsetBits.W))
   def blkAddr = addr(fullAddressBits-1,offsetBits)
-  def hasSMS =  (pfVec & PfSource.SMS) === PfSource.SMS
-  def hasBOP = (pfVec & PfSource.BOP) === PfSource.BOP
-  def hasSPP = (pfVec & PfSource.SPP) === PfSource.SPP
+  def hasSMS =  pfVec(PfVectorConst.SMS)
+  def hasBOP =  pfVec(PfVectorConst.BOP)
+  def hasSPP =  pfVec(PfVectorConst.SPP)
+  def is_l1pf = pfVec(PfVectorConst.SMS)
+  def is_l2pf = pfVec(PfVectorConst.BOP) | pfVec(PfVectorConst.SPP)
   def hasSPPBOP = pfVec === PfSource.BOP_SPP
-  def is_l1pf = pfVec === PfSource.SMS
-  def is_l2pf = (pfVec & (PfSource.BOP | PfSource.SPP)).orR
 }
 
 class PrefetchEvict(implicit p: Parameters) extends PrefetchBundle {
