@@ -44,6 +44,8 @@ class PrefetchReq(implicit p: Parameters) extends PrefetchBundle {
   val source = UInt(sourceIdBits.W)
   val pfVec = UInt(PfVectorConst.bits.W)
   def addr = Cat(tag, set, 0.U(offsetBits.W))
+  def get_pageAddr = addr(fullAddressBits - 1, pageOffsetBits)
+  def get_blockOff = addr(pageOffsetBits - 1, offsetBits)
   def tag_set = Cat(tag,set)
   def hasSMS =  pfVec(PfVectorConst.SMS)
   def hasBOP =  pfVec(PfVectorConst.BOP)
