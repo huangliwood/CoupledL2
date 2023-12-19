@@ -900,8 +900,17 @@ object TestTop_fullSys extends App {
   val top = DisableMonitors(p => LazyModule(new TestTop_fullSys()(p)))(config)
 
   (new ChiselStage).execute(Array("--target", "verilog") ++ args, Seq(
-    ChiselGeneratorAnnotation(() => top.module),
-    FirtoolOption("--disable-annotation-unknown")
+    FirtoolOption("-O=release"),
+    FirtoolOption("--disable-all-randomization"),
+    FirtoolOption("--disable-annotation-unknown"),
+    FirtoolOption("--strip-debug-info"),
+    FirtoolOption("--lower-memories"),
+    FirtoolOption("--add-vivado-ram-address-conflict-synthesis-bug-workaround"),
+    FirtoolOption("--lowering-options=noAlwaysComb," +
+      " disallowPortDeclSharing, disallowLocalVariables," +
+      " emittedLineLength=120, explicitBitcast, locationInfoStyle=plain," +
+      " disallowExpressionInliningInPorts, disallowMuxInlining"),
+    ChiselGeneratorAnnotation(() => top.module)
   ))
 
   ChiselDB.init(false)
