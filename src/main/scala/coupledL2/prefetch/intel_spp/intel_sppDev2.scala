@@ -1024,11 +1024,11 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
   //                               ^
   //                               |
   //                            archored_value
-   def fTableEntry() = new Bundle {
-    val valid = Bool()
-    val tag = UInt(fTagBits.W)
-    val cVec = Vec(blkNums, UInt(FitlerVecState.bits.W))
-  }
+    def fTableEntry() = new Bundle {
+      val valid = Bool()
+      val tag = UInt(fTagBits.W)
+      val cVec = Vec(blkNums, UInt(FitlerVecState.bits.W))
+    }
     // val consensusTable = Mem(fTableEntries,fTableEntry())
     val consensusTable = RegInit(VecInit(Seq.fill(fTableEntries)(0.U.asTypeOf(fTableEntry()))))
     // val evict_q = Module(new Queue(UInt(fullAddressBits.W), fTableQueueEntries, flow = false, pipe = true))
@@ -1053,6 +1053,7 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     val smsReq_valid = WireInit(io.in_smsReq.valid)
     val bopReq_valid = WireInit(io.in_bopReq.valid && !s1_bop_tagHit)
     val sppReq_valid = WireInit(io.in_sppReq.valid && !s1_spp_tagHit)
+    val s0_only_doUpdate = WireInit((io.in_bopReq.valid||io.in_sppReq.valid)&&(s1_bop_tagHit||s1_spp_tagHit))
     val wait_issueQ = Module(new Queue(new PrefetchReq,4,flow = false, pipe = true))
     wait_issueQ.io.enq.valid := bopReq_valid ||  sppReq_valid
     wait_issueQ.io.enq.bits := ParallelPriorityMux(
@@ -1070,8 +1071,8 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
       )
     )
     io.in_smsReq.ready := true.B
-    io.in_bopReq.ready := true.B
-    io.in_sppReq.ready := true.B
+    io.in_bopReq.ready := wait_issueQ.io.enq.ready
+    io.in_sppReq.ready := wait_issueQ.io.enq.ready
     wait_issueQ.io.deq.ready := !io.in_smsReq.valid
     io.in_trainReq.ready := !io.in_smsReq.valid
 
@@ -1079,8 +1080,8 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
         s0_result := consensusTable(get_idx(s0_req.get_pageAddr))
     }
     for(i <- 0 until(blkNums)){
-      s0_achoredVec_bop(i) := has_bop(s0_result.cVec(i)) && ctrl_filter_bop
-      s0_achoredVec_spp(i) := has_spp(s0_result.cVec(i)) && ctrl_filter_spp
+      s0_achoredVec_bop(i) := has_bop(s0_result.cVec(i))
+      s0_achoredVec_spp(i) := has_spp(s0_result.cVec(i))
     }
     // --------------------------------------------------------------------------------
     // stage 1
@@ -1092,6 +1093,7 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     val s1_result = VecInit.fill(dupNums)(RegEnable(s0_result,0.U.asTypeOf(fTableEntry()),s0_valid));dontTouch(s1_result)
     val s1_isHint2llc = RegNext(s0_isHint2llc,false.B)
     val s1_fromTrain = RegNext(s0_fromTrain,false.B)
+    val s1_only_doUpdate = RegNext(s0_only_doUpdate,false.B)
 
     val s1_achoread_pageTag = RegEnable(get_tag(s0_req.get_pageAddr),s0_valid)
     val s1_achoredVec_bop = RegEnable(s0_achoredVec_bop,VecInit.fill(blkNums)(false.B),s0_valid);dontTouch(s1_achoredVec_bop)
@@ -1116,7 +1118,7 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     val s1_wData = WireInit(VecInit.fill(dupNums)(0.U.asTypeOf(fTableEntry())))
 
     for(i <- 0 until(dupNums)) {
-      when(!s1_fromTrain && (s1_req(i).set(dupOffsetBits-1+dupBits-1,dupOffsetBits-1) === i.U(dupBits.W))) {
+      when(!s1_fromTrain) {
         val trigerId = s1_req(i).pfVec
         s1_hit(i) := s1_result(i).valid && get_tag(s1_pageAddr) === s1_result(i).tag
 
@@ -1138,26 +1140,30 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
         }
         //s1_anchored_longest_blkOff(i) := OneHot.OH1ToUInt(HighestBit(s1_hitForMap_bitVec(i).asUInt,blkNums))
         // should filter when any other prefetchBitVec existed expected prefetch from bop
-        s1_can_send2_pfq(i) := !s1_hit(i) || (s1_hit(i) && (anchored_value === PfSource.NONE || 
-        (s1_req(i).hasSMS && ctrl_filter_sms)|| (s1_req(i).hasBOP && ctrl_filter_bop) || (s1_req(i).hasSPP && ctrl_filter_spp)))//anchored_value === PfSource.NONE //|| anchored_value === PfSource.BOP || anchored_value === PfSource.SMS
+        s1_can_send2_pfq(i) := !s1_only_doUpdate && (!s1_hit(i) || (s1_hit(i) && (anchored_value === PfSource.NONE || 
+        s1_req(i).hasSMS|| s1_req(i).hasBOP || s1_req(i).hasSPP)))//anchored_value === PfSource.NONE //|| anchored_value === PfSource.BOP || anchored_value === PfSource.SMS
 
         s1_wData(i).valid := true.B
         s1_wData(i).tag := get_tag(s1_pageAddr)
         s1_wData(i).cVec := s1_wBitMap(i)
-        }.otherwise{
-          s1_result(i) := 0.U.asTypeOf(fTableEntry())
-        }
+      }
     }
 
     s1_bop_tagHit := get_tag(io.in_bopReq.bits.get_pageAddr) === s1_achoread_pageTag
     s1_spp_tagHit := get_tag(io.in_sppReq.bits.get_pageAddr) === s1_achoread_pageTag
 
-    io.out_smsReq.valid := s1_valid(s1_dup_offset) && s1_can_send2_pfq(s1_dup_offset) && s1_req(s1_dup_offset).hasSMS
-    io.out_smsReq.bits := s1_req(s1_dup_offset)
-    io.out_smsReq.bits.pfVec := s1_next_VecState(s1_dup_offset)
-    io.in_smsReq.ready := true.B
+    when(!ctrl_filter_sms){
+      io.out_smsReq <> io.in_smsReq
+    }.otherwise{
+      io.out_smsReq.valid := s1_valid(s1_dup_offset) && s1_can_send2_pfq(s1_dup_offset) && s1_req(s1_dup_offset).hasSMS
+      io.out_smsReq.bits := s1_req(s1_dup_offset)
+      io.out_smsReq.bits.pfVec := s1_next_VecState(s1_dup_offset)
+      io.in_smsReq.ready := true.B
+    }
 
-    when(s1_bop_tagHit){
+    when(!ctrl_filter_bop){
+      io.out_bopReq <> io.in_bopReq
+    }.elsewhen(s1_bop_tagHit){
       io.out_bopReq.valid := io.in_bopReq.fire && !s1_achoredVec_bop(io.in_bopReq.bits.get_blockOff)
       io.out_bopReq.bits := io.in_bopReq.bits
       // io.out_bopReq.bits.pfVec := get_pfVec(io.in_bopReq.bits.get_blockOff)
@@ -1168,13 +1174,15 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
       io.out_bopReq.bits.pfVec := s1_next_VecState(s1_dup_offset)
       io.in_bopReq.ready := io.out_bopReq.ready
     }
-    when(s1_spp_tagHit){
+    when(!ctrl_filter_spp){
+      io.out_sppReq <> io.in_sppReq
+    }.elsewhen(s1_spp_tagHit){
       io.out_sppReq.valid := io.in_sppReq.fire && !s1_achoredVec_spp(io.in_sppReq.bits.get_blockOff)
       io.out_sppReq.bits := io.in_sppReq.bits
       // io.out_sppReq.bits.pfVec := get_pfVec(io.in_sppReq.bits.get_blockOff)
       io.in_sppReq.ready := io.out_sppReq.ready
     }.otherwise{
-      io.out_sppReq.valid := s1_valid(s1_dup_offset) && s1_can_send2_pfq(s1_dup_offset) && s1_req(s1_dup_offset).hasSMS
+      io.out_sppReq.valid := s1_valid(s1_dup_offset) && s1_can_send2_pfq(s1_dup_offset) && s1_req(s1_dup_offset).hasSPP
       io.out_sppReq.bits := s1_req(s1_dup_offset)
       io.out_sppReq.bits.pfVec := s1_next_VecState(s1_dup_offset)
       io.in_sppReq.ready := io.out_sppReq.ready
@@ -1201,6 +1209,7 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
             consensusTable(RegNext(s2_widx)) := RegNext(s2_wData)
         }
     }
+    
     // --------------------------------------------------------------------------------
     // evict operation
     // --------------------------------------------------------------------------------
@@ -1241,7 +1250,7 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
   XSPerfAccumulate("hyper_filter_input_spp",io.in_sppReq.valid)
   // XSPerfAccumulate("hyper_filter_input_hint2llc",io.req.valid && io.is_hint2llc)
   XSPerfAccumulate("hyper_filter_output",io.out_bopReq.valid||io.out_bopReq.valid||io.out_bopReq.valid)
-  XSPerfAccumulate("hyper_filter_output_sms",io.out_smsReq.valid && io.out_smsReq.bits.pfVec === FitlerVecState.SMS)
+  XSPerfAccumulate("hyper_filter_output_sms",io.out_smsReq.valid)
   XSPerfAccumulate("hyper_filter_output_bop",io.out_bopReq.valid)
   XSPerfAccumulate("hyper_filter_output_spp",io.out_sppReq.valid)
   XSPerfAccumulate("hyper_filter_ouput_hint2llc",io.hint2llc_out.valid)
@@ -1264,32 +1273,34 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
   // --------------------------------------------------------------------------------
   // csr pf ctrl
   // --------------------------------------------------------------------------------
-  // ctrl[0, 1, 2,  3, 4, 5, 6, 7, 8, 9, 10]
-  //      |     |   |           |  |      |
-  //      ------    ------------   ------
-  //        |            |           |
-  //  ctrlSwitch    sppConfig     FTConfig
-  // deafault 010_0000_1000 = 0x208
+  // ctrl[15,14,13,12,11,10,9,8,  7, 6, 5, 4, 3,  2, 1, 0]
+  //                    |     |   |           |  |      |
+  //                    ------    ------------   ------
+  //                      |            |           |
+  //                  FTConfig    sppConfig     ctrlSwitch
+  // default 0000_0111_1110_0111
+  // hex:     0     7   e    3
+  // default value: 0x07e3
   //switchConfig[0,1,2]
-    //ctrl[0] -> enable sms
-    //ctrl[1] -> enable bop
-    //ctrl[2] -> enable spp
+    //| ctrl[0] -> enable sms
+    //| ctrl[1] -> enable bop
+    //| ctrl[2] -> enable spp
   //sppConfig[3,4,5,6,7]
-    //sppConfig[0] -> enable hint2llc   
-    //sppConfig[1] -> enable Nextline Agreesive
-    //sppConfig[2] -> enable bp recovery
-    //sppConfig[3] -> enable shareBO
-    //sppConfig[4] -> enable slowLookUp
+    //| sppConfig[0] -> enable hint2llc   
+    //| sppConfig[1] -> enable Nextline Agreesive
+    //| sppConfig[2] -> enable bp recovery
+    //| sppConfig[3] -> enable shareBO
+    //| sppConfig[4] -> enable slowLookUp
   // filterTableConfig[8,9,10]
-    //fTConfig[0]  -> enable fitter sms
-    //fTConfig[1]  -> enable filter bop
-    //fTConfig[2]  -> enable fitter spp
-  val ctrlSwitch = WireInit(~(PfCtrlConst.Switch.get_fields(io.l2_pf_ctrl)));dontTouch(ctrlSwitch)
+    // fTConfig[0]  -> enable fitter sms
+    // fTConfig[1]  -> enable filter bop
+    // fTConfig[2]  -> enable fitter spp
+  val ctrlSwitch = WireInit(PfCtrlConst.Switch.get_fields(io.l2_pf_ctrl));dontTouch(ctrlSwitch)
   val ctrl_SMSen = WireInit(ctrlSwitch(PfCtrlConst.Switch.SMS));dontTouch(ctrl_SMSen)
   val ctrl_SPPen = WireInit(ctrlSwitch(PfCtrlConst.Switch.SPP));dontTouch(ctrl_SPPen)
   val ctrl_BOPen = WireInit(ctrlSwitch(PfCtrlConst.Switch.BOP));dontTouch(ctrl_BOPen)
 
-  val ctrl_sppConfig = WireInit(~PfCtrlConst.SppConfig.get_fields(io.l2_pf_ctrl));dontTouch(ctrl_sppConfig)
+  val ctrl_sppConfig = WireInit(PfCtrlConst.SppConfig.get_fields(io.l2_pf_ctrl));dontTouch(ctrl_sppConfig)
   val ctrl_fitlerTableConfig = WireInit(PfCtrlConst.FitlerTableConfig.get_fields(io.l2_pf_ctrl));dontTouch(ctrl_fitlerTableConfig)
   
   // --------------------------------------------------------------------------------
