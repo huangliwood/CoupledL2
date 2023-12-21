@@ -129,7 +129,7 @@ class SinkA(entries: Int)(implicit p: Parameters) extends L2Module with HasPerfL
     // )
     // commonReq.ready := io.task.ready
     // prefetchReq.get.ready := io.task.ready && !commonReq.valid
-    XSPerfAccumulate("sinkA_pf_blocked", io.prefetchReq.get.valid && !io.prefetchReq.get.ready)
+    XSPerfAccumulate("sinkA_pf_blocked", io.prefetchReq.get.valid && !io.prefetchReq.get.ready && io.task.fire)
   } else {
     io.task <> commonReq
   }
