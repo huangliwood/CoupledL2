@@ -42,12 +42,14 @@ class PrefetchReq(implicit p: Parameters) extends PrefetchBundle {
   val source = UInt(sourceIdBits.W)
   val pfVec = UInt(PfVectorConst.bits.W)
   def addr = Cat(tag, set, 0.U(offsetBits.W))
+  def get_pageAddr = addr(fullAddressBits - 1, pageOffsetBits)
+  def get_blockOff = addr(pageOffsetBits - 1, offsetBits)
   def tag_set = Cat(tag,set)
-  def is_l1pf = pfVec === PfSource.SMS
-  def is_l2pf = pfVec === PfSource.BOP || pfVec === PfVectorConst.DEFAULT
-  def hasSMS = (pfVec & PfSource.SMS) === PfSource.SMS
-  def hasBOP = (pfVec & PfSource.BOP) === PfSource.BOP
-  def hasSPP = (pfVec & PfSource.SPP) === PfSource.SPP
+  def hasSMS =  pfVec(PfVectorConst.SMS)
+  def hasBOP =  pfVec(PfVectorConst.BOP)
+  def hasSPP =  pfVec(PfVectorConst.SPP)
+  def is_l1pf = pfVec(PfVectorConst.SMS)
+  def is_l2pf = pfVec(PfVectorConst.BOP) | pfVec(PfVectorConst.SPP)
 }
 
 class PrefetchResp(implicit p: Parameters) extends PrefetchBundle {
@@ -56,8 +58,11 @@ class PrefetchResp(implicit p: Parameters) extends PrefetchBundle {
   val set = UInt(setBits.W)
   val pfVec = UInt(PfVectorConst.bits.W)
   def addr = Cat(tag, set, 0.U(offsetBits.W))
-  def hasBOP = (pfVec & PfSource.BOP) === PfSource.BOP
-  def hasSPP = (pfVec & PfSource.SPP) === PfSource.SPP
+  def hasSMS =  pfVec(PfVectorConst.SMS)
+  def hasBOP =  pfVec(PfVectorConst.BOP)
+  def hasSPP =  pfVec(PfVectorConst.SPP)
+  def is_l1pf = pfVec(PfVectorConst.SMS)
+  def is_l2pf = pfVec(PfVectorConst.BOP) | pfVec(PfVectorConst.SPP)
   def hasSPPBOP = pfVec === PfSource.BOP_SPP
 }
 
@@ -75,12 +80,12 @@ class PrefetchTrain(implicit p: Parameters) extends PrefetchBundle {
   val pfVec = UInt(PfVectorConst.bits.W)
   def addr = Cat(tag, set, 0.U(offsetBits.W))
   def blkAddr = addr(fullAddressBits-1,offsetBits)
-  def hasSMS =  (pfVec & PfSource.SMS) === PfSource.SMS
-  def hasBOP = (pfVec & PfSource.BOP) === PfSource.BOP
-  def hasSPP = (pfVec & PfSource.SPP) === PfSource.SPP
+  def hasSMS =  pfVec(PfVectorConst.SMS)
+  def hasBOP =  pfVec(PfVectorConst.BOP)
+  def hasSPP =  pfVec(PfVectorConst.SPP)
+  def is_l1pf = pfVec(PfVectorConst.SMS)
+  def is_l2pf = pfVec(PfVectorConst.BOP) | pfVec(PfVectorConst.SPP)
   def hasSPPBOP = pfVec === PfSource.BOP_SPP
-  def is_l1pf = pfVec === PfSource.SMS
-  def is_l2pf = pfVec === PfSource.BOP || pfVec === PfVectorConst.DEFAULT
 }
 
 class PrefetchEvict(implicit p: Parameters) extends PrefetchBundle {
@@ -210,6 +215,8 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
     case hyperPf: HyperPrefetchParams => // case spp +  bop + smsReceiver
       hasSpp = true
       val hybrid_pfts = Module(new HyperPrefetchDev2(parentName + "hpft_"))
+      hybrid_pfts.io.l2_pf_en := RegNextN(io_l2_pf_en,2,Some(true.B))
+      hybrid_pfts.io.l2_pf_ctrl := RegNextN(io_l2_pf_ctrl,2,Some(0.U))
       hybrid_pfts.io.train <> io.train
       hybrid_pfts.io.resp <> io.resp
       hybrid_pfts.io.recv_addr := ValidIODelay(io.recv_addr, 2)
