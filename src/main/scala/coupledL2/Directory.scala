@@ -27,6 +27,8 @@ import freechips.rocketchip.tilelink.TLMessages._
 import xs.utils.mbist.MBISTPipeline
 import xs.utils.perf.HasPerfLogging
 import xs.utils.sram.SRAMTemplate
+import chisel3.util.random.LFSR
+
 
 class MetaEntry(implicit p: Parameters) extends L2Bundle {
   val dirty = Bool()
@@ -207,7 +209,13 @@ class Directory(parentName: String = "Unknown")(implicit p: Parameters) extends 
   val hitWay = OHToUInt(hitVec)
   val replaceWay = WireInit(UInt(wayBits.W), 0.U)
   val (inv, invalidWay) = invalid_way_sel(metaAll_s3, replaceWay)
-  val chosenWay = Mux(inv, invalidWay, replaceWay)
+
+  val useRandomWay = RegInit(false.B)
+  val failedSet = RegInit(0.U(setBits.W))
+  val failedSetMatch = req_s3.set === failedSet
+  val randomWay = LFSR(ways)
+  
+  val chosenWay = Mux(inv, invalidWay, Mux(useRandomWay && failedSetMatch, randomWay, replaceWay))
   // if chosenWay not in wayMask, then choose a way in wayMask
   // TODO: consider remove this is not used for better timing
   val finalWay = Mux(
@@ -271,6 +279,28 @@ class Directory(parentName: String = "Unknown")(implicit p: Parameters) extends 
   io.replResp.bits.meta := metaAll_s3(finalWay)
   io.replResp.bits.mshrId := req_s3.mshrId
   io.replResp.bits.retry := refillRetry
+
+  val refillRetryContinusCnt = RegInit(0.U(8.W))
+  val RefillRetryMAX = 10
+  val lastRefillRetry = RegEnable(refillRetry, false.B, io.replResp.valid)
+  dontTouch(lastRefillRetry)
+  dontTouch(refillRetry)
+
+  when(refillRetry && lastRefillRetry) {
+    refillRetryContinusCnt := refillRetryContinusCnt + 1.U
+  }.otherwise {
+    refillRetryContinusCnt := 0.U
+  }
+
+  when(refillRetryContinusCnt >= RefillRetryMAX.U) {
+    useRandomWay := true.B
+    failedSet := req_s3.set
+  }
+
+  when(useRandomWay && failedSetMatch) {
+    useRandomWay := false.B
+    refillRetryContinusCnt := 0.U
+  }
 
   /* ====== Update ====== */
   // update replacer only when A hit or refill, at stage 3
