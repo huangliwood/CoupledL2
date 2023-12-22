@@ -636,7 +636,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   s2_first_flag := RegNext(s1_first_flag,false.B)
 
   //directly calculate from sram 
-  s2_readResult := Mux(s2_valid, pTable.io.r.resp.data(0), 0.U.asTypeOf(new pTableEntry))
+  s2_readResult := pTable.io.r.resp.data(0) //Mux(s2_valid, pTable.io.r.resp.data(0), 0.U.asTypeOf(new pTableEntry))
 
   //pressure calculate, there should not take complex logics
   val s2_is_crossPage = WireInit(is_samePage(s2_child.block,s1_parent.block));dontTouch(s2_is_crossPage)
@@ -840,7 +840,7 @@ class Unpack(implicit p: Parameters) extends SPPModule {
   q.io.enq <> io.req //change logic to replace the tail entry
 
   val req = RegEnable(q.io.deq.bits,0.U.asTypeOf(new PatternTableResp), q.io.deq.fire)
-  val req_deltas = Reg(Vec(pTableDeltaEntries, SInt((blkOffsetBits + 1).W)))
+  val req_deltas = RegInit(VecInit(Seq.fill(pTableDeltaEntries)(0.S((blkOffsetBits + 1).W))))
   val issue_finish = req_deltas.map(_ === 0.S).reduce(_ && _)
   q.io.deq.ready := !inProcess || issue_finish || endeq
   when(q.io.deq.fire) {
@@ -1064,8 +1064,19 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     // val consensusTable = Mem(fTableEntries,fTableEntry())
     val consensusTable = RegInit(VecInit(Seq.fill(fTableEntries)(0.U.asTypeOf(fTableEntry()))))
     // val evict_q = Module(new Queue(UInt(fullAddressBits.W), fTableQueueEntries, flow = false, pipe = true))
-    val evict_q = Module(new SRAMQueue(UInt(31.W),entries = fTableQueueEntries, flow = false, 
+    val evict_q = Module(new SRAMQueue(UInt((31).W),entries = fTableQueueEntries, flow = false, 
         hasMbist = cacheParams.hasMbist, hasClkGate=enableClockGate, hasShareBus = cacheParams.hasShareBus, parentName=parentName+"filterDelayQ"))
+    // pythisc backend freezed memory cacacipty
+    // - _ -
+    // |   |
+    // |   | 
+    // val evict_q_reg = Module(new SyncDataModuleTemplate(
+    //   UInt(7.W),
+    //   fTableQueueEntries,
+    //   numRead = 1,
+    //   numWrite = 1,
+    //   parentModule = parentName+"filterDelayQ_reg"
+    // ))
 
     // --------------------------------------------------------------------------------
     // stage 0
