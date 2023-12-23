@@ -18,6 +18,8 @@ import xs.utils.ParallelPriorityMux
 import xs.utils.RegNextN
 import xs.utils.CircularShift
 import xs.utils.GenMask
+import xs.utils.FastArbiter
+import freechips.rocketchip.rocket.PRV
 
 object PfCtrlConst{
   object Switch{
@@ -658,16 +660,21 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   def M_COMPLEX_UNTIMELY = "b100".U
 
   //pressure caculate
-  s2_testBO := MuxLookup(
-    s2_opcode,
-    0.S(shareBOBits.W),
-    Seq(
-      M_SIMPLE_TIMELY -> s1_ghr_shareBO,
-      M_SIMPLE_UNTIMELY -> (s1_ghr_shareBO.asUInt << 2.U).asSInt,
-      M_COMPLEX_TIMELY -> 0.S,
-      M_COMPLEX_UNTIMELY -> 0.S
+  val s2_testBO2 =  MuxLookup(
+      s2_opcode,
+      0.S(shareBOBits.W),
+      Seq(
+        M_SIMPLE_TIMELY -> s1_ghr_shareBO,
+        M_SIMPLE_UNTIMELY -> (s1_ghr_shareBO.asUInt << 2.U).asSInt,
+        M_COMPLEX_TIMELY -> 0.S,
+        M_COMPLEX_UNTIMELY -> 0.S
+      )
     )
-  )
+  s2_testBO := s1_ghr_shareBO + 1.S
+  // Mux(io.from_ghr.bits.bop_hitAcc_state =/= 0.U && io.from_ghr.bits.spp_hitAcc_state === 0.U,
+  //   s1_ghr_shareBO + 10.S,
+  //   s2_testBO2
+  // )
   def LOW_COV_LOW_ACC   = "b00".U
   def LOW_COV_HIGH_ACC  = "b01".U
   def HIGH_COV_LOW_ACC  = "b10".U
@@ -760,7 +767,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   val s3_NL_blkAddr =WireInit(VecInit(Seq.fill(pTableDeltaEntries)(0.U(blkAddrBits.W))))
   // pressure calculate
   // normal lookahead
-  s3_delta_list_checked := s3_delta_list.map(x => Mux(is_samePage((s3_current.block.asSInt + x).asUInt, s3_current.block), x, 0.S))
+  s3_delta_list_checked := s3_delta_list.map(x => Mux(is_samePage((s3_current.block.asSInt + x).asUInt, s1_parent.block), x, 0.S))
   // nextline
   s3_delta_list_nl_masked := s3_delta_list.zipWithIndex.map(d => Mux(s3_NL_ctrlMask(d._2), Mux(s3_testBO > 0.S, s3_testBO + d._2.S, s3_testBO - d._2.S), 0.S))
   s3_NL_blkAddr := s3_delta_list_nl_masked.map(x => (s3_current.block.asSInt + x).asUInt)
@@ -769,7 +776,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   //
   s3_enprefetch := s3_valid && s3_hit && s3_issued =/= 0.U
   when(s3_valid && s3_first_flag && (!s3_enprefetch || io.ctrl.en_Nextline_Agreesive)) {
-    s3_enprefetchnl := ENABLE_NL.B && is_samePage(s3_NL_blkAddr.head, s3_current.block)
+    s3_enprefetchnl := ENABLE_NL.B
   }
 
   // calculate needed writing delta counters
@@ -1388,6 +1395,34 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     XSPerfAccumulate("hyper_filter_evict_fromQ",s1_hitEvict)
 }
 
+class weightRR[T <: Data](gen: T, n: Int, weightBits: Int, parentName:String = "Unknown")(implicit p: Parameters) extends HyperPrefetchDev2Module{
+  val io = IO(new Bundle(){
+    val in = Flipped(Vec(n, Decoupled(gen)))
+    val in_weight = Vec(n, Input(UInt(weightBits.W)))
+    val out = Decoupled(gen)
+  })
+  val weight_vec = RegInit(0.U.asTypeOf(Vec(n,UInt(weightBits.W))))
+  val rr_arb = Module(new FastArbiter(gen,n))
+  val need_updateW = WireInit(weight_vec.map(_ === 0.U).reduce(_&&_))
+  for(i <- 0 until n){
+    rr_arb.io.in(i).valid := io.in(i).valid
+    rr_arb.io.in(i).bits := io.in(i).bits
+    if(i == 0){
+      io.in(i).ready := rr_arb.io.in(i).ready && weight_vec(i) =/= 0.U
+    }else{
+      io.in(i).ready := rr_arb.io.in(i).ready && weight_vec.zip(io.in).take(i).map(x => Mux(x._1 =/= 0.U && x._2.valid,false.B,true.B)).reduce(_ && _) && weight_vec(i) =/= 0.U
+    }
+    
+    when(io.in(i).fire){
+      weight_vec(i) := weight_vec(i) - 1.U
+    }.elsewhen(need_updateW){
+      weight_vec(i) := io.in_weight(i)
+    }
+  }
+
+  io.out <> rr_arb.io.out
+}
+
 //Only used for hybrid spp and bop
 class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) extends HyperPrefetchDev2Module {
   val io = IO(new Bundle() {
@@ -1471,22 +1506,23 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
     }
   }
   class globalCounter extends HyperPrefetchDev2Bundle{
-    val l1pf_hitAcc = UInt(5.W)
-    val l1pf_issued = UInt(5.W)
-    val l2pf_hitAcc = UInt(5.W)
-    val l2pf_issued = UInt(5.W)
-    val bop_hitAcc = UInt(5.W)
-    val bop_issued = UInt(10.W)
-    val spp_hitAcc = UInt(5.W)
-    val spp_issued = UInt(10.W)
-    val shareBO = SInt(6.W)
+    val l1pf_hitAcc = UInt(6.W)
+    val l2pf_hitAcc = UInt(6.W)
+    val bop_hitAcc = UInt(6.W)
+    val spp_hitAcc = UInt(6.W)
 
-    val l1pf_hitAccState = UInt(PfaccState.bits.W)
-    val l2pf_hitAccState = UInt(PfaccState.bits.W) 
+    val l1pf_issued = UInt(7.W)
+    val l2pf_issued = UInt(7.W)
+    val bop_issued = UInt(7.W)
+    val spp_issued = UInt(7.W)
   }
+  val ghr_l1pf_hitAccState = WireInit(0.U(PfaccState.bits.W))
+  val ghr_l2pf_hitAccState = WireInit(0.U(PfaccState.bits.W)) 
   val ghr = RegInit(0.U.asTypeOf(new  globalCounter()));dontTouch(ghr)
-  val ghr_last = RegInit(0.U.asTypeOf(new  globalCounter()));dontTouch(ghr_last)
-  val ghrCounter = Counter(true.B, 2048)
+  val ghr_last1Round = RegInit(0.U.asTypeOf(new  globalCounter()));dontTouch(ghr_last1Round)
+  val ghr_last2Round = RegInit(0.U.asTypeOf(new  globalCounter()));dontTouch(ghr_last2Round)
+  val ghr_avgRound = RegInit(0.U.asTypeOf(new  globalCounter()));dontTouch(ghr_avgRound)
+  val ghrCounter = Counter(io.l2_pf_en, 512)
   val ghr_roundReset = WireInit(false.B);dontTouch(ghr_roundReset)
   val ghr_roundCnt = ghrCounter._1
   ghr_roundReset := ghrCounter._2
@@ -1538,11 +1574,21 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
 
   when(ghr_roundReset){
     ghr := 0.U.asTypeOf(new globalCounter())
-    ghr_last := ghr
-    get_perfState(ghr.l1pf_hitAcc,ghr.l1pf_issued,ghr.l1pf_hitAccState) 
-    get_perfState(ghr.l2pf_hitAcc,ghr.l2pf_issued,ghr.l2pf_hitAccState) 
-  }
-  ghr.shareBO := bop.io.shareBO
+    ghr_last1Round := ghr
+    ghr_last2Round := ghr_last1Round
+    def get_avg2(x:UInt,y:UInt) = (x + y) >> 2.U
+    ghr_avgRound.bop_hitAcc := get_avg2(ghr_last1Round.bop_hitAcc,ghr_last2Round.bop_hitAcc)
+    ghr_avgRound.spp_hitAcc := get_avg2(ghr_last1Round.spp_hitAcc,ghr_last2Round.spp_hitAcc)
+    ghr_avgRound.l1pf_hitAcc := get_avg2(ghr_last1Round.l1pf_hitAcc,ghr_last2Round.l1pf_hitAcc)
+    ghr_avgRound.l2pf_hitAcc := get_avg2(ghr_last1Round.l2pf_hitAcc,ghr_last2Round.l2pf_hitAcc)
+    ghr_avgRound.bop_issued  := get_avg2(ghr_last1Round.bop_issued ,ghr_last2Round.bop_issued )
+    ghr_avgRound.spp_issued  := get_avg2(ghr_last1Round.spp_issued ,ghr_last2Round.spp_issued )
+    ghr_avgRound.l1pf_issued := get_avg2(ghr_last1Round.l1pf_issued,ghr_last2Round.l1pf_issued)
+    ghr_avgRound.l2pf_issued := get_avg2(ghr_last1Round.l2pf_issued,ghr_last2Round.l2pf_issued)
+    
+    get_perfState(ghr.l1pf_hitAcc,ghr.l1pf_issued,ghr_l1pf_hitAccState) 
+    get_perfState(ghr.l2pf_hitAcc,ghr.l2pf_issued,ghr_l2pf_hitAccState) 
+  } 
   
   // --------------------------------------------------------------------------------
   // spp train diverter queue
@@ -1563,10 +1609,10 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
   spp.io.resp := DontCare
   spp.io.from_ghr.valid := ghr_roundReset
   spp.io.from_ghr.bits.l2_deadCov_state := pf_deadCov_state
-  spp.io.from_ghr.bits.l2_hitAcc_state := ghr.l2pf_hitAccState
-  spp.io.from_ghr.bits.bop_hitAcc_state := ghr.bop_hitAcc
-  spp.io.from_ghr.bits.spp_hitAcc_state := ghr.spp_hitAcc
-  spp.io.from_ghr.bits.shareBO := RegNext(ghr.shareBO)
+  spp.io.from_ghr.bits.l2_hitAcc_state := ghr_l2pf_hitAccState
+  spp.io.from_ghr.bits.bop_hitAcc_state := ghr_last1Round.bop_hitAcc
+  spp.io.from_ghr.bits.spp_hitAcc_state := ghr_last1Round.spp_hitAcc
+  spp.io.from_ghr.bits.shareBO := RegNext(bop.io.shareBO,0.S)
   spp.io.from_ghr.bits.global_queue_used := q_spp.io.full //RegNext(pftQueue.io.queue_used)
   spp.io.sppCtrl := ctrl_sppConfig
 
@@ -1613,20 +1659,51 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
   // req_pipe.io.out.ready := io.req.ready
   // io.req <> req_pipe.io.out
   val s1_ready = WireInit(false.B)
-  val s0_req = WireInit(0.U.asTypeOf(ValidIO(new PrefetchReq)))
-  s0_req.valid := q_sms.io.deq.valid || q_bop.io.deq.valid || q_spp.io.deq.valid
-  s0_req.bits := ParallelPriorityMux(
-    Seq(
-      q_sms.io.deq.valid -> q_sms.io.deq.bits,
-      q_bop.io.deq.valid -> q_bop.io.deq.bits,
-      q_spp.io.deq.valid -> q_spp.io.deq.bits,
-      q_hint2llc.io.deq.valid -> q_hint2llc.io.deq.bits,
-    )
-  )
-  q_sms.io.deq.ready := s1_ready
-  q_bop.io.deq.ready := s1_ready && !q_sms.io.deq.valid
-  q_spp.io.deq.ready := s1_ready && !q_sms.io.deq.valid && !q_bop.io.deq.valid
+  // val s0_req = WireInit(0.U.asTypeOf(ValidIO(new PrefetchReq)))
+  // s0_req.valid := q_sms.io.deq.valid || q_bop.io.deq.valid || q_spp.io.deq.valid
+  // s0_req.bits := ParallelPriorityMux(
+  //   Seq(
+  //     q_sms.io.deq.valid -> q_sms.io.deq.bits,
+  //     q_bop.io.deq.valid -> q_bop.io.deq.bits,
+  //     q_spp.io.deq.valid -> q_spp.io.deq.bits,
+  //     q_hint2llc.io.deq.valid -> q_hint2llc.io.deq.bits,
+  //   )
+  // )
+  // q_sms.io.deq.ready := s1_ready
+  // q_bop.io.deq.ready := s1_ready && !q_sms.io.deq.valid
+  // q_spp.io.deq.ready := s1_ready && !q_sms.io.deq.valid && !q_bop.io.deq.valid
   q_hint2llc.io.deq.ready := s1_ready && !q_sms.io.deq.valid && !q_bop.io.deq.valid && !q_spp.io.deq.valid
+
+  val out_wRR =  Module(new weightRR(new PrefetchReq, 3, 4))
+  out_wRR.io.in(0) <> q_sms.io.deq
+  out_wRR.io.in(1) <> q_bop.io.deq
+  out_wRR.io.in(2) <> q_spp.io.deq
+  def get_weightMap(myself:UInt, x1:UInt, x2:UInt,strict:Boolean= false):UInt={
+    val weight = WireInit(0.U(4.W))
+    if(strict){
+      when(myself >= x1 && myself >= x2){
+        weight := 15.U
+      }.elsewhen(myself < x1 && myself < x2){
+        weight := 1.U
+      }.otherwise{
+        weight := 7.U
+      }
+    }else{
+      when(myself > x1 && myself > x2){
+        weight := 15.U
+      }.elsewhen(myself <= x1 && myself <= x2){
+        weight := 1.U
+      }.otherwise{
+        weight := 7.U
+      }
+    }
+    weight
+  }
+  out_wRR.io.in_weight(0) := get_weightMap(ghr_avgRound.l1pf_hitAcc,ghr_avgRound.bop_hitAcc,ghr_avgRound.spp_hitAcc,true)
+  out_wRR.io.in_weight(1) := get_weightMap(ghr_avgRound.bop_hitAcc,ghr_avgRound.l1pf_hitAcc,ghr_avgRound.spp_hitAcc,true)
+  out_wRR.io.in_weight(2) := Mux(ghr_avgRound.l2pf_hitAcc === 0.U ,0.U,get_weightMap(ghr_avgRound.spp_hitAcc,ghr_avgRound.l1pf_hitAcc,ghr_avgRound.bop_hitAcc,false))
+
+  io.req <> out_wRR.io.out
   //hint to llc
   io.hint2llc.valid := RegNextN(fTable.io.hint2llc_out.valid, 2, Some(false.B))
   io.hint2llc.bits := RegNextN(fTable.io.hint2llc_out.bits, 2 , Some(0.U.asTypeOf(new PrefetchReq)))
@@ -1637,14 +1714,14 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
   // --------------------------------------------------------------------------------
   // stage 1 send out 
   // --------------------------------------------------------------------------------
-  val s1_valid = RegNext(s0_req.valid, false.B)
-  val s1_req = RegEnable(s0_req.bits, 0.U.asTypeOf(new PrefetchReq), s0_req.valid)
+  // val s1_valid = RegNext(s0_req.valid, false.B)
+  // val s1_req = RegEnable(s0_req.bits, 0.U.asTypeOf(new PrefetchReq), s0_req.valid)
   
-  io.req.valid := s1_valid
-  io.req.bits := s1_req
+  // io.req.valid := s1_valid
+  // io.req.bits := s1_req
   s1_ready := io.req.ready
 
-  XSPerfAccumulate("pfQ_sms_replaced_enq", q_sms.io.full && q_sms.io.enq.valid && !s1_ready)
-  XSPerfAccumulate("pfQ_bop_replaced_enq", q_bop.io.full && q_bop.io.enq.valid && !s1_ready)
-  XSPerfAccumulate("pfQ_spp_replaced_enq", q_spp.io.full && q_spp.io.enq.valid && !s1_ready)
+  XSPerfAccumulate("pfQ_sms_replaced_enq", q_sms.io.full && q_sms.io.enq.valid && !q_sms.io.enq.ready)
+  XSPerfAccumulate("pfQ_bop_replaced_enq", q_bop.io.full && q_bop.io.enq.valid && !q_sms.io.enq.ready)
+  XSPerfAccumulate("pfQ_spp_replaced_enq", q_spp.io.full && q_spp.io.enq.valid && !q_sms.io.enq.ready)
 }
