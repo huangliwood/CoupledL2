@@ -248,12 +248,11 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
       hybrid_pfts.io.resp <> io.resp
       hybrid_pfts.io.recv_addr := ValidIODelay(io.recv_addr, 2)
       io.req <> hybrid_pfts.io.req
-      // evict
       io.evict match {
         case Some(evict) =>
-        // hybrid_pfts.io.evict <> evict
-        hybrid_pfts.io.evict := DontCare
-        io.evict.get.ready := true.B
+          hybrid_pfts.io.evict <> evict
+        case _ => 
+          hybrid_pfts.io.evict := DontCare
       }
       // has spp multi-level cache option
       io.hint2llc match{
