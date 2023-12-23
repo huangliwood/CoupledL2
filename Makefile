@@ -22,8 +22,9 @@ test-top-l2l3l2:
 	mill -i CoupledL2.test.runMain coupledL2.TestTop_L2L3L2 -td build
 	mv build/TestTop_L2L3L2.v build/TestTop.v
 
-test-top-fullsys:
-	mill -i CoupledL2.test.runMain coupledL2.TestTop_fullSys -td build | tee ./build/build.log
+test-top-fullsys: clean
+	mkdir build
+	mill -i CoupledL2.test.runMain coupledL2.TestTop_fullSys -td build | tee ./build/build.log  
 	tac build/TestTop_fullSys.v | sed '1,4d' | tac > build/TestTop.v
 
 test-top-fullsys_1:
