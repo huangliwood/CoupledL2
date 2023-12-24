@@ -517,7 +517,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
       hasMbist = cacheParams.hasMbist, 
       hasShareBus = cacheParams.hasShareBus,
       hasClkGate = enableClockGate, 
-      parentName = parentName
+      parentName = "spp_ptable"
     ))
   val s0_ghr_shareBO = RegNext(io.from_ghr.bits.shareBO,0.S)
   val s1_ghr_shareBO = WireInit(1.S)
@@ -1065,7 +1065,7 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     val consensusTable = RegInit(VecInit(Seq.fill(fTableEntries)(0.U.asTypeOf(fTableEntry()))))
     // val evict_q = Module(new Queue(UInt(fullAddressBits.W), fTableQueueEntries, flow = false, pipe = true))
     val evict_q = Module(new SRAMQueue(UInt((31).W),entries = fTableQueueEntries, flow = false, 
-        hasMbist = cacheParams.hasMbist, hasClkGate=enableClockGate, hasShareBus = cacheParams.hasShareBus, parentName=parentName+"filterDelayQ"))
+        hasMbist = cacheParams.hasMbist, hasClkGate=enableClockGate, hasShareBus = cacheParams.hasShareBus, parentName = "spp_filterDelayQ"))
     // pythisc backend freezed memory cacacipty
     // - _ -
     // |   |
