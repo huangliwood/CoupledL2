@@ -818,7 +818,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   }
 }
 
-class Unpack(implicit p: Parameters) extends SPPModule {
+class Unpack(parentName:String="Unkown")(implicit p: Parameters) extends SPPModule {
   val io = IO(new Bundle {
     val req = Flipped(DecoupledIO(new PatternTableResp))
     val resp = DecoupledIO(new UnpackResp)
@@ -915,9 +915,9 @@ class SignaturePathPrefetch(implicit p: Parameters) extends SPPModule {
   val ctrl_shareBO = WireInit(sppCtrl(3));dontTouch(ctrl_shareBO)
   val ctrl_slowLookup = WireInit(sppCtrl(4));dontTouch(ctrl_slowLookup)
 
-  val sTable = Module(new SignatureTable)
-  val pTable = Module(new PatternTable)
-  val unpack = Module(new Unpack)
+  val sTable = Module(new SignatureTable("spp_stable"))
+  val pTable = Module(new PatternTable("spp_ptable"))
+  val unpack = Module(new Unpack("spp_unpack"))
 
   sTable.io.req.valid := io.train.valid
   sTable.io.req.bits.blkAddr := io.train.bits.blkAddr
@@ -965,8 +965,7 @@ class SignaturePathPrefetch(implicit p: Parameters) extends SPPModule {
 case class HyperPrefetchParams(
   fTableEntries: Int = 32,
   fTableQueueEntries: Int = 256
-)
-    extends PrefetchParameters {
+) extends PrefetchParameters {
   override val hasPrefetchBit:  Boolean = true
   override val inflightEntries: Int = 32
 }
@@ -1231,8 +1230,6 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
         for (j <- 0 until blkNums){
             when(s1_skip_filter){
               s1_wBitMap(i) := s1_fwd_wBitMap
-            }.elsewhen(s1_hit(i)){
-              s1_wBitMap(i)(j) := Mux(j.asUInt === s1_blkOffset, s1_next_VecState(i), anchored_cVec(j))
             }.otherwise{
               s1_wBitMap(i)(j) := Mux(j.asUInt === s1_blkOffset, s1_next_VecState(i), PfSource.NONE)
           }
@@ -1511,7 +1508,7 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
   val ghr_last1Round = RegInit(0.U.asTypeOf(new  globalCounter()));dontTouch(ghr_last1Round)
   val ghr_last2Round = RegInit(0.U.asTypeOf(new  globalCounter()));dontTouch(ghr_last2Round)
   val ghr_avgRound = RegInit(0.U.asTypeOf(new  globalCounter()));dontTouch(ghr_avgRound)
-  val ghrCounter = Counter(io.l2_pf_en, 512)
+  val ghrCounter = Counter(io.l2_pf_en, 1024)
   val ghr_roundReset = WireInit(false.B);dontTouch(ghr_roundReset)
   val ghr_roundCnt = ghrCounter._1
   ghr_roundReset := ghrCounter._2
@@ -1738,7 +1735,7 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
     def flush_pfQ = ghr_avgRound.l2pf_hitAcc === 0.U
   }
   
-  object  spp_scheduler{
+  object spp_scheduler{
     val s_NONE :: s_LOW :: s_HIGH :: Nil = Enum(3)
     def get_spp_state(acc:UInt,cov:UInt)={
       val state = WireInit(s_LOW);dontTouch(state)
@@ -1787,28 +1784,16 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
   out_wRR.io.in_weight.bits(0) := Mux(ctrl_BOPen, bop_scheduler.get_bop_weight(spp_state = spp_state_cur), 0.U)
   out_wRR.io.in_weight.bits(1) := Mux(ctrl_SPPen, spp_scheduler.get_spp_weight(bop_state = bop_state_cur), 0.U)
 
-  when(ghr_avgRound.l1pf_hitAcc >= ghr_avgRound.l2pf_hitAcc){
-    s0_req.valid := q_sms.io.deq.fire || out_wRR.io.out.fire
-    s0_req.bits := ParallelPriorityMux(
-      Seq(
-          q_sms.io.deq.valid -> q_sms.io.deq.bits,
-          out_wRR.io.out.valid -> out_wRR.io.out.bits
-      )
+  s0_req.valid := q_sms.io.deq.fire || out_wRR.io.out.fire
+  s0_req.bits := ParallelPriorityMux(
+    Seq(
+        q_sms.io.deq.valid -> q_sms.io.deq.bits,
+        out_wRR.io.out.valid -> out_wRR.io.out.bits
     )
-    q_sms.io.deq.ready := s1_ready
-    out_wRR.io.out.ready := s1_ready && !q_sms.io.deq.valid
-  }.otherwise{
-      s0_req.valid := q_sms.io.deq.fire || out_wRR.io.out.fire
-      s0_req.bits := ParallelPriorityMux(
-        Seq(
-            out_wRR.io.out.valid -> out_wRR.io.out.bits,
-            q_sms.io.deq.valid -> q_sms.io.deq.bits
-        )
-      )
-      out_wRR.io.out.ready := s1_ready
-      q_sms.io.deq.ready := s1_ready && !q_sms.io.deq.valid
-  }
-
+  )
+  q_sms.io.deq.ready := s1_ready
+  out_wRR.io.out.ready := s1_ready && !q_sms.io.deq.valid
+  
   //hint to llc
   io.hint2llc.valid := RegNextN(fTable.io.hint2llc_out.valid, 2, Some(false.B))
   io.hint2llc.bits := RegNextN(fTable.io.hint2llc_out.bits, 2 , Some(0.U.asTypeOf(new PrefetchReq)))
