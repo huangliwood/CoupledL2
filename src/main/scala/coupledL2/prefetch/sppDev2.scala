@@ -1082,10 +1082,6 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     // stage 0
     // --------------------------------------------------------------------------------
     // bop not need filter, bop flow
-    val s0_train_tagHit = WireInit(false.B)
-    val s0_sms_tagHit = WireInit(false.B)
-    val s0_bop_tagHit = WireInit(false.B)
-    val s0_spp_tagHit = WireInit(false.B)
     // read filterTable
     val s0_valid = WireInit(false.B);dontTouch(s0_valid)
     val s0_req = WireInit(0.U.asTypeOf(new PrefetchReq));dontTouch(s0_req)
@@ -1094,13 +1090,9 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     val s0_fromTrain = WireInit(io.in_trainReq.fire)
     val s0_train_pfVec = RegInit(VecInit(Seq.fill(blkNums)(0.U(FitlerVecState.bits.W))))
     val s0_train_pageTag = WireInit(0.U(fTagBits.W));dontTouch(s0_train_pageTag)
-
+    val s0_train_tagHit = WireInit(ft_get_tag(io.in_trainReq.bits.get_pageAddr) === s0_train_pageTag);dontTouch(s0_train_tagHit)
     //flow filter
-    s0_train_tagHit := WireInit(ft_get_tag(io.in_trainReq.bits.get_pageAddr) === s0_train_pageTag)
-    s0_sms_tagHit := ft_get_tag(io.in_pfReq.bits.get_pageAddr) === s0_train_pageTag && s0_req.hasSMS
-    s0_bop_tagHit := ft_get_tag(io.in_pfReq.bits.get_pageAddr) === s0_train_pageTag && s0_req.hasBOP
-    s0_spp_tagHit := ft_get_tag(io.in_pfReq.bits.get_pageAddr) === s0_train_pageTag && s0_req.hasSPP
-    val s0_can_flow_filter = WireInit((s0_bop_tagHit || s0_bop_tagHit || s0_spp_tagHit));dontTouch(s0_can_flow_filter)
+    val s0_can_flow_filter = WireInit(ft_get_tag(io.in_pfReq.bits.get_pageAddr) === s0_train_pageTag);dontTouch(s0_can_flow_filter)
     val s0_update_train_pfVec = WireInit(io.in_pfReq.fire && s0_can_flow_filter)
     val s0_can_send = WireInit(io.in_pfReq.fire && s0_can_flow_filter && s0_train_pfVec(io.in_pfReq.bits.get_blockOff) === PfSource.NONE);dontTouch(s0_can_send)
     val s0_skip_filter = WireInit(false.B)
@@ -1295,13 +1287,13 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
   io.hint2llc_out.valid := s1_valid(3) && s1_can_send2_pfq(3) && s1_isHint2llc
   io.hint2llc_out.bits := s1_req(3)
 
-    val s0_filterd_spp = s0_spp_tagHit && io.in_pfReq.fire && s0_train_pfVec(io.in_pfReq.bits.get_blockOff) === PfSource.NONE
-    val s0_filterd_bop = s0_bop_tagHit && io.in_pfReq.fire && s0_train_pfVec(io.in_pfReq.bits.get_blockOff) === PfSource.NONE
+    val s0_filterd_spp = s0_can_flow_filter && io.in_pfReq.fire && s0_train_pfVec(io.in_pfReq.bits.get_blockOff) === PfSource.NONE
+    val s0_filterd_bop = s0_can_flow_filter && io.in_pfReq.fire && s0_train_pfVec(io.in_pfReq.bits.get_blockOff) === PfSource.NONE
     val s1_filter = s1_valid(1) && !s1_fromTrain && !s1_skip_filter && !s1_can_send2_pfq(s1_dup_offset)
-    XSPerfAccumulate("hyper_filter_input",io.in_pfReq.valid||io.in_pfReq.valid||io.in_pfReq.valid||io.in_trainReq.valid)
-    XSPerfAccumulate("hyper_filter_input_sms",io.in_pfReq.valid)
-    XSPerfAccumulate("hyper_filter_input_bop",io.in_pfReq.valid)
-    XSPerfAccumulate("hyper_filter_input_spp",io.in_pfReq.valid)
+    XSPerfAccumulate("hyper_filter_input",io.in_pfReq.valid||io.in_pfReq.valid||io.in_pfReq.valid)
+    XSPerfAccumulate("hyper_filter_input_sms",io.in_pfReq.valid && io.in_pfReq.bits.hasSMS)
+    XSPerfAccumulate("hyper_filter_input_bop",io.in_pfReq.valid && io.in_pfReq.bits.hasBOP)
+    XSPerfAccumulate("hyper_filter_input_spp",io.in_pfReq.valid && io.in_pfReq.bits.hasSPP)
     // XSPerfAccumulate("hyper_filter_input_hint2llc",io.req.valid && io.is_hint2llc)
     XSPerfAccumulate("hyper_filter_output",io.out_pfReq.valid)
     XSPerfAccumulate("hyper_filter_output_sms",io.out_pfReq.valid && io.out_pfReq.bits.hasSMS)
@@ -1726,7 +1718,7 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
     def flush_pfQ = ghr_avgRound.l2pf_hitAcc === 0.U
   }
   q_sms.io.flush := false.B
-  q_bop.io.flush := false.B//bop_scheduler.flush_pfQ
+  q_bop.io.flush := bop_scheduler.flush_pfQ
   q_spp.io.flush := spp_scheduler.flush_pfQ
   q_hint2llc.io.flush := spp_scheduler.flush_pfQ
 
@@ -1736,17 +1728,7 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
   out_wRR.io.in_weight.bits(0) := Mux(ctrl_BOPen, bop_scheduler.get_bop_weight(spp_state = spp_state_cur), 0.U)
   out_wRR.io.in_weight.bits(1) := Mux(ctrl_SPPen, spp_scheduler.get_spp_weight(bop_state = bop_state_cur), 0.U)
 
-  s0_req.valid := q_sms.io.deq.fire || out_wRR.io.out.fire
-  s0_req.bits := ParallelPriorityMux(
-    Seq(
-        q_sms.io.deq.valid -> q_sms.io.deq.bits,
-        out_wRR.io.out.valid -> out_wRR.io.out.bits
-    )
-  )
-
-  q_sms.io.deq.ready := fTable.io.in_pfReq.ready
-  out_wRR.io.out.ready := fTable.io.in_pfReq.ready && !q_sms.io.deq.valid
-  
+  s0_req <> out_wRR.io.out
   // qurry fTable
   fTable.io.in_pfReq <> s0_req
   fTable.io.in_trainReq.valid := io.train.valid
@@ -1765,11 +1747,20 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
   // --------------------------------------------------------------------------------
   // stage 1 send out 
   // --------------------------------------------------------------------------------
-  val pftQueue = Module(new Queue(new PrefetchReq,2))
-  pftQueue.io.enq <> fTable.io.out_pfReq
-  io.req <> pftQueue.io.deq
+  // now directly flow
+  val s1_req = WireInit(0.U.asTypeOf(DecoupledIO(new PrefetchReq)))
+  s1_req.valid := q_sms.io.deq.fire || fTable.io.out_pfReq.fire
+  s1_req.bits := ParallelPriorityMux(
+    Seq(
+        q_sms.io.deq.valid -> q_sms.io.deq.bits,
+        fTable.io.out_pfReq.valid -> fTable.io.out_pfReq.bits
+    )
+  )
+  q_sms.io.deq.ready := s1_req.ready
+  fTable.io.out_pfReq.ready := s1_req.ready && !q_sms.io.deq.valid
+  io.req <> s1_req
 
   XSPerfAccumulate("pfQ_sms_replaced_enq", q_sms.io.full && q_sms.io.enq.valid && !q_sms.io.enq.ready)
-  XSPerfAccumulate("pfQ_bop_replaced_enq", q_bop.io.full && q_bop.io.enq.valid && !q_sms.io.enq.ready)
-  XSPerfAccumulate("pfQ_spp_replaced_enq", q_spp.io.full && q_spp.io.enq.valid && !q_sms.io.enq.ready)
+  XSPerfAccumulate("pfQ_bop_replaced_enq", q_bop.io.full && q_bop.io.enq.valid && !q_bop.io.enq.ready)
+  XSPerfAccumulate("pfQ_spp_replaced_enq", q_spp.io.full && q_spp.io.enq.valid && !q_spp.io.enq.ready)
 }
