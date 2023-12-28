@@ -104,7 +104,7 @@ trait HasSPPParams extends HasCoupledL2Parameters {
   val pTableDeltaEntries = sppParams.pTableDeltaEntries
   val signatureBits = sppParams.signatureBits
   val pTableQueueEntries = 4
-  val unpackQueueEntries = 2
+  val unpackQueueEntries = 4
   val fTableEntries = sppParams.fTableEntries
   val lookCountBits = 6
   val hin2llcQueueThreshold = 30
@@ -120,17 +120,26 @@ trait HasSPPParams extends HasCoupledL2Parameters {
 
   def strideMap(a: SInt) : UInt = {
     val out = WireInit(0.U(3.W))
-    when(a <= -5.S) {
-      out := "b100".U
-    } .elsewhen(a >= 5.S) {
-      out := "b011".U
-    } .elsewhen(-4.S<=a && a <= -3.S) {
-      out := "b101".U
-    } .elsewhen(3.S <= a && a <= 4.S) {
-      out := "b000".U
-    } .otherwise {
-      out := a.asUInt(2, 0)
-    }
+    // when(a <= -4.S) {
+    //   out := "b100".U
+    // } .elsewhen(a >= 4.S) {
+    //   out := "b000".U
+    // } .elsewhen(-4.S<=a && a <= -3.S) {
+    //   out := "b101".U
+    // } .elsewhen(3.S <= a && a <= 4.S) {
+    //   out := "b000".U
+    // } .otherwise {
+    //   out := a.asUInt(2, 0)
+    // }
+    
+    when(a > 4.S   )      { out := "b000".U}
+    .elsewhen(a === 1.S ) { out := "b001".U}
+    .elsewhen(a === 2.S ) { out := "b010".U}
+    .elsewhen(a === 3.S ) { out := "b011".U}
+    .elsewhen(a === 4.S ) { out := "b100".U}
+    .elsewhen(a < -2.S  ) { out := "b101".U}
+    .elsewhen(a === -2.S) { out := "b110".U}
+    .elsewhen(a === -1.S) { out := "b111".U}
     out
   }
   def makeSign(old_sig:UInt,new_delta:SInt):UInt={
@@ -470,8 +479,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   
   val s0_ghr_shareBO = RegNext(io.from_ghr.bits.shareBO,0.S)
   val s1_ghr_shareBO = WireInit(1.S(shareBOBits.W))
-  s1_ghr_shareBO := Mux(io.ctrl.en_shareBO,s0_ghr_shareBO, 0.S)
-  // val s1_pfBO = WireInit(s1_ghr_shareBO + s1_timely_BO)
+  s1_ghr_shareBO := Mux(io.ctrl.en_shareBO,Mux(s0_ghr_shareBO >= 0.S, s0_ghr_shareBO + 1.S, s0_ghr_shareBO - 1.S), 0.S)
   // --------------------------------------------------------------------------------
   // stage 0
   // --------------------------------------------------------------------------------
@@ -610,7 +618,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
       Seq(
         M_SIMPLE_TIMELY -> s1_ghr_shareBO,
         M_SIMPLE_UNTIMELY -> (s1_ghr_shareBO.asUInt << 2.U).asSInt,
-        M_COMPLEX_TIMELY -> s1_ghr_shareBO,
+        M_COMPLEX_TIMELY -> 0.S,
         M_COMPLEX_UNTIMELY -> s1_ghr_shareBO
       )
     )
@@ -628,7 +636,9 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   val s2_CovMap= io.from_ghr.bits.l2_deadCov_state
   val s2_C_A = WireInit(Cat(s2_CovMap,s2_AccMap));dontTouch(s2_C_A)
   val s2_NL_ctrlMask = WireInit(0.U(4.W));dontTouch(s2_NL_ctrlMask)
-  s2_NL_ctrlMask := MuxLookup(
+  s2_NL_ctrlMask := Mux(io.ctrl.en_Nextline_Agreesive,
+    "b1111".U,
+    MuxLookup(
       s2_C_A,
       GenMask.apply(0),
       Seq(
@@ -637,7 +647,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
         HIGH_COV_LOW_ACC  -> "b0000".U,
         HIGH_COV_HIGH_ACC -> "b0011".U,
     )
-  )
+  ))
   //FSM
   switch(state_s2s1) {
     is(s_idle) {
@@ -719,7 +729,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   val s3_issued = s3_delta_list_checked.map(a => Mux(a =/= 0.S, 1.U, 0.U)).reduce(_ +& _)
   //
   s3_enprefetch := s3_valid && s3_hit && s3_issued =/= 0.U
-  when(s3_valid && s3_first_flag && (!s3_enprefetch || io.ctrl.en_Nextline_Agreesive)) {
+  when(s3_valid && s3_first_flag && !s3_enprefetch) {
     s3_enprefetchnl := ENABLE_NL.B
   }
 
@@ -849,7 +859,8 @@ class Unpack(parentName:String="Unkown")(implicit p: Parameters) extends SPPModu
   
   val enresp = WireInit(false.B)
   val extract_delta = req_deltas.reduce((a, b) => Mux(a =/= 0.S, a, b))
-  val prefetchBlock = (req.block.asSInt + extract_delta).asUInt
+  val prefetchBlock = WireInit(0.U(blkAddrBits.W));dontTouch(prefetchBlock)
+  prefetchBlock := req.block + extract_delta.asUInt
 
   val hit = WireInit(false.B)
   val s1_result = WireInit(0.U.asTypeOf(fTableEntry()))
