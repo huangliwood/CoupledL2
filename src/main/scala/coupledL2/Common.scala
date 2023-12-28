@@ -49,9 +49,9 @@ object PfSource extends Enumeration {
 
 }
 object PfVectorConst extends {
-  val BOP = 0
-  val SPP = 1
-  val SMS = 2
+  val SMS = 0
+  val BOP = 1
+  val SPP = 2
 
   val bits = 3
   val DEFAULT = 0.U(bits.W)
