@@ -285,6 +285,7 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
   def get_idx(addr:      UInt) = hash1(addr) ^ hash2(addr)
   def get_bpIdx(addr: UInt) = addr(log2Up(bpTableEntries) - 1, 0) ^ addr(2 * log2Up(bpTableEntries) - 1, log2Up(bpTableEntries))
   def get_tag(addr:      UInt) = addr(signatureBits - 1, log2Up(sTableEntries))
+  def get_bp_tag(blkAddr:      UInt) = blkAddr(blkAddrBits - 1, log2Up(bpTableEntries))
   def sTableEntry() = new Bundle {
     val valid = Bool()
     val tag = UInt(sTagBits.W)
@@ -370,15 +371,11 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
       s1_bp_mask(i) := s1_rotate_sig(i) === s1_rEntryData.sig 
     }
     s1_bp_redirect_blk := bpTable.get(s1_bp_rIdx).pre_blkAddr
-    s1_bp_hit := ENABLE_BP.asBool && s1_valid && s1_bp_mask.reduce(_ || _) && get_tag(s1_req.get_pageAddr) === get_tag(s1_bp_redirect_blk>>blkOffsetBits.U)
+    s1_bp_hit := ENABLE_BP.asBool && s1_valid && s1_bp_mask.reduce(_ || _) && get_bp_tag(s1_req.blkAddr) === get_bp_tag(s1_bp_redirect_blk)
     //TODO: there should set offset for matchedIndex?
     val s1_bp_matchedIdx = WireInit(OneHot.OH1ToUInt(HighestBit(s1_bp_mask.asUInt,4)));dontTouch(s1_bp_matchedIdx)
     s1_bp_matched_sig := s1_rotate_sig(s1_bp_matchedIdx)
   }
-  // io.resp.bits.isBP := s1_req.isBP
-
-  // io.req.ready := sTable.io.r.req.ready
-
   // --------------------------------------------------------------------------------
   // stage 2
   // --------------------------------------------------------------------------------
@@ -1702,11 +1699,11 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
         1.U,
         Seq(
           Cat(s_NONE,s_NONE)  -> 1.U,
-          Cat(s_NONE,s_LOW)   -> 1.U,
-          Cat(s_NONE,s_HIGH)  -> 1.U,
-          Cat(s_LOW ,s_NONE)  -> 2.U,
-          Cat(s_LOW ,s_LOW)   -> 1.U,
-          Cat(s_LOW ,s_HIGH)  -> 2.U,
+          Cat(s_NONE,s_LOW)   -> 2.U,
+          Cat(s_NONE,s_HIGH)  -> 2.U,
+          Cat(s_LOW ,s_NONE)  -> 3.U,
+          Cat(s_LOW ,s_LOW)   -> 3.U,
+          Cat(s_LOW ,s_HIGH)  -> 3.U,
           Cat(s_HIGH,s_NONE)  -> 5.U,
           Cat(s_HIGH,s_LOW)   -> 5.U,
           Cat(s_HIGH,s_HIGH)  -> 5.U,
