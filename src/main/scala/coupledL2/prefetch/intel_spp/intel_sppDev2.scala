@@ -104,7 +104,7 @@ trait HasSPPParams extends HasCoupledL2Parameters {
   val pTableDeltaEntries = sppParams.pTableDeltaEntries
   val signatureBits = sppParams.signatureBits
   val pTableQueueEntries = 4
-  val unpackQueueEntries = 2
+  val unpackQueueEntries = 4
   val fTableEntries = sppParams.fTableEntries
   val lookCountBits = 6
   val hin2llcQueueThreshold = 30
@@ -120,17 +120,26 @@ trait HasSPPParams extends HasCoupledL2Parameters {
 
   def strideMap(a: SInt) : UInt = {
     val out = WireInit(0.U(3.W))
-    when(a <= -5.S) {
-      out := "b100".U
-    } .elsewhen(a >= 5.S) {
-      out := "b011".U
-    } .elsewhen(-4.S<=a && a <= -3.S) {
-      out := "b101".U
-    } .elsewhen(3.S <= a && a <= 4.S) {
-      out := "b000".U
-    } .otherwise {
-      out := a.asUInt(2, 0)
-    }
+    // when(a <= -4.S) {
+    //   out := "b100".U
+    // } .elsewhen(a >= 4.S) {
+    //   out := "b000".U
+    // } .elsewhen(-4.S<=a && a <= -3.S) {
+    //   out := "b101".U
+    // } .elsewhen(3.S <= a && a <= 4.S) {
+    //   out := "b000".U
+    // } .otherwise {
+    //   out := a.asUInt(2, 0)
+    // }
+    
+    when(a > 4.S   )      { out := "b000".U}
+    .elsewhen(a === 1.S ) { out := "b001".U}
+    .elsewhen(a === 2.S ) { out := "b010".U}
+    .elsewhen(a === 3.S ) { out := "b011".U}
+    .elsewhen(a === 4.S ) { out := "b100".U}
+    .elsewhen(a < -2.S  ) { out := "b101".U}
+    .elsewhen(a === -2.S) { out := "b110".U}
+    .elsewhen(a === -1.S) { out := "b111".U}
     out
   }
   def makeSign(old_sig:UInt,new_delta:SInt):UInt={
@@ -285,6 +294,7 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
   def get_idx(addr:      UInt) = hash1(addr) ^ hash2(addr)
   def get_bpIdx(addr: UInt) = addr(log2Up(bpTableEntries) - 1, 0) ^ addr(2 * log2Up(bpTableEntries) - 1, log2Up(bpTableEntries))
   def get_tag(addr:      UInt) = addr(signatureBits - 1, log2Up(sTableEntries))
+  def get_bp_tag(blkAddr:      UInt) = blkAddr(blkAddrBits - 1, log2Up(bpTableEntries))
   def sTableEntry() = new Bundle {
     val valid = Bool()
     val tag = UInt(sTagBits.W)
@@ -327,7 +337,8 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
     val s0_bp_wIdx = WireInit(get_bpIdx(s0_bp_page));dontTouch(s0_bp_wIdx)
     //caution: not include power gating there
     bpTable.get(s0_bp_wIdx).valid := io.s0_bp_update.valid
-    bpTable.get(s0_bp_wIdx).pre_blkAddr := io.s0_bp_update.bits.blkAddr
+    bpTable.get(s0_bp_wIdx).pre_blkAddr := Mux(io.s0_bp_update.bits.blkAddr > bpTable.get(s0_bp_wIdx).pre_blkAddr,
+     io.s0_bp_update.bits.blkAddr, bpTable.get(s0_bp_wIdx).pre_blkAddr)
     for( i <- 0 until(io.s0_bp_update.bits.parent_sig.length)){
         bpTable.get(s0_bp_wIdx).parent_sig(i) := io.s0_bp_update.bits.parent_sig(i)
     }
@@ -367,18 +378,14 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
   if(bpTable.isDefined){
     for (i <- 0 until (4)) {
       s1_rotate_sig(i) := CircularShift(bpTable.get(s1_bp_rIdx).parent_sig.head).left(3 * i)
-      s1_bp_mask(i) := s1_rotate_sig(i) === s1_rEntryData.sig
+      s1_bp_mask(i) := s1_rotate_sig(i) === s1_rEntryData.sig 
     }
     s1_bp_redirect_blk := bpTable.get(s1_bp_rIdx).pre_blkAddr
-    s1_bp_hit := ENABLE_BP.asBool && s1_valid && s1_bp_mask.reduce(_ || _)
+    s1_bp_hit := ENABLE_BP.asBool && s1_valid && s1_bp_mask.reduce(_ || _) && get_bp_tag(s1_req.blkAddr) === get_bp_tag(s1_bp_redirect_blk)
     //TODO: there should set offset for matchedIndex?
     val s1_bp_matchedIdx = WireInit(OneHot.OH1ToUInt(HighestBit(s1_bp_mask.asUInt,4)));dontTouch(s1_bp_matchedIdx)
     s1_bp_matched_sig := s1_rotate_sig(s1_bp_matchedIdx)
   }
-  // io.resp.bits.isBP := s1_req.isBP
-
-  // io.req.ready := sTable.io.r.req.ready
-
   // --------------------------------------------------------------------------------
   // stage 2
   // --------------------------------------------------------------------------------
@@ -413,7 +420,7 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
 
   XSPerfAccumulate("spp_st_req_nums",io.s0_toPtReq.valid)
   if(ENABLE_BP){
-    XSPerfAccumulate("spp_st_bp_req", s0_valid && s1_bp_hit)
+    XSPerfAccumulate("spp_st_bp_req", io.s1_toPtReq.bits.bp_use_valid)
     XSPerfAccumulate("spp_st_bp_update",io.s0_bp_update.valid)
   }
 }
@@ -473,8 +480,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   
   val s0_ghr_shareBO = RegNext(io.from_ghr.bits.shareBO,0.S)
   val s1_ghr_shareBO = WireInit(1.S(shareBOBits.W))
-  s1_ghr_shareBO := Mux(io.ctrl.en_shareBO,s0_ghr_shareBO, 0.S)
-  // val s1_pfBO = WireInit(s1_ghr_shareBO + s1_timely_BO)
+  s1_ghr_shareBO := Mux(io.ctrl.en_shareBO,Mux(s0_ghr_shareBO >= 0.S, s0_ghr_shareBO + 1.S, s0_ghr_shareBO - 1.S), 0.S)
   // --------------------------------------------------------------------------------
   // stage 0
   // --------------------------------------------------------------------------------
@@ -543,7 +549,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   val s1_bypass_valid = WireInit(s2_s1_bypass_result.valid)
   val s1_bypass_tag = WireInit(s2_s1_bypass_result.tag)
   //temporary calculate only for machine control
-  val s2_s1_testBlock = WireInit((s2_s1_bypass_block.asSInt + s1_cal_maxEntry.delta).asUInt);dontTouch(s2_s1_testBlock)
+  val s2_s1_testBlock = WireInit(s2_s1_bypass_block + s1_cal_maxEntry.delta.asUInt);dontTouch(s2_s1_testBlock)
   s2_s1_hit := s1_bypass_valid && (get_tag(s2_s1_bypass_sig) === s1_bypass_tag)
   s1_continue := state_s2s1 === s_lookahead && s1_cal_maxEntry.cDelta >= s1_miniCount
   //| sig | delta | block |
@@ -607,17 +613,17 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   def M_COMPLEX_UNTIMELY = "b100".U
 
   //pressure caculate
-  val s2_testBO2 =  MuxLookup(
+  s2_testBO :=  MuxLookup(
       s2_opcode,
       0.S(shareBOBits.W),
       Seq(
         M_SIMPLE_TIMELY -> s1_ghr_shareBO,
         M_SIMPLE_UNTIMELY -> (s1_ghr_shareBO.asUInt << 2.U).asSInt,
-        M_COMPLEX_TIMELY -> s1_ghr_shareBO,
+        M_COMPLEX_TIMELY -> 0.S,
         M_COMPLEX_UNTIMELY -> s1_ghr_shareBO
       )
     )
-  s2_testBO := s1_ghr_shareBO + 1.S
+  // s2_testBO := s1_ghr_shareBO + 1.S
   // Mux(io.from_ghr.bits.bop_hitAcc_state =/= 0.U && io.from_ghr.bits.spp_hitAcc_state === 0.U,
   //   s1_ghr_shareBO + 10.S,
   //   s2_testBO2
@@ -631,7 +637,9 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   val s2_CovMap= io.from_ghr.bits.l2_deadCov_state
   val s2_C_A = WireInit(Cat(s2_CovMap,s2_AccMap));dontTouch(s2_C_A)
   val s2_NL_ctrlMask = WireInit(0.U(4.W));dontTouch(s2_NL_ctrlMask)
-  s2_NL_ctrlMask := MuxLookup(
+  s2_NL_ctrlMask := Mux(io.ctrl.en_Nextline_Agreesive,
+    "b1111".U,
+    MuxLookup(
       s2_C_A,
       GenMask.apply(0),
       Seq(
@@ -640,7 +648,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
         HIGH_COV_LOW_ACC  -> "b0000".U,
         HIGH_COV_HIGH_ACC -> "b0011".U,
     )
-  )
+  ))
   //FSM
   switch(state_s2s1) {
     is(s_idle) {
@@ -710,19 +718,16 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
 
   val s3_delta_list_checked = WireInit(VecInit(Seq.fill(pTableDeltaEntries)(0.S(deltaBits.W))))
   val s3_delta_list_nl_masked = WireInit(VecInit(Seq.fill(pTableDeltaEntries)(0.S(deltaBits.W))));dontTouch(s3_delta_list_nl_masked)
-  
-  val s3_NL_blkAddr =WireInit(VecInit(Seq.fill(pTableDeltaEntries)(0.U(blkAddrBits.W))))
   // pressure calculate
   // normal lookahead
-  s3_delta_list_checked := s3_delta_list.map(x => Mux(is_samePage((s3_current.block.asSInt + x).asUInt, s1_parent.block), x, 0.S))
+  s3_delta_list_checked := s3_delta_list.map(x => Mux(is_samePage(s3_current.block + x.asUInt, s1_parent.block), x, 0.S))
   // nextline
   s3_delta_list_nl_masked := s3_delta_list.zipWithIndex.map(d => Mux(s3_NL_ctrlMask(d._2), Mux(s3_testBO > 0.S, s3_testBO + d._2.S, s3_testBO - d._2.S), 0.S))
-  s3_NL_blkAddr := s3_delta_list_nl_masked.map(x => (s3_current.block.asSInt + x).asUInt)
 
   val s3_issued = s3_delta_list_checked.map(a => Mux(a =/= 0.S, 1.U, 0.U)).reduce(_ +& _)
   //
   s3_enprefetch := s3_valid && s3_hit && s3_issued =/= 0.U
-  when(s3_valid && s3_first_flag && (!s3_enprefetch || io.ctrl.en_Nextline_Agreesive)) {
+  when(s3_valid && s3_first_flag && !s3_enprefetch) {
     s3_enprefetchnl := ENABLE_NL.B
   }
 
@@ -760,6 +765,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   val s4_sig = RegNext(s3_current.sig,0.U)
   val s4_block = RegNext(s3_current.block,0.U)
   val s4_delta_list_checked = RegNext(s3_delta_list_checked,0.U.asTypeOf((s3_delta_list_checked.cloneType)))
+  val s4_delta_list_nl_masked = RegNext(s3_delta_list_nl_masked,0.U.asTypeOf((s3_delta_list_nl_masked.cloneType)))
   val s4_enprefetch = RegNext(s3_enprefetch,false.B)
   val s4_enprefetchnl = RegNext(s3_enprefetchnl,false.B)
 
@@ -767,7 +773,8 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   val s4_bp_update = WireInit(s4_valid && (s4_enprefetch || s4_enprefetchnl) && io.ctrl.en_bp_recovery);dontTouch(s4_bp_update)
   //pressure caculate
   val s4_wCount_accum = WireInit(s4_wEntry.deltaEntries.map(_.cDelta).reduce(_ + _))
-  val s4_delta_longest = WireInit(s4_delta_list_checked.reduce((a,b) => Mux(a > b, a, b)));dontTouch(s4_delta_longest)
+  val s4_delta_longest = WireInit(Mux(s4_enprefetch, s4_delta_list_checked.reduce((a,b) => Mux(a > b, a, b)),
+  s4_delta_list_nl_masked.reduce((a,b) => Mux(a > b, a, b))));dontTouch(s4_delta_longest)
   // --------------------------------------------------------------------------------
   // pTable operation
   // --------------------------------------------------------------------------------
@@ -785,7 +792,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   
   //update bp
   io.pt2st_bp.valid := ENABLE_BP.asBool && s4_bp_update
-  io.pt2st_bp.bits.blkAddr := (s4_block.asSInt + s4_delta_longest.asSInt).asUInt
+  io.pt2st_bp.bits.blkAddr := s4_block + s4_delta_longest.asUInt
   io.pt2st_bp.bits.parent_sig(0) := s4_sig
   dontTouch(io.pt2st_bp)
 
@@ -811,7 +818,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   XSPerfAccumulate("spp_pt_enpf",state_s2s1 === s_lookahead && s3_enprefetch)
   XSPerfAccumulate("spp_pt_nextLine",state_s2s1 === s_lookahead && s3_enprefetchnl)
   XSPerfAccumulate("spp_pt_cross_page",state_s2s1 === s_lookahead && s2_valid && 
-    s3_delta_list.map(x => is_samePage((s3_current.block.asSInt + x).asUInt,s3_current.block)).reduce(_||_))
+    s3_delta_list.map(x => is_samePage(s3_current.block + x.asUInt,s3_current.block)).reduce(_||_))
   for (i <- 0 until pTableEntries) {
     XSPerfAccumulate(s"spp_pt_touched_entry_onlyset_${i.toString}", pTable.io.r.req.bits.setIdx === i.U(log2Up(pTableEntries).W)
     )
@@ -852,7 +859,8 @@ class Unpack(parentName:String="Unkown")(implicit p: Parameters) extends SPPModu
   
   val enresp = WireInit(false.B)
   val extract_delta = req_deltas.reduce((a, b) => Mux(a =/= 0.S, a, b))
-  val prefetchBlock = (req.block.asSInt + extract_delta).asUInt
+  val prefetchBlock = WireInit(0.U(blkAddrBits.W));dontTouch(prefetchBlock)
+  prefetchBlock := req.block + extract_delta.asUInt
 
   val hit = WireInit(false.B)
   val s1_result = WireInit(0.U.asTypeOf(fTableEntry()))
@@ -1082,10 +1090,6 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     // stage 0
     // --------------------------------------------------------------------------------
     // bop not need filter, bop flow
-    val s0_train_tagHit = WireInit(false.B)
-    val s0_sms_tagHit = WireInit(false.B)
-    val s0_bop_tagHit = WireInit(false.B)
-    val s0_spp_tagHit = WireInit(false.B)
     // read filterTable
     val s0_valid = WireInit(false.B);dontTouch(s0_valid)
     val s0_req = WireInit(0.U.asTypeOf(new PrefetchReq));dontTouch(s0_req)
@@ -1094,13 +1098,9 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     val s0_fromTrain = WireInit(io.in_trainReq.fire)
     val s0_train_pfVec = RegInit(VecInit(Seq.fill(blkNums)(0.U(FitlerVecState.bits.W))))
     val s0_train_pageTag = WireInit(0.U(fTagBits.W));dontTouch(s0_train_pageTag)
-
+    val s0_train_tagHit = WireInit(ft_get_tag(io.in_trainReq.bits.get_pageAddr) === s0_train_pageTag);dontTouch(s0_train_tagHit)
     //flow filter
-    s0_train_tagHit := WireInit(ft_get_tag(io.in_trainReq.bits.get_pageAddr) === s0_train_pageTag)
-    s0_sms_tagHit := ft_get_tag(io.in_pfReq.bits.get_pageAddr) === s0_train_pageTag && s0_req.hasSMS
-    s0_bop_tagHit := ft_get_tag(io.in_pfReq.bits.get_pageAddr) === s0_train_pageTag && s0_req.hasBOP
-    s0_spp_tagHit := ft_get_tag(io.in_pfReq.bits.get_pageAddr) === s0_train_pageTag && s0_req.hasSPP
-    val s0_can_flow_filter = WireInit((s0_bop_tagHit || s0_bop_tagHit || s0_spp_tagHit));dontTouch(s0_can_flow_filter)
+    val s0_can_flow_filter = WireInit(ft_get_tag(io.in_pfReq.bits.get_pageAddr) === s0_train_pageTag);dontTouch(s0_can_flow_filter)
     val s0_update_train_pfVec = WireInit(io.in_pfReq.fire && s0_can_flow_filter)
     val s0_can_send = WireInit(io.in_pfReq.fire && s0_can_flow_filter && s0_train_pfVec(io.in_pfReq.bits.get_blockOff) === PfSource.NONE);dontTouch(s0_can_send)
     val s0_skip_filter = WireInit(false.B)
@@ -1112,7 +1112,7 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     def get_stall(x:DecoupledIO[PrefetchReq]):Bool = x.valid && !x.ready
 
     replay_Q0.io.enq <> io.in_pfReq
-    replay_Q0.io.enq.valid := io.in_pfReq.fire && !s0_can_flow_filter
+    replay_Q0.io.enq.valid := io.in_pfReq.fire && !s0_can_send
     //only l2 pf req need go quiteUpdateQ
     quiteUpdateQ.io.enq.valid := s0_can_send && io.out_pfReq.fire
     quiteUpdateQ.io.enq.bits := io.out_pfReq.bits
@@ -1120,17 +1120,18 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     quiteUpdateQ_pfVec.io.enq.bits := s0_train_pfVec.zipWithIndex.map(x => 
       Mux(x._2.U === quiteUpdateQ.io.enq.bits.get_blockOff,x._1 | quiteUpdateQ.io.enq.bits.pfVec, x._1)
     )
-    s0_valid := quiteUpdateQ.io.deq.fire || replay_Q0.io.deq.fire || io.in_trainReq.fire //|| q_hint2llc.io.deq.valid
+    s0_valid := quiteUpdateQ.io.deq.fire || replay_Q0.io.deq.fire //|| q_hint2llc.io.deq.valid
     s0_req := ParallelPriorityMux(
       Seq(
+        io.in_trainReq.valid -> io.in_trainReq.bits,
         replay_Q0.io.deq.valid -> replay_Q0.io.deq.bits,
         quiteUpdateQ.io.deq.valid -> quiteUpdateQ.io.deq.bits,
-        io.in_trainReq.valid -> io.in_trainReq.bits,
+
        // q_hint2llc.io.deq.valid -> q_hint2llc.io.deq.bits,
       )
     )
-    replay_Q0.io.deq.ready := true.B
-    quiteUpdateQ.io.deq.ready := !io.in_pfReq.valid && !replay_Q0.io.deq.valid
+    replay_Q0.io.deq.ready := !io.in_trainReq.valid
+    quiteUpdateQ.io.deq.ready := !io.in_trainReq.valid && !io.in_pfReq.valid && !replay_Q0.io.deq.valid
     quiteUpdateQ_pfVec.io.deq.ready := quiteUpdateQ.io.deq.ready
 
     val s0_fwd_evict_hitTrain = WireInit(false.B);dontTouch(s0_fwd_evict_hitTrain)
@@ -1138,21 +1139,21 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
 
     when(s0_fwd_evict_hitTrain){
         s0_train_pfVec(s0_fwd_evict_blkOff) := PfSource.NONE
-      }.elsewhen(s0_valid && s0_fromTrain && !s0_train_tagHit){
+      }.elsewhen(s0_fromTrain && !s0_train_tagHit){
       for(i <- 0 until(blkNums)){
         s0_train_pfVec(i) := s0_result.cVec(i)
       }
     }.elsewhen(s0_update_train_pfVec){
         s0_train_pfVec(io.in_pfReq.bits.get_blockOff) := s0_train_pfVec(io.in_pfReq.bits.get_blockOff) | io.in_pfReq.bits.pfVec
     }
-    val s0_train_pfVec_need_replace = WireInit(s0_valid && s0_fromTrain && !s0_train_tagHit)
+    val s0_train_pfVec_need_replace = WireInit(s0_fromTrain && !s0_train_tagHit)
 
-    s0_train_pageTag := RegEnable(s0_result.tag, 0.U, s0_valid && s0_fromTrain)
+    s0_train_pageTag := RegEnable(s0_result.tag, 0.U, s0_fromTrain)
     s0_skip_filter := quiteUpdateQ.io.deq.fire
     
     val s0_read = WireInit(replay_Q0.io.deq.fire || io.in_trainReq.fire);dontTouch(s0_read)
     val s0_rIdx = WireInit(get_idx(s0_req.get_pageAddr));dontTouch(s0_rIdx)
-    val s0_train_Idx = RegEnable(s0_rIdx, s0_valid && s0_fromTrain);dontTouch(s0_train_Idx)
+    val s0_train_Idx = RegEnable(s0_rIdx, s0_fromTrain);dontTouch(s0_train_Idx)
     // --------------------------------------------------------------------------------
     // stage 1
     // --------------------------------------------------------------------------------
@@ -1266,9 +1267,8 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
     evict_q.io.enq.bits := RegNext(get_saved_blkAddr(io.out_pfReq.bits.get_blkAddr),0.U)
     evict_q.io.deq.ready := !s2_normalWrite && s2_evictQ_used > (fTableQueueEntries-1).U;
 
-    when(s0_read){
-      s0_result := consensusTable(s0_rIdx)
-    }
+
+    s0_result := consensusTable(s0_rIdx)
 
     when(s1_train_pfVec_need_replace){
       consensusTable(s1_wIdx).cVec := s1_write_train_pfVec
@@ -1295,13 +1295,13 @@ class FilterTable(parentName:String = "Unknown")(implicit p: Parameters) extends
   io.hint2llc_out.valid := s1_valid(3) && s1_can_send2_pfq(3) && s1_isHint2llc
   io.hint2llc_out.bits := s1_req(3)
 
-    val s0_filterd_spp = s0_spp_tagHit && io.in_pfReq.fire && s0_train_pfVec(io.in_pfReq.bits.get_blockOff) === PfSource.NONE
-    val s0_filterd_bop = s0_bop_tagHit && io.in_pfReq.fire && s0_train_pfVec(io.in_pfReq.bits.get_blockOff) === PfSource.NONE
+    val s0_filterd_spp = s0_can_flow_filter && io.in_pfReq.fire && s0_train_pfVec(io.in_pfReq.bits.get_blockOff) === PfSource.NONE
+    val s0_filterd_bop = s0_can_flow_filter && io.in_pfReq.fire && s0_train_pfVec(io.in_pfReq.bits.get_blockOff) === PfSource.NONE
     val s1_filter = s1_valid(1) && !s1_fromTrain && !s1_skip_filter && !s1_can_send2_pfq(s1_dup_offset)
-    XSPerfAccumulate("hyper_filter_input",io.in_pfReq.valid||io.in_pfReq.valid||io.in_pfReq.valid||io.in_trainReq.valid)
-    XSPerfAccumulate("hyper_filter_input_sms",io.in_pfReq.valid)
-    XSPerfAccumulate("hyper_filter_input_bop",io.in_pfReq.valid)
-    XSPerfAccumulate("hyper_filter_input_spp",io.in_pfReq.valid)
+    XSPerfAccumulate("hyper_filter_input",io.in_pfReq.valid||io.in_pfReq.valid||io.in_pfReq.valid)
+    XSPerfAccumulate("hyper_filter_input_sms",io.in_pfReq.valid && io.in_pfReq.bits.hasSMS)
+    XSPerfAccumulate("hyper_filter_input_bop",io.in_pfReq.valid && io.in_pfReq.bits.hasBOP)
+    XSPerfAccumulate("hyper_filter_input_spp",io.in_pfReq.valid && io.in_pfReq.bits.hasSPP)
     // XSPerfAccumulate("hyper_filter_input_hint2llc",io.req.valid && io.is_hint2llc)
     XSPerfAccumulate("hyper_filter_output",io.out_pfReq.valid)
     XSPerfAccumulate("hyper_filter_output_sms",io.out_pfReq.valid && io.out_pfReq.bits.hasSMS)
@@ -1637,9 +1637,9 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
   // SPP Scheduler Table       |    BOP Scheduler Table   
   // |bop\sms| N | L | H |     |    |bop\sms| N | L | H |
   // --------------------      |    --------------------
-  // | N     | 0 | 3 | 5 |     |    | N     | 2 | 2 | 1 |
-  // | L     | 3 | 1 | 4 |     |    | L     | 4 | 1 | 1 |
-  // | H     | 3 | 4 | 1 |     |    | H     | 5 | 4 | 1 |
+  // | N     | 1 | 3 | 5 |     |    | N     | 1 | 2 | 1 |
+  // | L     | 2 | 3 | 5 |     |    | L     | 1 | 2 | 1 |
+  // | H     | 2 | 3 | 5 |     |    | H     | 3 | 4 | 1 |
 
   val bop_state_cur = WireInit(0.U(2.W));dontTouch(bop_state_cur)
   val bop_state_avg = WireInit(0.U(2.W));dontTouch(bop_state_avg)
@@ -1710,11 +1710,11 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
         1.U,
         Seq(
           Cat(s_NONE,s_NONE)  -> 1.U,
-          Cat(s_NONE,s_LOW)   -> 1.U,
-          Cat(s_NONE,s_HIGH)  -> 1.U,
-          Cat(s_LOW ,s_NONE)  -> 2.U,
-          Cat(s_LOW ,s_LOW)   -> 1.U,
-          Cat(s_LOW ,s_HIGH)  -> 2.U,
+          Cat(s_NONE,s_LOW)   -> 2.U,
+          Cat(s_NONE,s_HIGH)  -> 2.U,
+          Cat(s_LOW ,s_NONE)  -> 3.U,
+          Cat(s_LOW ,s_LOW)   -> 3.U,
+          Cat(s_LOW ,s_HIGH)  -> 3.U,
           Cat(s_HIGH,s_NONE)  -> 5.U,
           Cat(s_HIGH,s_LOW)   -> 5.U,
           Cat(s_HIGH,s_HIGH)  -> 5.U,
@@ -1736,17 +1736,7 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
   out_wRR.io.in_weight.bits(0) := Mux(ctrl_BOPen, bop_scheduler.get_bop_weight(spp_state = spp_state_cur), 0.U)
   out_wRR.io.in_weight.bits(1) := Mux(ctrl_SPPen, spp_scheduler.get_spp_weight(bop_state = bop_state_cur), 0.U)
 
-  s0_req.valid := q_sms.io.deq.fire || out_wRR.io.out.fire
-  s0_req.bits := ParallelPriorityMux(
-    Seq(
-        q_sms.io.deq.valid -> q_sms.io.deq.bits,
-        out_wRR.io.out.valid -> out_wRR.io.out.bits
-    )
-  )
-
-  q_sms.io.deq.ready := fTable.io.in_pfReq.ready
-  out_wRR.io.out.ready := fTable.io.in_pfReq.ready && !q_sms.io.deq.valid
-  
+  s0_req <> out_wRR.io.out
   // qurry fTable
   fTable.io.in_pfReq <> s0_req
   fTable.io.in_trainReq.valid := io.train.valid
@@ -1765,11 +1755,20 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
   // --------------------------------------------------------------------------------
   // stage 1 send out 
   // --------------------------------------------------------------------------------
-  val pftQueue = Module(new Queue(new PrefetchReq,2))
-  pftQueue.io.enq <> fTable.io.out_pfReq
-  io.req <> pftQueue.io.deq
+  // now directly flow
+  val s1_req = WireInit(0.U.asTypeOf(DecoupledIO(new PrefetchReq)))
+  s1_req.valid := q_sms.io.deq.fire || fTable.io.out_pfReq.fire
+  s1_req.bits := ParallelPriorityMux(
+    Seq(
+        q_sms.io.deq.valid -> q_sms.io.deq.bits,
+        fTable.io.out_pfReq.valid -> fTable.io.out_pfReq.bits
+    )
+  )
+  q_sms.io.deq.ready := s1_req.ready
+  fTable.io.out_pfReq.ready := s1_req.ready && !q_sms.io.deq.valid
+  io.req <> s1_req
 
   XSPerfAccumulate("pfQ_sms_replaced_enq", q_sms.io.full && q_sms.io.enq.valid && !q_sms.io.enq.ready)
-  XSPerfAccumulate("pfQ_bop_replaced_enq", q_bop.io.full && q_bop.io.enq.valid && !q_sms.io.enq.ready)
-  XSPerfAccumulate("pfQ_spp_replaced_enq", q_spp.io.full && q_spp.io.enq.valid && !q_sms.io.enq.ready)
+  XSPerfAccumulate("pfQ_bop_replaced_enq", q_bop.io.full && q_bop.io.enq.valid && !q_bop.io.enq.ready)
+  XSPerfAccumulate("pfQ_spp_replaced_enq", q_spp.io.full && q_spp.io.enq.valid && !q_spp.io.enq.ready)
 }
