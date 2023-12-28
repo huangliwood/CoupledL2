@@ -294,7 +294,7 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
   def get_idx(addr:      UInt) = hash1(addr) ^ hash2(addr)
   def get_bpIdx(addr: UInt) = addr(log2Up(bpTableEntries) - 1, 0) ^ addr(2 * log2Up(bpTableEntries) - 1, log2Up(bpTableEntries))
   def get_tag(addr:      UInt) = addr(signatureBits - 1, log2Up(sTableEntries))
-  def get_bp_tag(blkAddr:      UInt) = blkAddr(blkAddrBits - 1, log2Up(bpTableEntries))
+  def get_bp_tag(blkAddr:      UInt) = blkAddr(blkAddrBits - 1, log2Up(bpTableEntries)) //caution: should use full blockAddr!
   def sTableEntry() = new Bundle {
     val valid = Bool()
     val tag = UInt(sTagBits.W)
@@ -419,7 +419,7 @@ class SignatureTable(parentName: String = "Unknown")(implicit p: Parameters) ext
 
   XSPerfAccumulate("spp_st_req_nums",io.s0_toPtReq.valid)
   if(ENABLE_BP){
-    XSPerfAccumulate("spp_st_bp_req", s0_valid && s1_bp_hit)
+    XSPerfAccumulate("spp_st_bp_req", io.s1_toPtReq.bits.bp_use_valid)
     XSPerfAccumulate("spp_st_bp_update",io.s0_bp_update.valid)
   }
 }
@@ -548,7 +548,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   val s1_bypass_valid = WireInit(s2_s1_bypass_result.valid)
   val s1_bypass_tag = WireInit(s2_s1_bypass_result.tag)
   //temporary calculate only for machine control
-  val s2_s1_testBlock = WireInit((s2_s1_bypass_block.asSInt + s1_cal_maxEntry.delta).asUInt);dontTouch(s2_s1_testBlock)
+  val s2_s1_testBlock = WireInit(s2_s1_bypass_block + s1_cal_maxEntry.delta.asUInt);dontTouch(s2_s1_testBlock)
   s2_s1_hit := s1_bypass_valid && (get_tag(s2_s1_bypass_sig) === s1_bypass_tag)
   s1_continue := state_s2s1 === s_lookahead && s1_cal_maxEntry.cDelta >= s1_miniCount
   //| sig | delta | block |
@@ -721,10 +721,10 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   val s3_NL_blkAddr =WireInit(VecInit(Seq.fill(pTableDeltaEntries)(0.U(blkAddrBits.W))))
   // pressure calculate
   // normal lookahead
-  s3_delta_list_checked := s3_delta_list.map(x => Mux(is_samePage((s3_current.block.asSInt + x).asUInt, s1_parent.block), x, 0.S))
+  s3_delta_list_checked := s3_delta_list.map(x => Mux(is_samePage(s3_current.block + x.asUInt, s1_parent.block), x, 0.S))
   // nextline
   s3_delta_list_nl_masked := s3_delta_list.zipWithIndex.map(d => Mux(s3_NL_ctrlMask(d._2), Mux(s3_testBO > 0.S, s3_testBO + d._2.S, s3_testBO - d._2.S), 0.S))
-  s3_NL_blkAddr := s3_delta_list_nl_masked.map(x => (s3_current.block.asSInt + x).asUInt)
+  s3_NL_blkAddr := s3_delta_list_nl_masked.map(x => s3_current.block + x.asUInt)
 
   val s3_issued = s3_delta_list_checked.map(a => Mux(a =/= 0.S, 1.U, 0.U)).reduce(_ +& _)
   //
@@ -792,7 +792,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   
   //update bp
   io.pt2st_bp.valid := ENABLE_BP.asBool && s4_bp_update
-  io.pt2st_bp.bits.blkAddr := (s4_block.asSInt + s4_delta_longest.asSInt).asUInt
+  io.pt2st_bp.bits.blkAddr := s4_block + s4_delta_longest.asUInt
   io.pt2st_bp.bits.parent_sig(0) := s4_sig
   dontTouch(io.pt2st_bp)
 
@@ -818,7 +818,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   XSPerfAccumulate("spp_pt_enpf",state_s2s1 === s_lookahead && s3_enprefetch)
   XSPerfAccumulate("spp_pt_nextLine",state_s2s1 === s_lookahead && s3_enprefetchnl)
   XSPerfAccumulate("spp_pt_cross_page",state_s2s1 === s_lookahead && s2_valid && 
-    s3_delta_list.map(x => is_samePage((s3_current.block.asSInt + x).asUInt,s3_current.block)).reduce(_||_))
+    s3_delta_list.map(x => is_samePage(s3_current.block + x.asUInt,s3_current.block)).reduce(_||_))
   for (i <- 0 until pTableEntries) {
     XSPerfAccumulate(s"spp_pt_touched_entry_onlyset_${i.toString}", pTable.io.r.req.bits.setIdx === i.U(log2Up(pTableEntries).W)
     )
