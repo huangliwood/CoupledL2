@@ -623,6 +623,18 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
     ))
   )))
  l2xbar := TLBuffer() := AXI2TL(16, 16) := AXI2TLFragmenter() := l3FrontendAXI4Node
+  // l2xbar :=
+  // TLFIFOFixer() :=
+  // TLWidthWidget(32) :=
+  // TLBuffer() :=
+  // AXI4ToTL() :=
+  // AXI4Buffer() :=
+  // AXI4UserYanker(Some(16)) :=
+  // AXI4Fragmenter() :=
+  // AXI4Buffer() :=
+  // AXI4Buffer() :=
+  // AXI4IdIndexer(4) :=
+  // l3FrontendAXI4Node
 
   ram.node :=
     TLXbar() :=*
