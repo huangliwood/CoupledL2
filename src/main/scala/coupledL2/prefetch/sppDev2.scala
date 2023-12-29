@@ -801,7 +801,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
 
   // output
   io.resp.valid := s3_enprefetch || s3_enprefetchnl
-  io.resp.bits.block := RegNext(s3_current.block)
+  io.resp.bits.block := s3_current.block
   when(s3_enprefetchnl) {
     io.resp.bits.deltas := s3_delta_list_nl_masked
   }.otherwise{
