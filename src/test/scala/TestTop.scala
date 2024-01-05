@@ -511,7 +511,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
     master_nodes = master_nodes ++ Seq(l1d, l1i) // TODO
 
     val l1xbar = TLXbar()
-    val l2node = LazyModule(new CoupledL2()(new Config((_, _, _) => {
+    val l2 = LazyModule(new CoupledL2()(new Config((_, _, _) => {
       case L2ParamKey => L2Param(
         name = s"l2$i",
         ways = 4,
@@ -540,14 +540,14 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
     })))
     l1xbar := TLBuffer() := l1i
     l1xbar := TLBuffer() := l1d
-    l2node.pf_recv_node match{
+    l2.pf_recv_node match{
       case Some(l2Recv) => 
         val l1_sms_send_0_node = LazyModule(new PrefetchSmsOuterNode)
         l2Recv := l1_sms_send_0_node.outNode
       case None =>
     }
-    l2xbar := TLBuffer() := l2node.node := l1xbar
-    l2node // return l2 list
+    l2xbar := TLBuffer() := l2.node := l1xbar
+    l2 // return l2 list
   }
 
   val l3 = LazyModule(new HuanCun()(new Config((_, _, _) => {
@@ -623,6 +623,18 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
     ))
   )))
  l2xbar := TLBuffer() := AXI2TL(16, 16) := AXI2TLFragmenter() := l3FrontendAXI4Node
+  // l2xbar :=
+  // TLFIFOFixer() :=
+  // TLWidthWidget(32) :=
+  // TLBuffer() :=
+  // AXI4ToTL() :=
+  // AXI4Buffer() :=
+  // AXI4UserYanker(Some(16)) :=
+  // AXI4Fragmenter() :=
+  // AXI4Buffer() :=
+  // AXI4Buffer() :=
+  // AXI4IdIndexer(4) :=
+  // l3FrontendAXI4Node
 
   ram.node :=
     TLXbar() :=*

@@ -203,7 +203,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   val need_mshr_s3_a = need_acquire_s3_a || need_probe_s3_a || cache_alias
   // For channel B reqs, alloc mshr when Probe hits in both self and client dir
   val need_mshr_s3_b = dirResult_s3.hit && req_s3.fromB &&
-    !(meta_s3.state === BRANCH && req_s3.param === toB) &&
+    !((meta_s3.state === BRANCH || meta_s3.state === TIP) && req_s3.param === toB) &&
     meta_has_clients_s3
 
   // For channel C reqs, Release will always hit on MainPipe, no need for MSHR
@@ -455,7 +455,8 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     train.bits.vaddr.foreach(_ := req_s3.vaddr.getOrElse(0.U))
     train.bits.state:= Mux(!dirResult_s3.hit, AccessState.MISS,
       Mux(!meta_s3.prefetch.get, AccessState.HIT, AccessState.PREFETCH_HIT))
-    train.bits.pfVec := Mux(!dirResult_s3.hit, PfSource.BOP_SPP, req_s3.pfVec.getOrElse(PfSource.NONE))
+    train.bits.pfVec := PfSource.BOP_SPP
+    // train.bits.pfVec := Mux(!dirResult_s3.hit, PfSource.BOP_SPP, req_s3.pfVec.getOrElse(PfSource.NONE))
   }
   if(io.prefetchEvict.isDefined){
     val evict = io.prefetchEvict.get
@@ -614,7 +615,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     // But to consider mshrFull, all channel_reqs are needed
   )
   io.status_vec_toD(0).bits.channel := task_s3.bits.channel
-  io.status_vec_toD(1).valid        := task_s4.valid && isD_s4 && !need_write_releaseBuf_s4 && !need_write_refillBuf_s4
+  io.status_vec_toD(1).valid        := task_s4.valid
   io.status_vec_toD(1).bits.channel := task_s4.bits.channel
   io.status_vec_toD(2).valid        := d_s5.valid
   io.status_vec_toD(2).bits.channel := task_s5.bits.channel

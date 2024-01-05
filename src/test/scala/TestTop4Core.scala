@@ -22,7 +22,12 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
   val NumCores = 4
   val nrL2 = NumCores
 
-  def createClientNode(name: String, sources: Int) = {
+  val L2NBanks = 2
+  val L3NBanks = 4
+  val L2BlockSize = 64
+  val L3BlockSize = 64
+
+  def createDCacheNode(name: String, sources: Int) = {
     val masterNode = TLClientNode(Seq(
       TLMasterPortParameters.v2(
         masters = Seq(
@@ -42,26 +47,45 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
     masterNode
   }
 
-  val l2xbar = TLXbar()
-  // val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffffffL), beatBytes = 32)) // Normal rtl-based memory
-  val ram = LazyModule(new coupledL2.TLRAM(AddressSet(0, 0xffffffffffffL), beatBytes = 32)) // DPI-C memory
-  var master_nodes: Seq[TLClientNode] = Seq() // TODO
-  
-  // val nullNode = LazyModule(new SppSenderNull)
-  val l2List = (0 until nrL2).map{i =>
-    val l1d = createClientNode(s"l1d$i", 32)
-    val l1i = TLClientNode(Seq(
+  def createICacheNode(name: String, source: Int) = {
+    val masterNode = TLClientNode(Seq(
       TLMasterPortParameters.v1(
         clients = Seq(TLMasterParameters.v1(
-          name = s"l1i$i",
-          sourceId = IdRange(0, 32)
+          name = name,
+          sourceId = IdRange(0, source)
         ))
       )
     ))
-    master_nodes = master_nodes ++ Seq(l1d, l1i) // TODO
+    masterNode
+  }
 
-    val l1xbar = TLXbar()
-    val l2node = LazyModule(new CoupledL2()(new Config((_, _, _) => {
+  var master_nodes: Seq[TLClientNode] = Seq()
+  var l1xbars: Seq[TLNode] = Seq()
+  val l2xbar: TLNode = TLXbar()
+
+  var l2binders: Seq[TLNode] = Seq()
+  val l3binder = BankBinder(L3NBanks, L3BlockSize)
+
+  val mem_xbar = TLXbar()
+  // val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffffffL), beatBytes = 32)) // Normal rtl-based memory
+  val ram = LazyModule(new coupledL2.TLRAM(AddressSet(0, 0xffffffffffL), beatBytes = 32)) // DPI-C memory
+
+  // Create L1 nodes
+  (0 until nrL2).foreach{ i =>
+    val idMax = 64
+    val l1d = createDCacheNode(s"l1d$i", idMax) 
+    val l1i = createICacheNode(s"l1i$i", idMax)
+    master_nodes = master_nodes ++ Seq(l1d, l1i)
+
+    val xbar = TLXbar()
+    l1xbars = l1xbars ++ Seq(xbar)
+    xbar := TLBuffer() := l1i
+    xbar := TLBuffer() := l1d
+  }
+
+  // Create L2 nodes
+  val l2List = (0 until nrL2).map{i =>
+    val l2 = LazyModule(new CoupledL2()(new Config((_, _, _) => {
       case L2ParamKey => L2Param(
         name = s"l2$i",
         ways = 8,
@@ -69,7 +93,7 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
         clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
         echoField = Seq(huancun.DirtyField()),
         // prefetch = Some(BOPParameters(rrTableEntries = 16,rrTagBits = 6))
-        prefetch = Some(HyperPrefetchParams()),
+        prefetch = None, // Some(HyperPrefetchParams()),
         /* del L2 prefetche recv option, move into: prefetch =  PrefetchReceiverParams
         prefetch options:
           SPPParameters          => spp only
@@ -77,27 +101,26 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
           PrefetchReceiverParams => sms+bop
           HyperPrefetchParams    => spp+bop+sms
         */
-        sppMultiLevelRefill = Some(coupledL2.prefetch.PrefetchReceiverParams()),
+        sppMultiLevelRefill = None, // Some(coupledL2.prefetch.PrefetchReceiverParams()),
         /*must has spp, otherwise Assert Fail
         sppMultiLevelRefill options:
         PrefetchReceiverParams() => spp has cross level refill
         None                     => spp only refill L2 
         */
+        elaboratedTopDown = false,
       )
       case DebugOptionsKey => DebugOptions()
     })))
-    l1xbar := TLBuffer() := l1i
-    l1xbar := TLBuffer() := l1d
-    l2node.pf_recv_node match{
-      case Some(l2Recv) => 
-        val l1_sms_send_0_node = LazyModule(new PrefetchSmsOuterNode)
-        l2Recv := l1_sms_send_0_node.outNode
-      case None =>
-    }
-    l2xbar := TLBuffer() := l2node.node := l1xbar
-    l2node // return l2 list
+    
+    val binder = BankBinder(L2NBanks, L2BlockSize)
+    l2binders = l2binders ++ Seq(binder)
+
+    l2xbar := TLBuffer.chainNode(2) := TLXbar() :=* binder :*= l2.node :*= l1xbars(i)
+
+    l2
   }
 
+  // Create L3 node
   val l3 = LazyModule(new HuanCun()(new Config((_, _, _) => {
     case HCCacheParamsKey => HCCacheParameters(
       name = "L3",
@@ -112,7 +135,7 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
       simulation = true,
       hasMbist = false,
       prefetch = None,
-      prefetchRecv = Some(huancun.prefetch.PrefetchReceiverParams()), // None, //Some(huancun.prefetch.PrefetchReceiverParams()),
+      prefetchRecv = None, // Some(huancun.prefetch.PrefetchReceiverParams()), // None, //Some(huancun.prefetch.PrefetchReceiverParams()),
       tagECC = Some("secded"),
       dataECC = Some("secded"),
       ctrl = Some(huancun.CacheCtrl(
@@ -123,25 +146,25 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
     case DebugOptionsKey => DebugOptions()
   })))
 
-  println(f"pf_l3recv_node connecting to l3pf_RecvXbar out")
-  val sppHasCrossLevelRefillOpt = p(L2ParamKey).sppMultiLevelRefill
-  println(f"SPP cross level refill: ${sppHasCrossLevelRefillOpt} ")
-  sppHasCrossLevelRefillOpt match{
-    case Some(x) =>
-      val l3pf_RecvXbar = LazyModule(new PrefetchReceiverXbar(NumCores))
-      l2List.zipWithIndex.foreach {
-        case (l2, i) =>
-          l2.spp_send_node match {
-            case Some(l2Send) =>
-              l3pf_RecvXbar.inNode(i) := l2Send
-              println(f"spp_send_node${i} connecting to l3pf_RecvXbar")
-            case None =>
-        }
-      }
-      println(f"pf_l3recv_node connecting to l3pf_RecvXbar out")
-      l3.pf_l3recv_node.map(l3_recv =>  l3_recv:= l3pf_RecvXbar.outNode.head)
-    case None =>
-  }
+  // println(f"pf_l3recv_node connecting to l3pf_RecvXbar out")
+  // val sppHasCrossLevelRefillOpt = p(L2ParamKey).sppMultiLevelRefill
+  // println(f"SPP cross level refill: ${sppHasCrossLevelRefillOpt} ")
+  // sppHasCrossLevelRefillOpt match{
+  //   case Some(x) =>
+  //     val l3pf_RecvXbar = LazyModule(new PrefetchReceiverXbar(NumCores))
+  //     l2List.zipWithIndex.foreach {
+  //       case (l2, i) =>
+  //         l2.spp_send_node match {
+  //           case Some(l2Send) =>
+  //             l3pf_RecvXbar.inNode(i) := l2Send
+  //             println(f"spp_send_node${i} connecting to l3pf_RecvXbar")
+  //           case None =>
+  //       }
+  //     }
+  //     println(f"pf_l3recv_node connecting to l3pf_RecvXbar out")
+  //     l3.pf_l3recv_node.map(l3_recv =>  l3_recv:= l3pf_RecvXbar.outNode.head)
+  //   case None =>
+  // }
   val ctrl_node = TLClientNode(Seq(TLMasterPortParameters.v2(
       Seq(TLMasterParameters.v1(
         name = "ctrl",
@@ -163,11 +186,15 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
   }
 
   ram.node :=
+    mem_xbar :=*
     TLXbar() :=*
-      TLFragmenter(32, 64) :=*
-      TLCacheCork() :=*
-      TLDelayer(delayFactor) :=*
-      l3.node :=* l2xbar
+    TLFragmenter(32, 64) :=*
+    TLBuffer.chainNode(2) :=*
+    TLCacheCork() :=*
+    // TLDelayer(delayFactor) :=*
+    l3binder :*=
+    l3.node :*=
+    l2xbar
 
   lazy val module = new LazyModuleImp(this) with HasPerfEvents{
     master_nodes.zipWithIndex.foreach {
@@ -235,7 +262,15 @@ object TestTop_fullSys_4Core extends App {
   val top = DisableMonitors(p => LazyModule(new TestTop_fullSys_4Core()(p)))(config)
 
   (new ChiselStage).execute(Array("--target", "verilog") ++ args, Seq(
+    FirtoolOption("-O=release"),
+    FirtoolOption("--disable-all-randomization"),
+    FirtoolOption("--disable-annotation-unknown"),
+    FirtoolOption("--strip-debug-info"),
+    FirtoolOption("--lower-memories"),
+    FirtoolOption("--lowering-options=noAlwaysComb," +
+      " disallowPortDeclSharing, disallowLocalVariables," +
+      " emittedLineLength=120, explicitBitcast, locationInfoStyle=plain," +
+      " disallowExpressionInliningInPorts, disallowMuxInlining"),
     ChiselGeneratorAnnotation(() => top.module),
-    FirtoolOption("--disable-annotation-unknown")
   ))
 }
