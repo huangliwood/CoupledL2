@@ -536,6 +536,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
         */
         respKey =  Seq(PrefetchKey),
         enablePerf = true,
+        enableAssert = false,
         // sppMultiLevelRefill = None,
         // sppMultiLevelRefill = Some(coupledL2.prefetch.PrefetchReceiverParams()),
         /*must has spp, otherwise Assert Fail

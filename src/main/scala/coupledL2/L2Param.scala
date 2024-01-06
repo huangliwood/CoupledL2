@@ -82,7 +82,7 @@ case class L2Param
   replacement: String = "plru",
   mshrs: Int = 16,
   enableClockGate: Boolean = true,
-  dataEccCode: Option[String] = Some("secded"), // Option: "none", "identity", "parity", "sec", "secded"
+  dataEccCode: Option[String] = Some("none"), // Option: "none", "identity", "parity", "sec", "secded"
   releaseData: Int = 3,
   /* 0 for dirty alone
    * 1 for dirty and accessed
