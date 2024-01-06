@@ -621,7 +621,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
       Seq(
         M_SIMPLE_TIMELY -> s1_ghr_shareBO,
         M_SIMPLE_UNTIMELY -> (s1_ghr_shareBO.asUInt << 2.U).asSInt,
-        M_COMPLEX_TIMELY -> 0.S,
+        M_COMPLEX_TIMELY -> s1_ghr_shareBO,
         M_COMPLEX_UNTIMELY -> s1_ghr_shareBO
       )
     )
@@ -647,8 +647,8 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
       Seq(
         LOW_COV_LOW_ACC   -> "b0001".U,
         LOW_COV_HIGH_ACC  -> "b1111".U,
-        HIGH_COV_LOW_ACC  -> "b0000".U,
-        HIGH_COV_HIGH_ACC -> "b0011".U,
+        HIGH_COV_LOW_ACC  -> "b0001".U,
+        HIGH_COV_HIGH_ACC -> "b0001".U,
     )
   ))
   //FSM
@@ -974,7 +974,7 @@ class SignaturePathPrefetch(implicit p: Parameters) extends SPPModule {
 
 case class HyperPrefetchParams(
   fTableEntries: Int = 32,
-  fTableQueueEntries: Int = 256
+  fTableQueueEntries: Int = 128
 ) extends PrefetchParameters {
   override val hasPrefetchBit:  Boolean = true
   override val inflightEntries: Int = 32
