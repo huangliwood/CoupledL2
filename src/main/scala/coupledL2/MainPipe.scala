@@ -368,6 +368,10 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     } else {
       false.B
     }
+    // ,
+    // pfVec = if(meta_s3.pfVec.isDefined){
+    //   Mux(meta_s3.pfVec.get && dirResult_s3.hit, req_s3.pfVec.get, meta_s3.pfVec.get | req_s3.pfVec.get)
+    // }
   )
   val metaW_s3_b = Mux(req_s3.param === toN, MetaEntry(),
     MetaEntry(
@@ -452,11 +456,17 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     train.bits.set := req_s3.set
     train.bits.needT := req_needT_s3
     train.bits.source := req_s3.sourceId
+    if(cacheParams.enablePerf) { 
+      val prefetch_pf_hit = WireInit(task_s3.valid && req_prefetch_s3 && dirResult_s3.hit);dontTouch(prefetch_pf_hit)
+      val normal_pf_hit = WireInit(train.valid && dirResult_s3.hit);dontTouch(normal_pf_hit)
+      XSPerfAccumulate("mp_prefetch_pf_hit",prefetch_pf_hit)
+      XSPerfAccumulate("mp_normal_pf_hit",normal_pf_hit)
+    }
     train.bits.vaddr.foreach(_ := req_s3.vaddr.getOrElse(0.U))
     train.bits.state:= Mux(!dirResult_s3.hit, AccessState.MISS,
       Mux(!meta_s3.prefetch.get, AccessState.HIT, AccessState.PREFETCH_HIT))
-    train.bits.pfVec := PfSource.BOP_SPP
-    // train.bits.pfVec := Mux(!dirResult_s3.hit, PfSource.BOP_SPP, req_s3.pfVec.getOrElse(PfSource.NONE))
+    // train.bits.pfVec := PfSource.BOP_SPP
+    train.bits.pfVec := Mux(!dirResult_s3.hit, PfSource.BOP_SPP, meta_s3.pfVec.getOrElse(PfSource.BOP_SPP))
   }
   if(io.prefetchEvict.isDefined){
     val evict = io.prefetchEvict.get

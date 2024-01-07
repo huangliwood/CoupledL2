@@ -1573,13 +1573,17 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
   bop.io.train.bits := io.train.bits
   //TODO: need respALL ?
   //
-  // bop.io.resp.valid := io.resp.valid //&& io.resp.bits.hasBOP
-  // bop.io.resp.bits := io.resp.bits
-  // io.resp.ready := bop.io.resp.ready
-  val respQ = Module(new ReplaceableQueueV2(new PrefetchResp,4))
-  respQ.io.flush := false.B
-  respQ.io.enq <> fTable.io.out_respReq
-  bop.io.resp <>  respQ.io.deq
+  bop.io.resp.valid := io.resp.valid && io.resp.bits.hasBOP
+  bop.io.resp.bits := io.resp.bits
+  io.resp.ready := bop.io.resp.ready
+  fTable.io.in_respReq.valid := false.B
+  fTable.io.in_respReq.bits <> 0.U.asTypeOf(new PrefetchResp)
+  fTable.io.out_respReq.ready := false.B
+  // val respQ = Module(new ReplaceableQueueV2(new PrefetchResp,4))
+  // respQ.io.flush := false.B
+  // respQ.io.enq <> fTable.io.out_respReq
+  // bop.io.resp <>  respQ.io.deq
+  // fTable.io.in_respReq <> io.resp
 
   spp.io.resp := DontCare
   spp.io.from_ghr.valid := ghr_roundReset
@@ -1791,8 +1795,6 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
 
   fTable.io.in_trainReq.valid := io.train.valid
   fTable.io.in_trainReq.bits := io.train.bits
-
-  fTable.io.in_respReq <> io.resp
 
   fTable.io.is_hint2llc := q_hint2llc.io.deq.fire
   fTable.io.ctrl := ctrl_fitlerTableConfig
