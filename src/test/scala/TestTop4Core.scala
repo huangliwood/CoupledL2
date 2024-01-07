@@ -1,4 +1,5 @@
 package coupledL2
+import axi2tl.{AXI2TL, AXI2TLFragmenter, AXI2TLParam, AXI2TLParamKey}
 import circt.stage.{ChiselStage, FirtoolOption}
 import chisel3._
 import chisel3.util._
@@ -10,9 +11,10 @@ import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import coupledL2.prefetch._
 import coupledL2.utils.HasPerfEvents
-import huancun.{HuanCun, HCCacheParameters, HCCacheParamsKey, CacheParameters, CacheCtrl}
+import freechips.rocketchip.amba.axi4.{AXI4MasterNode, AXI4MasterParameters, AXI4MasterPortParameters}
+import huancun.{CacheCtrl, CacheParameters, HCCacheParameters, HCCacheParamsKey, HuanCun}
 import xs.utils.GTimer
-import xs.utils.perf.{DebugOptions,DebugOptionsKey}
+import xs.utils.perf.{DebugOptions, DebugOptionsKey}
 
 
 class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
@@ -72,9 +74,10 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
 
   // Create L1 nodes
   (0 until nrL2).foreach{ i =>
-    val idMax = 64
-    val l1d = createDCacheNode(s"l1d$i", idMax) 
-    val l1i = createICacheNode(s"l1i$i", idMax)
+    val dcache_idMax = 35
+    val icache_idMax = 13
+    val l1d = createDCacheNode(s"l1d$i", dcache_idMax)
+    val l1i = createICacheNode(s"l1i$i", icache_idMax)
     master_nodes = master_nodes ++ Seq(l1d, l1i)
 
     val xbar = TLXbar()
@@ -185,6 +188,16 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
     case(source, sink) => sink := source
   }
 
+  val AXI4idMax = 1000
+  val l3FrontendAXI4Node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
+    Seq(AXI4MasterParameters(
+      name = "dma",
+      id = IdRange(0, AXI4idMax),
+      maxFlight = Some(16)
+    ))
+  )))
+  l2xbar := TLBuffer() := AXI2TL(16, 16) := AXI2TLFragmenter() := l3FrontendAXI4Node
+
   ram.node :=
     mem_xbar :=*
     TLXbar() :=*
@@ -201,7 +214,7 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
       case (node, i) =>
         node.makeIOs()(ValName(s"master_port_$i"))
     }
-    // l3FrontendAXI4Node.makeIOs()(ValName("dma_port"))
+    l3FrontendAXI4Node.makeIOs()(ValName("dma_port"))
     ctrl_node.makeIOs()(ValName("cmo_port"))
     l3_ecc_int_sink.makeIOs()(ValName("l3_int_port"))
 
@@ -258,6 +271,7 @@ object TestTop_fullSys_4Core extends App {
       echoField = Seq(DirtyField())
     )
     case DebugOptionsKey => DebugOptions()
+    case AXI2TLParamKey => AXI2TLParam()
   })
   val top = DisableMonitors(p => LazyModule(new TestTop_fullSys_4Core()(p)))(config)
 
