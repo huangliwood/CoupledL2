@@ -260,7 +260,7 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
     s.valid && (s.bits.fromA || s.bits.fromC)
   }).asUInt) + grantQueueCnt >= mshrsAll.U - latency
   val noSpaceForMSHRReq = PopCount(VecInit(io.pipeStatusVec.map { case s =>
-    s.valid && s.bits.fromA
+    s.valid && (s.bits.fromA || s.bits.fromC)
   }).asUInt) + grantQueueCnt >= mshrsAll.U - latency
   // TODO: only block mp_grant and acuqire
   val noSpaceForWaitSinkE = PopCount(Cat(VecInit(io.pipeStatusVec.tail.map { case s =>
