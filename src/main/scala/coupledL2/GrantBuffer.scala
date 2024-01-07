@@ -253,7 +253,7 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
   // count the number of valid blocks + those in pipe that might use GrantBuf
   // so that GrantBuffer will not exceed capacity
   // TODO: we can still allow pft_resps (HintAck) to enter mainpipe
-  val toReqArb = WireInit(0.U.asTypeOf((io.toReqArb)))
+  val toReqArb = WireInit(0.U.asTypeOf(io.toReqArb))
   val latency = 1.U
 
   val noSpaceForSinkReq = PopCount(VecInit(io.pipeStatusVec.tail.map { case s =>
@@ -269,7 +269,7 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
 
   toReqArb.blockSinkReqEntrance.blockA_s1 := noSpaceForSinkReq || noSpaceForWaitSinkE
   toReqArb.blockSinkReqEntrance.blockB_s1 := Cat(inflight_grant.map(g => g.valid &&
-    g.bits.set === io.fromReqArb.status_s1.b_set && g.bits.tag === io.fromReqArb.status_s1.b_tag)).orR
+    g.bits.set === io.fromReqArb.status_s1.b_set && g.bits.tag === io.fromReqArb.status_s1.b_tag)).orR // TODO: has problem here when output add reg ?
   //TODO: or should we still Stall B req?
   // A-replace related rprobe is handled in SourceB
   toReqArb.blockSinkReqEntrance.blockC_s1 := noSpaceForSinkReq
@@ -277,6 +277,11 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
   toReqArb.blockMSHRReqEntrance := noSpaceForMSHRReq || noSpaceForWaitSinkE
 
   io.toReqArb := RegNext(toReqArb)
+
+  dontTouch(noSpaceForSinkReq)
+  dontTouch(noSpaceForMSHRReq)
+  dontTouch(noSpaceForWaitSinkE)
+  dontTouch(toReqArb)
 
   // =========== XSPerf ===========
   if (cacheParams.enablePerf) {
