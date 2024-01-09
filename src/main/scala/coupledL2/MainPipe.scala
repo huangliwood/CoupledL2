@@ -361,23 +361,38 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     meta_s3.alias.getOrElse(0.U),
     req_s3.alias.getOrElse(0.U)
   )
-  val metaW_s3_a = MetaEntry(
-    dirty = meta_s3.dirty,
-    state = Mux(req_needT_s3 || sink_resp_s3_a_promoteT, TRUNK, meta_s3.state),
-    clients = Fill(clientBits, true.B),
-    alias = Some(metaW_s3_a_alias),
-    accessed = true.B,
-    prefetch = if(meta_s3.prefetch.isDefined){
-      Mux(meta_s3.prefetch.get && dirResult_s3.hit, false.B, task_s3.bits.pfVec.get =/= PfSource.NONE | meta_s3.prefetch.get)
-    } else {
-      false.B
-    },
-    pfVec = if(meta_s3.pfVec.isDefined){
-      Mux(meta_s3.prefetch.get && dirResult_s3.hit, 0.U, task_s3.bits.pfVec.get | meta_s3.pfVec.get)
-    } else {
-      0.U
-    }
+  val metaW_valid_s3_a_prefetch_valid = WireInit(req_prefetch_s3)
+  val metaW_s3_a_prefetchUpdate = WireInit(meta_s3)
+  if(prefetchOpt.isDefined){
+    metaW_s3_a_prefetchUpdate.prefetch.get := Mux(metaW_s3_a_prefetchUpdate.pfVec.get =/= PfSource.NONE, true.B, false.B)
+    metaW_s3_a_prefetchUpdate.pfVec.get := Mux(meta_s3.prefetch.get && dirResult_s3.hit, 0.U, task_s3.bits.pfVec.get | meta_s3.pfVec.get)
+  }
+
+  val metaW_s3_a_normal = MetaEntry(
+      dirty = meta_s3.dirty,
+      state = Mux(req_needT_s3 || sink_resp_s3_a_promoteT, TRUNK, meta_s3.state),
+      clients = Fill(clientBits, true.B),
+      alias = Some(metaW_s3_a_alias),
+      accessed = true.B,
+      prefetch = if(meta_s3.prefetch.isDefined){
+        Mux(meta_s3.prefetch.get && dirResult_s3.hit, false.B, meta_s3.prefetch.get)
+      } else {
+        false.B
+      },
+      pfVec = if(meta_s3.pfVec.isDefined){
+        Mux(meta_s3.prefetch.get && dirResult_s3.hit, 0.U, task_s3.bits.pfVec.get | meta_s3.pfVec.get)
+      } else {
+        0.U
+      }
   )
+  val metaW_s3_a = WireInit(0.U.asTypeOf(new MetaEntry))
+  if(prefetchOpt.isDefined){
+    metaW_s3_a := Mux(metaW_valid_s3_a_prefetch_valid, metaW_s3_a_prefetchUpdate, metaW_s3_a_normal)
+  }else{
+    metaW_s3_a := metaW_s3_a_normal
+  }
+  
+
   val metaW_s3_b = Mux(req_s3.param === toN, MetaEntry(),
     MetaEntry(
       dirty = false.B,
