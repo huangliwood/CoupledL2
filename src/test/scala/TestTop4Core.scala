@@ -15,6 +15,7 @@ import freechips.rocketchip.amba.axi4.{AXI4MasterNode, AXI4MasterParameters, AXI
 import huancun.{CacheCtrl, CacheParameters, HCCacheParameters, HCCacheParamsKey, HuanCun}
 import xs.utils.GTimer
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
+import utils.{TLClientsMerger}
 
 
 class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
@@ -118,7 +119,7 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
     val binder = BankBinder(L2NBanks, L2BlockSize)
     l2binders = l2binders ++ Seq(binder)
 
-    l2xbar := TLBuffer.chainNode(2) := TLXbar() :=* binder :*= l2.node :*= l1xbars(i)
+    l2xbar := TLBuffer.chainNode(2) := TLClientsMerger() := TLXbar() :=* binder :*= l2.node :*= l1xbars(i)
 
     l2
   }
@@ -188,11 +189,11 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
     case(source, sink) => sink := source
   }
 
-  val AXI4idMax = 1000
+  val idBits = 13
   val l3FrontendAXI4Node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
     Seq(AXI4MasterParameters(
       name = "dma",
-      id = IdRange(0, AXI4idMax),
+      id = IdRange(0, 1 << idBits),
       maxFlight = Some(16)
     ))
   )))

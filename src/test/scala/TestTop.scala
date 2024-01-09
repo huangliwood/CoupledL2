@@ -598,7 +598,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
   val ctrl_node = TLClientNode(Seq(TLMasterPortParameters.v2(
       Seq(TLMasterParameters.v1(
         name = "ctrl",
-        sourceId = IdRange(0, 16),
+        sourceId = IdRange(0, 64),
         supportsProbe = TransferSizes.none
       )),
       channelBytes = TLChannelBeatBytes(8), // 64bits
