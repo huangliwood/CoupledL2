@@ -172,7 +172,7 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
     pftRespQueue.io.enq.valid := io.d_task.valid && dtaskOpcode === HintAck //&&io.d_task.bits.task.isfromL2pft && io.d_task.bits.task.pfVec.get === PfSource.BOP
     pftRespQueue.io.enq.bits.tag := io.d_task.bits.task.tag
     pftRespQueue.io.enq.bits.set := io.d_task.bits.task.set
-    pftRespQueue.io.enq.bits.pfVec := PfSource.BOP
+    pftRespQueue.io.enq.bits.pfVec := io.d_task.bits.task.pfVec.get
 
     val resp = io.prefetchResp.get
     resp.valid := pftRespQueue.io.deq.valid
@@ -180,7 +180,12 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
     resp.bits.set := pftRespQueue.io.deq.bits.set
     resp.bits.pfVec := pftRespQueue.io.deq.bits.pfVec
     pftRespQueue.io.deq.ready := resp.ready
-
+    if (cacheParams.enablePerf) {
+      XSPerfAccumulate("grant_resp_pfAll",  resp.valid)
+      XSPerfAccumulate("grant_resp_pf2sms", resp.valid && resp.bits.hasSMS)
+      XSPerfAccumulate("grant_resp_pf2bop", resp.valid && resp.bits.hasBOP)
+      XSPerfAccumulate("grant_resp_pf2spp", resp.valid && resp.bits.hasSPP)
+    }
     // assert(pftRespQueue.io.enq.ready, "pftRespQueue should never be full, no back pressure logic") // TODO: has bug here
   }
   // If no prefetch, there never should be HintAck
