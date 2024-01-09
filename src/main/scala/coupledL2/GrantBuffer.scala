@@ -178,7 +178,12 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
     resp.bits.set := pftRespQueue.io.deq.bits.set
     resp.bits.pfVec := pftRespQueue.io.deq.bits.pfVec
     pftRespQueue.io.deq.ready := resp.ready
-
+    if (cacheParams.enablePerf) {
+      XSPerfAccumulate("grant_resp_pfAll",  resp.valid)
+      XSPerfAccumulate("grant_resp_pf2sms", resp.valid && resp.bits.hasSMS)
+      XSPerfAccumulate("grant_resp_pf2bop", resp.valid && resp.bits.hasBOP)
+      XSPerfAccumulate("grant_resp_pf2spp", resp.valid && resp.bits.hasSPP)
+    }
     // assert(pftRespQueue.io.enq.ready, "pftRespQueue should never be full, no back pressure logic") // TODO: has bug here
   }
   // If no prefetch, there never should be HintAck
