@@ -669,6 +669,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   when(req_s3.fromA) {
     alloc_state.s_refill := false.B
     alloc_state.w_grantack := req_prefetch_s3 || req_get_s3
+    alloc_state.s_accessackdata := !req_get_s3
     alloc_state.w_replResp := dirResult_s3.hit // need replRead when NOT dirHit
     // need Acquire downwards
     when(need_acquire_s3_a) {

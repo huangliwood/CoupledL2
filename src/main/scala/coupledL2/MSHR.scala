@@ -506,8 +506,10 @@ class MSHR(implicit p: Parameters) extends L2Module {
     }
   }
 
-  when (e_resp.valid) {
+  when (e_resp.valid && e_resp.bits.opcode === GrantAck) {
     state_dups.foreach(_.w_grantack := true.B)
+  }.elsewhen(e_resp.valid && e_resp.bits.opcode === AccessAckData && e_resp.bits.last) {
+    state_dups.foreach(_.s_accessackdata := true.B)
   }
 
   val replResp = io.replResp.bits
@@ -544,7 +546,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
     timer := timer + 1.U
   }
   
-  val no_schedule = state_dups(0).s_refill && state_dups(0).s_probeack && state_dups(1).s_merge_probeack && state_dups(1).s_release // && state.s_triggerprefetch.getOrElse(true.B)
+  val no_schedule = state_dups(0).s_refill && state_dups(0).s_probeack && state_dups(1).s_merge_probeack && state_dups(1).s_release && state_dups(1).s_accessackdata // && state.s_triggerprefetch.getOrElse(true.B)
   val no_wait = state_dups(2).w_rprobeacklast && state_dups(2).w_pprobeacklast && state_dups(0).w_grantlast && state_dups(0).w_releaseack && state_dups(0).w_grantack && state_dups(1).w_replResp
   val will_free = no_schedule && no_wait
   when (will_free && req_valid_dups(1)) {
@@ -571,7 +573,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
   // wait for resps, high as valid
   io.status.bits.w_c_resp := !state_dups(3).w_rprobeacklast || !state_dups(3).w_pprobeacklast || !state_dups(0).w_pprobeack
   io.status.bits.w_d_resp := !state_dups(0).w_grantlast || !state_dups(0).w_grant || !state_dups(0).w_releaseack
-  io.status.bits.w_e_resp := !state_dups(0).w_grantack
+  io.status.bits.w_e_resp := !state_dups(0).w_grantack  || !state_dups(0).s_accessackdata
   io.status.bits.will_free := will_free
   io.status.bits.is_miss := !dirResult.hit
   io.status.bits.is_prefetch := req_prefetch
