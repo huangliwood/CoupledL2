@@ -59,24 +59,6 @@ trait HasChannelBits { this: Bundle =>
   def fromC = channel(2).asBool
 }
 
-object PfSource extends Enumeration {
-  val bits = 3
-  val NONE    = "b000".U(bits.W)
-  val SMS     = "b001".U(bits.W)
-  val BOP     = "b010".U(bits.W)
-  val SPP     = "b100".U(bits.W)
-  val BOP_SPP = "b110".U(bits.W)
-
-}
-object PfVectorConst extends {
-  val SMS = 0
-  val BOP = 1
-  val SPP = 2
-
-  val bits = 3
-  val DEFAULT = 0.U(bits.W)
-}
-
 // We generate a Task for every TL request
 // this is the info that flows in Mainpipe
 class TaskBundle(implicit p: Parameters) extends L2Bundle with HasChannelBits {

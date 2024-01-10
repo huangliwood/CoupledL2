@@ -226,19 +226,12 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
 
  val pf_recv_node: Option[BundleBridgeSink[PrefetchRecv]] = prefetchOpt match {
   case Some(receive: PrefetchReceiverParams) => Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
-  case Some(sms_sender_hyper: MCLPPrefetchParams) => Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
-  case Some(sms_sender_hyper: intel_spp.HyperPrefetchParams) => Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
+  case Some(sms_sender_hyper: HyperPrefetchParams) => Some(BundleBridgeSink(Some(() => new PrefetchRecv)))
   case _ => None
 }
 
   val spp_send_node: Option[BundleBridgeSource[LlcPrefetchRecv]] = prefetchOpt match {
-    case Some(hyper_pf: MCLPPrefetchParams) =>
-      sppMultiLevelRefillOpt match{
-        case Some(receive: PrefetchReceiverParams) =>
-          Some(BundleBridgeSource(() => new LlcPrefetchRecv()))
-        case _ => None
-      }
-    case Some(hyper_pf2: intel_spp.HyperPrefetchParams) =>
+    case Some(hyper_pf2: HyperPrefetchParams) =>
       sppMultiLevelRefillOpt match{
         case Some(receive: PrefetchReceiverParams) =>
           Some(BundleBridgeSource(() => new LlcPrefetchRecv()))
@@ -302,9 +295,7 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
     val prefetchTrains = prefetchOpt.map(_ => Wire(Vec(banks, DecoupledIO(new PrefetchTrain()(pftParams)))))
     val prefetchResps = prefetchOpt.map(_ => Wire(Vec(banks, DecoupledIO(new PrefetchResp()(pftParams)))))
     val prefetchEvicts = prefetchOpt.map({
-      case hyper : MCLPPrefetchParams =>
-        Some( Wire(Vec(banks, DecoupledIO(new PrefetchEvict()(pftParams)))))
-      case hyper2 : intel_spp.HyperPrefetchParams =>
+      case hyper2 : HyperPrefetchParams =>
         Some( Wire(Vec(banks, DecoupledIO(new PrefetchEvict()(pftParams)))))
       case _ => None
     })

@@ -27,8 +27,7 @@ import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink.TLPermissions._
 import coupledL2.utils._
 import coupledL2.debug._
-import coupledL2.prefetch.{AccessState, PrefetchEvict, PrefetchTrain}
-import coupledL2.prefetch.MCLPPrefetchParams
+import coupledL2.prefetch.{AccessState, PrefetchEvict, PrefetchTrain,HyperPrefetchParams}
 import xs.utils.perf.HasPerfLogging
 
 class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with HasPerfEvents{
@@ -99,9 +98,6 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
       val data = new DSBlock
     })
 
-    /* send to sinkA and req_buffer to count stall */
-    val mpInfo = Vec(2, ValidIO(new MainPipeInfo))
-
     /* write dir, including reset dir */
     val metaWReq = ValidIO(new MetaWrite)
     val tagWReq = ValidIO(new TagWrite)
@@ -119,8 +115,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     val prefetchTrain = prefetchOpt.map(_ => DecoupledIO(new PrefetchTrain))
     val prefetchEvict = if(prefetchOpt.isDefined){
       prefetchOpt.get match{
-        case hyper: MCLPPrefetchParams => Some(DecoupledIO(new PrefetchEvict))
-        case hyper2: prefetch.intel_spp.HyperPrefetchParams => Some(DecoupledIO(new PrefetchEvict))
+        case hyper2: HyperPrefetchParams => Some(DecoupledIO(new PrefetchEvict))
         case _ => None
       }
     } else {
@@ -488,7 +483,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     XSPerfAccumulate("mp_prefetch_pf_hit",prefetch_pf_hit)
     XSPerfAccumulate("mp_normal_pf_hit",normal_pf_hit)
     train.bits.state:= Mux(!dirResult_s3.hit, AccessState.MISS,
-      Mux(meta_s3.pfVec.get === PfSource.NONE, AccessState.HIT, AccessState.PREFETCH_HIT))
+      Mux(meta_s3.pfVec.get === PfSource.NONE, AccessState.DEMAND_HIT, AccessState.PREFETCH_HIT))
     train.bits.pfVec := Mux(!dirResult_s3.hit, PfSource.BOP_SPP, meta_s3.pfVec.getOrElse(PfSource.BOP_SPP))
 
     if(cacheParams.enablePerf) { 

@@ -106,7 +106,6 @@ class PrefetchIO(implicit p: Parameters) extends PrefetchBundle {
   val recv_addr = Flipped(ValidIO(UInt(64.W)))
   val evict = prefetchOpt.get match {
     case hyper: HyperPrefetchParams => Some(Flipped(DecoupledIO(new PrefetchEvict)))
-    case hyper: MCLPPrefetchParams => Some(Flipped(DecoupledIO(new PrefetchEvict)))
     case _ => None
   }
   val hint2llc = if(sppMultiLevelRefillOpt.nonEmpty) Some(ValidIO(new PrefetchReq)) else None
@@ -252,6 +251,6 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
   XSPerfAccumulate("prefetch_train", io.train.fire)
   XSPerfAccumulate("prefetch_train_on_miss", io.train.fire && io.train.bits.state === AccessState.MISS)
   XSPerfAccumulate("prefetch_train_on_pf_hit", io.train.fire && io.train.bits.state === AccessState.PREFETCH_HIT)
-  XSPerfAccumulate("prefetch_train_on_cache_hit", io.train.fire && io.train.bits.state === AccessState.HIT)
+  XSPerfAccumulate("prefetch_train_on_cache_hit", io.train.fire && io.train.bits.state === AccessState.DEMAND_HIT)
   XSPerfAccumulate("prefetch_send2_pfq", io.req.fire)
 }

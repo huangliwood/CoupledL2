@@ -321,7 +321,6 @@ class BestOffsetPrefetch(implicit p: Parameters) extends BOPModule with HasPerfL
   io.train.ready := scoreTable.io.req.ready && (!req_valid || io.req.ready)
   io.resp.ready := true.B;dontTouch(io.resp.ready)
   io.shareBO := RegNext(prefetchOffset.asSInt,0.S)
-  respQueue.io.deq.ready := rrTable.io.w.ready
 
   for (off <- offsetList) {
     if (off < 0) {

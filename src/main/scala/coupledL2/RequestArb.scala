@@ -61,9 +61,6 @@ class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging wi
     /* status of each pipeline stage */
     val status_s1 = Output(new PipeEntranceStatus) // set & tag of entrance status
     val status_vec = Vec(2, ValidIO(new PipeStatus)) // whether this stage will flow into SourceD
-
-    /* send to sinkA and req_buffer to count stall */
-    val mpInfo = Vec(1, ValidIO(new MainPipeInfo))
     
     /* handle set conflict, capacity conflict */
     val fromMSHRCtl = Input(new BlockInfo())

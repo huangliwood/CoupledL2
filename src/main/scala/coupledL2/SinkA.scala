@@ -61,7 +61,7 @@ class SinkA(entries: Int)(implicit p: Parameters) extends L2Module with HasPerfL
     task.aliasTask.foreach(_ := false.B)
     task.useProbeData := false.B
     task.pfVec.foreach(_ := PfSource.NONE)
-    task.needHint.foreach(_ := a.data(0))
+    task.needHint.foreach(_ := true.B )//a.data(0))
     // task.needHint.foreach(_ := true.B)
     task.dirty := false.B
     task.way := 0.U(wayBits.W)
