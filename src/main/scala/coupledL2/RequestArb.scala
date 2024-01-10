@@ -222,17 +222,6 @@ class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging wi
 
   dontTouch(io)
 
-  def TaskBundletoMainPipeInfo(task: TaskBundle): MainPipeInfo = {
-    val info = Wire(new MainPipeInfo)
-    info.reqTag := task.tag
-    info.set := task.set
-    info.isPrefetch := task.opcode === Hint
-    info.channel := task.channel
-    info
-  }
-  io.mpInfo(0).valid := task_s1.valid
-  io.mpInfo(0).bits := TaskBundletoMainPipeInfo(task_s1.bits)
-
   // Performance counters
   if(cacheParams.enablePerf) {
     XSPerfAccumulate("mshr_req", mshr_task_s0.valid)

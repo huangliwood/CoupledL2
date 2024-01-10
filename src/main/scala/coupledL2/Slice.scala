@@ -53,7 +53,7 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
   val directory = Module(new Directory(parentName + "dir_"))
   val dataStorage = Module(new DataStorage(parentName + "data_"))
   val refillUnit = Module(new RefillUnit())
-  val sinkA = Module(new SinkA(entries = reqBuf_entries))
+  val sinkA = Module(new SinkA)
   val sinkB = Module(new SinkB)
   val sinkC = Module(new SinkC)
   val sourceC = Module(new SourceC)
@@ -145,6 +145,7 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
   grantBuf.io.d_task <> mainPipe.io.toSourceD
   grantBuf.io.fromReqArb.status_s1 := reqArb.io.status_s1
   grantBuf.io.pipeStatusVec := reqArb.io.status_vec ++ mainPipe.io.status_vec_toD
+  grantBuf.io.hintDup := a_reqBuf.io.hintDup
   mshrCtl.io.pipeStatusVec(0) := reqArb.io.status_vec(1) // s2 status
   mshrCtl.io.pipeStatusVec(1) := mainPipe.io.status_vec_toD(0) // s3 status
 

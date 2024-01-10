@@ -172,7 +172,7 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
         val pfVec = UInt(PfVectorConst.bits.W)
       },
       entries = 16))
-    val latePftRespQueue = Module(new ReplaceableQueueV2(new Bundle() {
+    val latePftRespQueue = Module(new Queue(new Bundle() {
             val tag = UInt(tagBits.W)
             val set = UInt(setBits.W)
             val pfVec = prefetchOpt.map(_ => UInt(PfVectorConst.bits.W))
@@ -198,7 +198,12 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
     toPftArb.io.in(0) <> pftRespQueue.io.deq
     toPftArb.io.in(1) <> latePftRespQueue.io.deq
     io.prefetchResp.get <> toPftArb.io.out
-
+    if (cacheParams.enablePerf) {
+      XSPerfAccumulate("grant_resp_pfAll",  io.prefetchResp.get.valid)
+      XSPerfAccumulate("grant_resp_pf2sms", io.prefetchResp.get.valid && io.prefetchResp.get.bits.hasSMS)
+      XSPerfAccumulate("grant_resp_pf2bop", io.prefetchResp.get.valid && io.prefetchResp.get.bits.hasBOP)
+      XSPerfAccumulate("grant_resp_pf2spp", io.prefetchResp.get.valid && io.prefetchResp.get.bits.hasSPP)
+    }
     // assert(latePftRespQueue.io.enq.ready, "latePftRespQueue should never be full, no back pressure logic") // TODO: has bug here
     // assert(pftRespQueue.io.enq.ready, "pftRespQueue should never be full, no back pressure logic") // TODO: has bug here
   }
