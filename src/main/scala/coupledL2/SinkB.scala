@@ -157,10 +157,11 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
 
   val mergeB_mshr = WireInit(io.msInfo(io.bMergeTask.bits.id))
   val mergeB_task = WireInit(io.bMergeTask.bits.task)
-  val s_mergeB = mergeB_mshr.valid && mergeB_mshr.bits.metaTag === mergeB_task.tag && mergeB_mshr.bits.set === mergeB_task.set && mergeB_mshr.bits.mergeB
+  val s_mergeB_for_mergeB_task = mergeB_mshr.valid && mergeB_mshr.bits.metaTag === mergeB_task.tag && mergeB_mshr.bits.set === mergeB_task.set && mergeB_mshr.bits.mergeB
+  val s_mergeB_for_task = mergeBMask(io.task.bits)
 
-  val io_task_can_valid = !s_addrConflict && !s_replaceConflict && !s_mergeB
-  val io_bMergeTask_can_valid = s_mergeB
+  val io_task_can_valid = !s_addrConflict && !s_replaceConflict && !s_mergeB_for_task
+  val io_bMergeTask_can_valid = s_mergeB_for_mergeB_task
   if(cacheParams.enableAssert) {
     when(io.task.fire){
       assert(io_task_can_valid, "io_task cant valid")
@@ -172,7 +173,8 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
     dontTouch(s_replaceConflict)
     dontTouch(mergeB_mshr)
     dontTouch(mergeB_task)
-    dontTouch(s_mergeB)
+    dontTouch(s_mergeB_for_mergeB_task)
+    dontTouch(s_mergeB_for_task)
     dontTouch(io_task_can_valid)
     dontTouch(io_bMergeTask_can_valid)
   }
@@ -184,8 +186,8 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
   }.elsewhen(io.task.fire) {
     task_retry_count := 0.U
   }
-  when(task_retry_count === 500.U) {
-    assert(false.B, "sinkB retry over 500")
+  when(task_retry_count >= 2000.U) {
+    assert(false.B, "sinkB retry timeout")
   }
 
   if(cacheParams.enablePerf) {
