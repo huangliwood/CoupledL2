@@ -135,7 +135,7 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
   task_retry.bits := taskOutPipe.bits
   when(task_retry.valid){ assert(task_retry.ready, "taskRetryPipe can be full when enq.valid, no back pressure logic") }
   // task can pass (retry override io.b)
-  val task_out_ready = task_mergeB || (task_temp.ready && !task_addrConflict && !task_replaceConflict && !task_s3AddrConflict)
+  val task_out_ready = (task_mergeB && !task_s3AddrConflict) || (task_temp.ready && !task_addrConflict && !task_replaceConflict && !task_s3AddrConflict)
   io.b.ready :=  task_out_ready && !taskRetryPipe.valid
   taskRetryPipe.ready := task_out_ready
 
@@ -143,7 +143,7 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
   dontTouch(task_retry)
 
   val bMergeTask = Wire(Decoupled(new BMergeTask))
-  bMergeTask.valid := io.b.valid && task_mergeB && !task_s3AddrConflict
+  bMergeTask.valid := (io.b.valid || taskRetryPipe.valid) && task_mergeB && !task_s3AddrConflict
   bMergeTask.bits.id := task_mergeBId
   bMergeTask.bits.task := task
   val bMergeTaskOutPipe = Queue(bMergeTask, entries = 1, pipe = true, flow = false) // for timing: mshrCtl <> sinkB <> mshrCtl
