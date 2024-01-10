@@ -32,7 +32,7 @@ import xs.utils.mbist.{MBISTInterface, MBISTPipeline}
 import xs.utils.perf.{DebugOptionsKey, HasPerfLogging}
 import xs.utils.sram.SRAMTemplate
 import coupledL2.utils.HasPerfEvents
-import prefetch.{SPPParameters, MCLPPrefetchParams}
+import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 
 trait HasCoupledL2Parameters {
   val p: Parameters
@@ -252,9 +252,11 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
       }
     case _ => None //Spp not exist, can not use multl-level refill
   }
+  val device = new SimpleDevice("l2", Seq("xiangshan,cpl2"))
+  val intNode = IntSourceNode(IntSourcePortSimple(resources = device.int))
 
-  lazy val module = new CoupledL2Impl
-  class CoupledL2Impl extends LazyModuleImp(this) with HasPerfLogging with HasPerfEvents{
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) with HasPerfLogging with HasPerfEvents{
     val banks = node.in.size
     val bankBits = if (banks == 1) 0 else log2Up(banks)
     val io = IO(new Bundle {
@@ -390,10 +392,18 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
             s.req.valid := p.io.req.valid && bank_eq(p.io.req.bits.set, i, bankBits)
             s.req.bits := p.io.req.bits
             prefetchReqsReady(i) := s.req.ready && bank_eq(p.io.req.bits.set, i, bankBits)
-            val train = Pipeline(s.train)
-            val resp = Pipeline(s.resp)
-            prefetchTrains.get(i) <> train
-            prefetchResps.get(i) <> resp
+
+            val s1_train = RegEnable(s.train.bits, 0.U.asTypeOf(new PrefetchTrain()(pftParams)), s.train.valid)
+            val s1_resp  = RegEnable(s.resp.bits, 0.U.asTypeOf(new PrefetchResp()(pftParams)), s.resp.valid)
+            //pf train
+            prefetchTrains.get(i).valid := RegNext(s.train.valid, false.B)
+            prefetchTrains.get(i).bits := s1_train
+            s.train.ready := prefetchTrains.get(i).ready
+            //pf resp
+            prefetchResps.get(i).valid := RegNext(s.resp.valid, false.B)
+            prefetchResps.get(i).bits := s1_resp
+            s.resp.ready := prefetchResps.get(i).ready
+
             prefetchEvicts.foreach({
                   case Some(evict_wire) => 
                     val s_evict = Pipeline(s.evict.get)
@@ -411,10 +421,12 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
             // restore to full address
             if(bankBits != 0){
               val train_full_addr = Cat(
-                train.bits.tag, train.bits.set, i.U(bankBits.W), 0.U(offsetBits.W)
+                s1_train.tag, s1_train.set, i.U(bankBits.W), 0.U(offsetBits.W)
               )
               val (train_tag, train_set, _) = s.parseFullAddress(train_full_addr)
-              val resp_full_addr = Cat(resp.bits.tag, resp.bits.set, i.U(bankBits.W), 0.U(offsetBits.W))
+              val resp_full_addr = Cat(
+                s1_resp.tag, s1_resp.set, i.U(bankBits.W), 0.U(offsetBits.W)
+              )
               val (resp_tag, resp_set, _) = s.parseFullAddress(resp_full_addr)
               prefetchTrains.get(i).bits.tag := train_tag
               prefetchTrains.get(i).bits.set := train_set
@@ -425,6 +437,12 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
 
         slice
     }
+
+    // TODO: config reg for ECC (enable or disable)
+    val slicesECC = VecInit(slices.map( s => RegNext(s.io.eccError)))
+    val hasECCError = Cat(slicesECC.asUInt).orR
+    intNode.out.foreach(int => int._1.foreach(_ := hasECCError))
+    intNode.out.foreach(i => dontTouch(i._1))
 
     private val mbistPl = MBISTPipeline.PlaceMbistPipeline(Int.MaxValue,
       s"${parentName}_mbistPipe",

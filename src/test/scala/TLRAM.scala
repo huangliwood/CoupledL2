@@ -110,13 +110,8 @@ class TLRAM(
 
     val indexBits = (outer.address.mask & ~(beatBytes-1)).bitCount
     val width = code.width(eccBytes*8)
-    val lanes = beatBytes/eccBytes // eccBytes表示多少个byte进行一个ecc保护, 对于没有ECC，lanes = beatBytes = 32
-    // val mem = makeSinglePortedByteWriteSeqMem(
-    //   // size = BigInt(1) << indexBits,
-    //   size = BigInt(1) << 1,
-    //   lanes = lanes, // 将一个beatBytes分成了很多个lanes
-    //   bits = width) // mem的存储组成为Vec(32, UInt(8.W))
-    println(s"[TLRAM] width: ${width} lanes:${lanes} indexBits:${indexBits} beatBytes:${beatBytes}")
+    val lanes = beatBytes/eccBytes 
+    println(s"[TLRAM] width: ${width} lanes:${lanes} indexBits:${indexBits} beatBytes:${beatBytes} eccBytes:${eccBytes}")
     val eccCode = Some(ecc.code)
     val address = outer.address
     val laneDataBits = eccBytes * 8
@@ -267,14 +262,12 @@ class TLRAM(
 
     // Does the D stage want to perform a write?
     // It's important this reduce to false.B when eccBytes=1 && atomics=false && canCorrect=false
-    // D stage 需要写入的时候，d_wb就会拉高，PutPartial、Atomic、或者ECC报错(need_fix)的时候
     val d_wb = d_full && (d_sublane || d_atomic || (d_read && d_need_fix))
     // Formulate an R response unless there is a data output fix to perform
     // It's important this reduce to false.B for sramReg and true.B for !code.canCorrect
     val r_respond = !sramReg.B && (!r_need_fix || !(r_read || r_atomic))
     // Resolve WaW and WaR hazard when D performs an update (only happens on ECC correction)
     // It's important this reduce to false.B unless code.canDetect
-    // D Stage 遇到了ECC错误，需要fix，此时R Stage就不能取读取SRAM
     val r_replay = RegNext(r_full && d_full && d_read && d_need_fix)
     // r_full && d_wb => read ecc fault (we insert a buble for atomic/sublane)
     assert (!(r_full && d_wb) || (d_full && d_read && d_need_fix))
@@ -350,7 +343,6 @@ class TLRAM(
     val a_ren = a_read || a_atomic || a_sublane
     val r_ren = r_read || r_atomic || r_sublane
     val wen = d_wb || Mux(r_replay, !r_ren, a_fire && !a_ren) // val d_wb = d_full && (d_sublane || d_atomic || (d_read && d_need_fix))
-    // A Stage 请求进来的时候，且R和D Stage都不需要操作SRAM，就可以顺利在A Stage读取数据
     val ren = !wen && (a_fire || r_replay) // help Chisel infer a RW-port
 
     val addr   = Mux(d_wb, d_address, Mux(r_replay, r_address, in.a.bits.address))
@@ -371,7 +363,7 @@ class TLRAM(
 
     val split = beatBytes / 8 // for beatByte = 32-byte ==> split = 4
     val bankByte = 64 // 64-bit
-    r_raw_data := {
+    r_raw_data := RegNext({
       val mems = (0 until split).map {_ => Module(new RAMHelper(bankByte))}
       mems.zipWithIndex map { case (mem, i) =>
         mem.clk   := clock
@@ -379,12 +371,12 @@ class TLRAM(
         mem.rIdx  := (index << log2Up(split)) + i.U
         mem.wIdx  := (index << log2Up(split)) + i.U
         mem.wdata := coded.asUInt((i + 1) * 64 - 1, i * 64) // in.w.bits.data((i + 1) * 64 - 1, i * 64) // 0~63, 64~127
-        mem.wmask := MaskExpand(sel)
+        mem.wmask := MaskExpand(sel).asUInt((i + 1) * 64 - 1, i * 64)
         mem.wen   := wen
       }
       val rdata = mems.map {mem => mem.rdata}
       Cat(rdata.reverse).asTypeOf(r_raw_data.cloneType)
-    }
+    }) holdUnless RegNext(ren)
 
     // Tie off unused channels
     in.b.valid := false.B

@@ -27,8 +27,9 @@ import freechips.rocketchip.tilelink.TLMessages._
 import xs.utils.mbist.MBISTPipeline
 import xs.utils.perf.HasPerfLogging
 import xs.utils.sram.SRAMTemplate
+import chisel3.util.random.LFSR
 
-class MetaEntry(implicit p: Parameters) extends L2Bundle {
+class MetaEntryWithoutPfVec(implicit p: Parameters) extends L2Bundle {
   val dirty = Bool()
   val state = UInt(stateBits.W)
   val clients = UInt(clientBits.W)  // valid-bit of clients
@@ -41,6 +42,44 @@ class MetaEntry(implicit p: Parameters) extends L2Bundle {
   def =/=(entry: MetaEntry): Bool = {
     this.asUInt =/= entry.asUInt
   }
+
+  def toMetaEntry(pfVec: UInt) = {
+    val entry = Wire(new MetaEntry)
+    entry.dirty := dirty
+    entry.state := state
+    entry.clients := clients
+    entry.alias.foreach(_ := alias.getOrElse(0.U))
+    entry.prefetch.foreach(_ := prefetch.getOrElse(false.B))
+    entry.pfVec.foreach(_ := pfVec)
+    entry.accessed := accessed
+    entry
+  }
+}
+
+class MetaEntry(implicit p: Parameters) extends L2Bundle {
+  val dirty = Bool()
+  val state = UInt(stateBits.W)
+  val clients = UInt(clientBits.W)  // valid-bit of clients
+  // TODO: record specific state of clients instead of just 1-bit
+  val alias = aliasBitsOpt.map(width => UInt(width.W)) // alias bits of client
+  val prefetch = if (hasPrefetchBit) Some(Bool()) else None // whether block is prefetched
+  val pfVec = if (hasPrefetchBit)  prefetchOpt.map(_ => UInt(PfVectorConst.bits.W)) else None // prefetch state
+  val accessed = Bool()
+
+  def =/=(entry: MetaEntry): Bool = {
+    this.asUInt =/= entry.asUInt
+  }
+
+  def toWithoutPfVec() = {
+    val entry = Wire(new MetaEntryWithoutPfVec)
+    entry.dirty := dirty
+    entry.state := state
+    entry.clients := clients
+    entry.alias.foreach(_ := alias.getOrElse(0.U))
+    entry.prefetch.foreach(_ := prefetch.getOrElse(false.B))
+    entry.accessed := accessed
+    entry
+  }
 }
 
 object MetaEntry {
@@ -49,7 +88,8 @@ object MetaEntry {
     init
   }
   def apply(dirty: Bool, state: UInt, clients: UInt, alias: Option[UInt],
-            prefetch: Bool = false.B, pfVec: UInt = PfSource.NONE, accessed: Bool = false.B)(implicit p: Parameters) = {
+//            prefetch: Bool = false.B, accessed: Bool = false.B)(implicit p: Parameters) = {
+             prefetch: Bool = false.B, pfVec: UInt = PfVectorConst.DEFAULT, accessed: Bool = false.B)(implicit p: Parameters) = {
     val entry = Wire(new MetaEntry)
     entry.dirty := dirty
     entry.state := state
@@ -61,6 +101,7 @@ object MetaEntry {
     entry
   }
 }
+
 
 class DirRead(implicit p: Parameters) extends L2Bundle {
   val tag = UInt(tagBits.W)
@@ -92,7 +133,7 @@ class ReplacerResult(implicit p: Parameters) extends L2Bundle {
   val retry = Bool()
 }
 
-class MetaWrite(implicit p: Parameters) extends L2Bundle with HasChannelBits{
+class MetaWrite(implicit p: Parameters) extends L2Bundle with HasChannelBits {
   val set = UInt(setBits.W)
   val wayOH = UInt(cacheParams.ways.W)
   val wmeta = new MetaEntry
@@ -126,12 +167,15 @@ class Directory(parentName: String = "Unknown")(implicit p: Parameters) extends 
   dontTouch(debug_addr_replResp)
 
 
-  def invalid_way_sel(metaVec: Seq[MetaEntry], repl: UInt) = {
+  def invalid_way_sel(metaVec: Seq[MetaEntryWithoutPfVec], repl: UInt) = {
     val invalid_vec = metaVec.map(_.state === MetaData.INVALID)
     val has_invalid_way = Cat(invalid_vec).orR
     val way = ParallelPriorityMux(invalid_vec.zipWithIndex.map(x => x._1 -> x._2.U(wayBits.W)))
     (has_invalid_way, way)
   }
+
+  val pfVecResp = WireInit(PfVectorConst.DEFAULT)
+  val pfVecReplResp = WireInit(PfVectorConst.DEFAULT)
 
   val sets = cacheParams.sets
   val ways = cacheParams.ways
@@ -144,11 +188,12 @@ class Directory(parentName: String = "Unknown")(implicit p: Parameters) extends 
   val tagArray  = Module(new BankedSRAM(UInt(tagBits.W), sets, ways, banks, singlePort = true,
     hasMbist = cacheParams.hasMbist, hasShareBus = cacheParams.hasShareBus,
     enableClockGate = enableClockGate, parentName = parentName + "tag_"))
-  val metaArray = Module(new SRAMTemplate(new MetaEntry, sets, ways, singlePort = true,
+  val metaArray = Module(new SRAMTemplate(new MetaEntryWithoutPfVec, sets, ways, singlePort = true,
     hasMbist = cacheParams.hasMbist, hasShareBus = cacheParams.hasShareBus,
     hasClkGate = enableClockGate, parentName = parentName + "meta_"))
+
   val tagRead = Wire(Vec(ways, UInt(tagBits.W)))
-  val metaRead = Wire(Vec(ways, new MetaEntry()))
+  val metaRead = Wire(Vec(ways, new MetaEntryWithoutPfVec()))
 
   val resetFinish = RegInit(false.B)
   val resetIdx = RegInit((sets - 1).U)
@@ -194,7 +239,7 @@ class Directory(parentName: String = "Unknown")(implicit p: Parameters) extends 
   metaRead := metaArray.io.r(io.read.fire, io.read.bits.set).resp.data
   metaArray.io.w(
     metaWen,
-    io.metaWReq.bits.wmeta,
+    io.metaWReq.bits.wmeta.toWithoutPfVec(),
     io.metaWReq.bits.set,
     io.metaWReq.bits.wayOH
   )
@@ -209,7 +254,13 @@ class Directory(parentName: String = "Unknown")(implicit p: Parameters) extends 
   val hitWay = OHToUInt(hitVec)
   val replaceWay = WireInit(UInt(wayBits.W), 0.U)
   val (inv, invalidWay) = invalid_way_sel(metaAll_s3, replaceWay)
-  val chosenWay = Mux(inv, invalidWay, replaceWay)
+
+  val useRandomWay = RegInit(false.B)
+  val failedSet = RegInit(0.U(setBits.W))
+  val failedSetMatch = req_s3.set === failedSet
+  val randomWay = LFSR(ways)
+  
+  val chosenWay = Mux(inv, invalidWay, Mux(useRandomWay && failedSetMatch, randomWay, replaceWay))
   // if chosenWay not in wayMask, then choose a way in wayMask
   // TODO: consider remove this is not used for better timing
   val finalWay = Mux(
@@ -227,7 +278,7 @@ class Directory(parentName: String = "Unknown")(implicit p: Parameters) extends 
 
   io.resp.hit   := hit_s3
   io.resp.way   := way_s3
-  io.resp.meta  := meta_s3
+  io.resp.meta  := meta_s3.toMetaEntry(pfVecResp)
   io.resp.tag   := tag_s3
   io.resp.set   := set_s3
   io.resp.error := false.B  // depends on ECC
@@ -247,7 +298,7 @@ class Directory(parentName: String = "Unknown")(implicit p: Parameters) extends 
   // we cancel the Grant and let it retry
   // TODO: timing?
   val wayConflictMask = VecInit(io.msInfo.map(s =>
-    s.valid && s.bits.set === req_s3.set && (s.bits.releaseNotSent || s.bits.dirHit) && s.bits.way === finalWay
+    s.valid && s.bits.set === req_s3.set && (s.bits.blockRefill || s.bits.dirHit) && s.bits.way === finalWay
   )).asUInt
   val refillRetry = wayConflictMask.orR
 
@@ -270,9 +321,31 @@ class Directory(parentName: String = "Unknown")(implicit p: Parameters) extends 
   io.replResp.bits.tag := tagAll_s3(finalWay)
   io.replResp.bits.set := req_s3.set
   io.replResp.bits.way := finalWay
-  io.replResp.bits.meta := metaAll_s3(finalWay)
+  io.replResp.bits.meta := metaAll_s3(finalWay).toMetaEntry(pfVecReplResp)
   io.replResp.bits.mshrId := req_s3.mshrId
   io.replResp.bits.retry := refillRetry
+
+  val refillRetryContinusCnt = RegInit(0.U(8.W))
+  val RefillRetryMAX = 10
+  val lastRefillRetry = RegEnable(refillRetry, false.B, io.replResp.valid)
+  dontTouch(lastRefillRetry)
+  dontTouch(refillRetry)
+
+  when(refillRetry && lastRefillRetry) {
+    refillRetryContinusCnt := refillRetryContinusCnt + 1.U
+  }.otherwise {
+    refillRetryContinusCnt := 0.U
+  }
+
+  when(refillRetryContinusCnt >= RefillRetryMAX.U) {
+    useRandomWay := true.B
+    failedSet := req_s3.set
+  }
+
+  when(useRandomWay && failedSetMatch) {
+    useRandomWay := false.B
+    refillRetryContinusCnt := 0.U
+  }
 
   /* ====== Update ====== */
   // update replacer only when A hit or refill, at stage 3
@@ -333,6 +406,19 @@ class Directory(parentName: String = "Unknown")(implicit p: Parameters) extends 
     )
   }
 
+  if (prefetchOpt.isDefined) {
+    val pfVecArray = RegInit(VecInit(Seq.fill(sets)(VecInit(Seq.fill(ways)(0.U.asTypeOf(UInt(PfVectorConst.bits.W)))))))
+    when(metaWen) {
+      pfVecArray(io.metaWReq.bits.set)(OHToUInt(io.metaWReq.bits.wayOH)) := io.metaWReq.bits.wmeta.pfVec.get
+    }
+    val result = RegInit(VecInit(Seq.fill(ways)(0.U.asTypeOf(UInt(PfVectorConst.bits.W)))))
+    when(reqValid_s2){
+      result := pfVecArray(req_s2.set)
+    }
+    pfVecResp := result(way_s3)
+    pfVecReplResp := result(finalWay)
+  }
+
   /* ====== Reset ====== */
   when(resetIdx === 0.U) {
     resetFinish := true.B
@@ -341,8 +427,12 @@ class Directory(parentName: String = "Unknown")(implicit p: Parameters) extends 
     resetIdx := resetIdx - 1.U
   }
 
-  XSPerfAccumulate("dirRead_cnt", io.read.fire)
-  XSPerfAccumulate("choose_busy_way", reqValid_s3 && !req_s3.wayMask(chosenWay))
-  XSPerfAccumulate("dirWrite_all",io.metaWReq.valid && io.metaWReq.bits.fromA)
-  XSPerfAccumulate("dirWrite_fromPrefetch",io.metaWReq.valid && io.metaWReq.bits.fromA && io.metaWReq.bits.wmeta.prefetch.get)
+  if (cacheParams.enablePerf) {
+    XSPerfAccumulate("dirRead_cnt", io.read.fire)
+    XSPerfAccumulate("choose_busy_way", reqValid_s3 && !req_s3.wayMask(chosenWay))
+    XSPerfAccumulate("dirWrite_all",io.metaWReq.valid && io.metaWReq.bits.fromA)
+    if(hasPrefetchBit){
+        XSPerfAccumulate("dirWrite_fromPrefetch",io.metaWReq.valid && io.metaWReq.bits.fromA && io.metaWReq.bits.wmeta.prefetch.get)
+    }
+  }
 }

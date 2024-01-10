@@ -29,7 +29,7 @@ case class BOPParameters(
   rrTableEntries: Int = 256,
   rrTagBits:      Int = 12,
   scoreBits:      Int = 5,
-  roundMax:       Int = 4,
+  roundMax:       Int = 31,
   badScore:       Int = 1,
   offsetList: Seq[Int] = Seq(
     -32, -30, -27, -25, -24, -20, -18, -16, -15,
@@ -189,7 +189,7 @@ class OffsetScoreTable(implicit p: Parameters) extends BOPModule with HasPerfLog
   // val st = RegInit(VecInit(offsetList.map(off => (new ScoreTableEntry).apply(off.U, 0.U))))
   val st = RegInit(VecInit(Seq.fill(scores)((new ScoreTableEntry).apply(0.U))))
   val offList = WireInit(VecInit(offsetList.map(off => off.S(offsetWidth.W).asUInt)))
-  val ptr = RegInit(0.U(scoreTableIdxBits.W))
+  val ptr = RegInit(0.U(scoreTableIdxBits.W));dontTouch(ptr)
   val round = RegInit(0.U(roundBits.W));dontTouch(round)
 
   val bestOffset = RegInit(2.U(offsetWidth.W)) // the entry with the highest score while traversing
@@ -224,6 +224,9 @@ class OffsetScoreTable(implicit p: Parameters) extends BOPModule with HasPerfLog
   // The current learning phase finishes at the end of a round when:
   // (1) one of the score equals SCOREMAX, or
   // (2) the number of rounds equals ROUNDMAX.
+  val oldScore = WireInit(0.U(scoreBits.W));dontTouch(oldScore)
+  val newScore = WireInit(0.U(scoreBits.W));dontTouch(newScore)
+
   when(state === s_learn) {
     when(io.test.req.fire) {
       val roundFinish = ptr === (scores - 1).U
@@ -237,13 +240,12 @@ class OffsetScoreTable(implicit p: Parameters) extends BOPModule with HasPerfLog
     }
 
     when(io.test.resp.fire && io.test.resp.bits.hit) {
-      val oldScore = WireInit(0.U(scoreBits.W));dontTouch(oldScore)
-      val newScore = WireInit(0.U(scoreBits.W));dontTouch(newScore)
       oldScore := st(io.test.resp.bits.ptr).score
       newScore := oldScore + 1.U
       val offset = offList(io.test.resp.bits.ptr)
       st(io.test.resp.bits.ptr).score := newScore
       // bestOffset := winner((new ScoreTableEntry).apply(offset, newScore), bestOffset)
+      //TODO: hyper struct need farthest offset
       val renewOffset = newScore >= bestScore
       bestOffset := Mux(renewOffset, offset, bestOffset)
       bestScore := Mux(renewOffset, newScore, bestScore)
@@ -298,7 +300,7 @@ class BestOffsetPrefetch(implicit p: Parameters) extends BOPModule with HasPerfL
   scoreTable.io.req.valid := io.train.valid
   scoreTable.io.req.bits := oldAddr
 
-  val req = Reg(new PrefetchReq)
+  val req = RegInit(0.U.asTypeOf(new PrefetchReq))
   val req_valid = RegInit(false.B)
   val crossPage = getPPN(newAddr) =/= getPPN(oldAddr) // unequal tags
   when(io.req.fire) {
@@ -318,8 +320,8 @@ class BestOffsetPrefetch(implicit p: Parameters) extends BOPModule with HasPerfL
   io.req.bits.pfVec := PfSource.BOP
   io.train.ready := scoreTable.io.req.ready && (!req_valid || io.req.ready)
   io.resp.ready := true.B;dontTouch(io.resp.ready)
-  io.shareBO := prefetchOffset.asSInt
-  // respQueue.io.deq.ready := rrTable.io.w.ready
+  io.shareBO := RegNext(prefetchOffset.asSInt,0.S)
+  respQueue.io.deq.ready := rrTable.io.w.ready
 
   for (off <- offsetList) {
     if (off < 0) {

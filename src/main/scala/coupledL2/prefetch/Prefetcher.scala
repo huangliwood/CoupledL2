@@ -169,36 +169,11 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
   val io = IO(new PrefetchIO)
   val io_l2_pf_en = IO(Input(Bool()))
   val io_l2_pf_ctrl = IO(Input(UInt(Csr_PfCtrlBits.W)))
+  
   dontTouch(io_l2_pf_en)
   dontTouch(io_l2_pf_ctrl)
-  dontTouch(io.recv_addr)
   var hasSpp = false
   prefetchOpt.get match {
-    // case spp: SPPParameters => // case spp only
-    //   hasSpp = true
-    //   val pft = Module(new SignaturePathPrefetch(parentName + "spp_"))
-    //   val pftQueue = Module(new PrefetchQueue)
-    //   val pipe = Module(new Pipeline(io.req.bits.cloneType, 1))
-    //   pft.io.train <> io.train
-    //   pft.io.resp <> io.resp
-    //   pftQueue.io.enq <> pft.io.req
-    //   pipe.io.in <> pftQueue.io.deq
-    //   io.req <> pipe.io.out
-    //   io.hint2llc match{
-    //   case Some(sender) =>
-    //     println(s"${cacheParams.name} Prefetch Config: SPP + SPP cross-level refill")
-    //     pftQueue.io.enq.valid := pft.io.req.valid && (!pft.io.req.bits.hint2llc)
-    //     pftQueue.io.enq.bits <> pft.io.req.bits
-    //     pipe.io.in <> pftQueue.io.deq
-    //     io.req <> pipe.io.out
-    //     sender.valid := pft.io.req.bits.hint2llc
-    //     sender.bits := pft.io.req.bits
-    //   case _ =>
-    //     println(s"${cacheParams.name} Prefetch Config: SPP")
-    //     pftQueue.io.enq <> pft.io.req
-    //     pipe.io.in <> pftQueue.io.deq
-    //     io.req <> pipe.io.out
-    // }
     case bop: BOPParameters => // case bop only
       println(s"${cacheParams.name} Prefetch Config: BOP")
       val pft = Module(new BestOffsetPrefetch)
@@ -240,9 +215,12 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
       XSPerfAccumulate("bop_send2_queue", bop.io.req.valid)
       XSPerfAccumulate("prefetch_req_fromL2", bop_en && bop.io.req.valid)
       XSPerfAccumulate("prefetch_req_L1L2_overlapped", l1_pf.io.req.valid && bop_en && bop.io.req.valid)
-    case hyperPf_intel: intel_spp.HyperPrefetchParams => // case spp +  bop + smsReceiver
+      XSPerfAccumulate("bop_send2_queue", bop_en && bop.io.req.valid)
+      XSPerfAccumulate("sms_send2_queue", l1_pf.io.req.valid)
+    
+    case hyperPf: HyperPrefetchParams => // case spp +  bop + smsReceiver
       hasSpp = true
-      val hybrid_pfts = Module(new intel_spp.HyperPrefetchDev2(parentName + "hpft_intel_").suggestName("intel_spp"))
+      val hybrid_pfts = Module(new HyperPrefetchDev2(parentName + "hpft_"))
       hybrid_pfts.io.l2_pf_en := RegNextN(io_l2_pf_en,2,Some(true.B))
       hybrid_pfts.io.l2_pf_ctrl := RegNextN(io_l2_pf_ctrl,2,Some(0.U))
       hybrid_pfts.io.train <> io.train
@@ -251,40 +229,20 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
       io.req <> hybrid_pfts.io.req
       io.evict match {
         case Some(evict) =>
-          hybrid_pfts.io.evict <> evict
-        case _ => 
-          hybrid_pfts.io.evict := DontCare
-      }
-      // has spp multi-level cache option
-      io.hint2llc match{
-        case Some(sender) =>
-          dontTouch(io.hint2llc.get)
-          println(s"${cacheParams.name} Prefetch Config: BOP + SMS receiver + SPP + SPP cross-level refill")
-          sender <> hybrid_pfts.io.hint2llc
-        case _ => println(s"${cacheParams.name} Prefetch Config: BOP + SMS receiver + SPP")
-      }
-
-    case mclp: MCLPPrefetchParams =>
-      val hybrid_pfts = Module(new MCLPPrefetcher(parentName + "hpft_mclp_"))
-      hybrid_pfts.io.train <> io.train
-      hybrid_pfts.io.resp <> io.resp
-      hybrid_pfts.io.recv_addr := ValidIODelay(io.recv_addr, 2)
-      io.req <> hybrid_pfts.io.req
-
-      // evict
-      io.evict match {
-        case Some(evict) =>
         hybrid_pfts.io.evict <> evict
-        case None => 
-          hybrid_pfts.io.evict := DontCare
+        case None =>
+        hybrid_pfts.io.evict := DontCare
       }
       // has spp multi-level cache option
       io.hint2llc match{
         case Some(sender) =>
           println(s"${cacheParams.name} Prefetch Config: BOP + SMS receiver + SPP + SPP cross-level refill")
-          sender <> hybrid_pfts.io.hint2llc
+          sender <> 0.U.asTypeOf(io.hint2llc.get.cloneType) //hybrid_pfts.io.hint2llc
         case _ => println(s"${cacheParams.name} Prefetch Config: BOP + SMS receiver + SPP")
       }
+      // hybrid_pfts.io.queue_used := pftQueue.io.used
+      // hybrid_pfts.io.db_degree.valid := counterWrap
+      // hybrid_pfts.io.db_degree.bits := pf_state
     case _ => assert(cond = false, "Unknown prefetcher")
   }
   val mbistPl = MBISTPipeline.PlaceMbistPipeline(2,
@@ -294,8 +252,6 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
   XSPerfAccumulate("prefetch_train", io.train.fire)
   XSPerfAccumulate("prefetch_train_on_miss", io.train.fire && io.train.bits.state === AccessState.MISS)
   XSPerfAccumulate("prefetch_train_on_pf_hit", io.train.fire && io.train.bits.state === AccessState.PREFETCH_HIT)
-  XSPerfAccumulate("prefetch_train_on_cache_hit", io.train.fire && io.train.bits.state === AccessState.DEMAND_HIT)
-  XSPerfAccumulate("prefetch_req_fire", io.req.fire)
-  // XSPerfHistogram("prefetch_dead_block", deadPfEviction, counterWrap, 0, 200, 5)
-  // XSPerfHistogram("prefetch_dead_ratio", pf_state, counterWrap, 0, 4, 1)
+  XSPerfAccumulate("prefetch_train_on_cache_hit", io.train.fire && io.train.bits.state === AccessState.HIT)
+  XSPerfAccumulate("prefetch_send2_pfq", io.req.fire)
 }

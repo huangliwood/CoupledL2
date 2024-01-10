@@ -513,7 +513,7 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
     master_nodes = master_nodes ++ Seq(l1d, l1i) // TODO
 
     val l1xbar = TLXbar()
-    val l2node = LazyModule(new CoupledL2()(new Config((_, _, _) => {
+    val l2 = LazyModule(new CoupledL2()(new Config((_, _, _) => {
       case L2ParamKey => L2Param(
         name = s"L2",
         // ways = 4,
@@ -549,9 +549,14 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
     })))
     l1xbar := TLBuffer() := l1i
     l1xbar := TLBuffer() := l1d
-
-    l2xbar := TLBuffer() := l2node.node := l1xbar
-    l2node // return l2 list
+    l2.pf_recv_node match{
+      case Some(l2Recv) => 
+        val l1_sms_send_0_node = LazyModule(new PrefetchSmsOuterNode)
+        l2Recv := l1_sms_send_0_node.outNode
+      case None =>
+    }
+    l2xbar := TLBuffer() := l2.node := l1xbar
+    l2 // return l2 list
   }
 
   val l3 = LazyModule(new HuanCun()(new Config((_, _, _) => {
@@ -609,18 +614,21 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
   val ctrl_node = TLClientNode(Seq(TLMasterPortParameters.v2(
       Seq(TLMasterParameters.v1(
         name = "ctrl",
-        sourceId = IdRange(0, 16),
+        sourceId = IdRange(0, 64),
         supportsProbe = TransferSizes.none
       )),
       channelBytes = TLChannelBeatBytes(8), // 64bits
       minLatency = 1,
       echoFields = Nil,
     )))
-  val ecc_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
-  val l3_reset_sink = BundleBridgeSink(Some(() => Reset()))
+  val l3_ecc_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
   l3.ctlnode.foreach(_ := TLBuffer() := ctrl_node)
-  l3.intnode.foreach(ecc_int_sink := _)
-  l3.rst_nodes.foreach(_.foreach(l3_reset_sink := _))
+  l3.intnode.foreach(l3_ecc_int_sink := _)
+
+  val l2_ecc_int_sinks = Seq.fill(nrL2)(IntSinkNode(IntSinkPortSimple(1, 1)))
+  l2List.map(_.intNode).zip(l2_ecc_int_sinks).foreach{ 
+    case(source, sink) => sink := source
+  }
 
   val idBits = 14
   val l3FrontendAXI4Node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
@@ -630,7 +638,19 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
       maxFlight = Some(16)
     ))
   )))
- l2xbar := TLBuffer() := AXI2TL(16, 16) := AXI4Fragmenter() := l3FrontendAXI4Node
+ l2xbar := TLBuffer() := AXI2TL(16, 16) := AXI2TLFragmenter() := l3FrontendAXI4Node
+  // l2xbar :=
+  // TLFIFOFixer() :=
+  // TLWidthWidget(32) :=
+  // TLBuffer() :=
+  // AXI4ToTL() :=
+  // AXI4Buffer() :=
+  // AXI4UserYanker(Some(16)) :=
+  // AXI4Fragmenter() :=
+  // AXI4Buffer() :=
+  // AXI4Buffer() :=
+  // AXI4IdIndexer(4) :=
+  // l3FrontendAXI4Node
 
   ram.node :=
     TLXbar() :=*
@@ -646,9 +666,10 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
     }
     l3FrontendAXI4Node.makeIOs()(ValName("dma_port"))
     ctrl_node.makeIOs()(ValName("cmo_port"))
-    ecc_int_sink.makeIOs()(ValName("int_port"))
-    l3_reset_sink.makeIOs()(ValName("rst_port"))
-    // sms_sink.makeIOs()(ValName("sms_port"))
+    l3_ecc_int_sink.makeIOs()(ValName("l3_int_port"))
+
+    l2_ecc_int_sinks.zipWithIndex.foreach{ case(sink, i) => sink.makeIOs()(ValName("l2_int_port_"+i))}
+
     val io = IO(new Bundle{
       val perfClean = Input(Bool())
       val perfDump = Input(Bool())
@@ -900,8 +921,17 @@ object TestTop_fullSys extends App {
   val top = DisableMonitors(p => LazyModule(new TestTop_fullSys()(p)))(config)
 
   (new ChiselStage).execute(Array("--target", "verilog") ++ args, Seq(
-    ChiselGeneratorAnnotation(() => top.module),
-    FirtoolOption("--disable-annotation-unknown")
+    FirtoolOption("-O=release"),
+    FirtoolOption("--disable-all-randomization"),
+    FirtoolOption("--disable-annotation-unknown"),
+    FirtoolOption("--strip-debug-info"),
+    FirtoolOption("--lower-memories"),
+    FirtoolOption("--add-vivado-ram-address-conflict-synthesis-bug-workaround"),
+    FirtoolOption("--lowering-options=noAlwaysComb," +
+      " disallowPortDeclSharing, disallowLocalVariables," +
+      " emittedLineLength=120, explicitBitcast, locationInfoStyle=plain," +
+      " disallowExpressionInliningInPorts, disallowMuxInlining"),
+    ChiselGeneratorAnnotation(() => top.module)
   ))
 
   ChiselDB.init(false)

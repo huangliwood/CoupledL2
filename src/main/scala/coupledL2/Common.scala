@@ -52,10 +52,6 @@ class ReplacerInfo(implicit p: Parameters) extends L2Bundle {
   val reqSource = UInt(MemReqSource.reqSourceBits.W)
 }
 
-trait HasCorruptBit {
-  val corrupt = Bool() // corrupt data checked by ECC in DataStorage (ECC)
-}
-
 trait HasChannelBits { this: Bundle =>
   val channel = UInt(3.W)
   def fromA = channel(0).asBool
@@ -63,9 +59,27 @@ trait HasChannelBits { this: Bundle =>
   def fromC = channel(2).asBool
 }
 
+object PfSource extends Enumeration {
+  val bits = 3
+  val NONE    = "b000".U(bits.W)
+  val SMS     = "b001".U(bits.W)
+  val BOP     = "b010".U(bits.W)
+  val SPP     = "b100".U(bits.W)
+  val BOP_SPP = "b110".U(bits.W)
+
+}
+object PfVectorConst extends {
+  val SMS = 0
+  val BOP = 1
+  val SPP = 2
+
+  val bits = 3
+  val DEFAULT = 0.U(bits.W)
+}
+
 // We generate a Task for every TL request
 // this is the info that flows in Mainpipe
-class TaskBundle(implicit p: Parameters) extends L2Bundle with HasChannelBits with HasCorruptBit {
+class TaskBundle(implicit p: Parameters) extends L2Bundle with HasChannelBits {
   val set = UInt(setBits.W)
   val tag = UInt(tagBits.W)
   val off = UInt(offsetBits.W)
@@ -85,6 +99,7 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle with HasChannelBits wi
   val useProbeData = Bool()               // data source, true for ReleaseBuf and false for RefillBuf
 
   // For Intent
+  // val fromL2pft = prefetchOpt.map(_ => Bool()) 
   // Is the prefetch req from L2(BOP) or from L1 prefetch?
   // If true, MSHR should send an ack to L2 prefetcher.
   val pfVec = prefetchOpt.map(_ => UInt(PfVectorConst.bits.W))
@@ -115,6 +130,10 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle with HasChannelBits wi
 
   def hasData = opcode(0)
   def isfromL2pft = if(prefetchOpt.isDefined) {(pfVec.get === PfSource.BOP || pfVec.get === PfSource.SPP || pfVec.get === PfSource.BOP_SPP)
+  }else{
+    false.B
+  }
+  def isfrompft = if(prefetchOpt.isDefined) {(pfVec.get =/= PfSource.NONE)
   }else{
     false.B
   }
@@ -189,9 +208,9 @@ class MSHRInfo(implicit p: Parameters) extends L2Bundle with HasChannelBits {
 
   // to block Acquire for to-be-replaced data until Release done (indicated by ReleaseAck received)
   val needRelease = Bool()
-  // MSHR needs to send ReleaseTask but has not yet sent it
+  // MSHR needs to send ReleaseTask but has not in mainpipe s3, RefillTask in MP need to block
   // PS: ReleaseTask is also responsible for writing refillData to DS when A miss
-  val releaseNotSent = Bool()
+  val blockRefill = Bool()
 
   val metaTag = UInt(tagBits.W)
   val dirHit = Bool()
@@ -232,6 +251,7 @@ class FSMState(implicit p: Parameters) extends L2Bundle {
   val s_merge_probeack = Bool() // respond probeack downwards, Probe merge into A-replacement-Release
   // val s_grantack = Bool() // respond grantack downwards, moved to GrantBuf
   val s_prefetchevict = prefetchOpt.map(_ => Bool())
+  val s_accessackdata = Bool()
   // wait
   val w_rprobeackfirst = Bool()
   val w_rprobeacklast = Bool()
@@ -282,10 +302,10 @@ class NestedWriteback(implicit p: Parameters) extends L2Bundle {
 }
 
 class PrefetchRecv(implicit p: Parameters) extends L2Bundle {
-  val l2_pf_en = Bool()
-  val l2_pf_ctrl = UInt(Csr_PfCtrlBits.W)
   val addr = UInt(64.W)
   val addr_valid = Bool()
+  val l2_pf_en = Bool()
+  val l2_pf_ctrl = UInt(Csr_PfCtrlBits.W)
 }
 
 class LlcPrefetchRecv extends Bundle{

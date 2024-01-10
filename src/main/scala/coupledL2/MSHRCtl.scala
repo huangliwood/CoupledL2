@@ -39,10 +39,7 @@ class MSHRSelector(implicit p: Parameters) extends L2Module {
 
 class MSHRCtl(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val io = IO(new Bundle() {
-    /* interact with req arb */
-    val fromReqArb = Input(new Bundle() {
-      val status_s1 = new PipeEntranceStatus
-    })
+
     val toReqArb = Output(new BlockInfo())
 
     /* interact with mainpipe */
@@ -99,6 +96,8 @@ class MSHRCtl(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val pipeReqCount = PopCount(Cat(io.pipeStatusVec.map(_.valid))) // TODO: consider add !mshrTask to optimize
   val mshrCount = PopCount(Cat(mshrs.map(_.io.status.valid)))
   val mshrWillUse = pipeReqCount + mshrCount
+  dontTouch(pipeReqCount)
+  dontTouch(mshrCount)
   dontTouch(mshrWillUse)
   val mshrSelector = Module(new MSHRSelector())
   mshrSelector.io.idle := mshrs.map(m => !m.io.status.valid)
@@ -137,9 +136,11 @@ class MSHRCtl(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val latency = 1 // stall latency cycle for timing
   val toReqArb = WireInit(0.U.asTypeOf((io.toReqArb)))
   toReqArb.blockC_s1 := false.B
-  toReqArb.blockB_s1 := Mux(!io.toReqArb.blockB_s1, mshrWillUse >= (mshrsAll-latency).U, mshrWillUse >= mshrsAll.U)
+//  toReqArb.blockB_s1 := Mux(!io.toReqArb.blockB_s1, mshrWillUse >= (mshrsAll-latency).U, mshrWillUse >= mshrsAll.U)
+  toReqArb.blockB_s1 := mshrWillUse >= mshrsAll.U
   toReqArb.blockA_s1 := Mux(!io.toReqArb.blockB_s1, mshrWillUse >= (mshrsAll-1-latency).U, mshrWillUse >= (mshrsAll-latency).U) // the last idle mshr should not be allocated for channel A req
   toReqArb.blockG_s1 := false.B
+  dontTouch(toReqArb)
 
   io.toReqArb := RegNext(toReqArb)
 
@@ -179,17 +180,7 @@ class MSHRCtl(implicit p: Parameters) extends L2Module with HasPerfLogging{
       case (in, s) => in := s.io.status
     }
   )
-  // Performance counters
-  XSPerfAccumulate("capacity_conflict_to_sinkA", io.toReqArb.blockA_s1)
-  XSPerfAccumulate("capacity_conflict_to_sinkB", io.toReqArb.blockB_s1)
-  XSPerfHistogram("mshr_alloc", io.toMainPipe.mshr_alloc_ptr,
-    enable = io.fromMainPipe.mshr_alloc_s3.valid,
-    start = 0, stop = mshrsAll, step = 1)
-  // prefetchOpt.foreach {
-  //   _ =>
-  //     XSPerfAccumulate("prefetch_trains", io.prefetchTrain.get.fire)
-  // }
-  
+  // Performance counters  
   if (cacheParams.enablePerf) {
     val start = 0
     val stop = 100
@@ -218,5 +209,15 @@ class MSHRCtl(implicit p: Parameters) extends L2Module with HasPerfLogging{
         timer, enable, 0, 300, 10)
       XSPerfMax("mshr_latency", timer, enable)
     }
+    
+    XSPerfAccumulate("capacity_conflict_to_sinkA", io.toReqArb.blockA_s1)
+    XSPerfAccumulate("capacity_conflict_to_sinkB", io.toReqArb.blockB_s1)
+    XSPerfHistogram("mshr_alloc", io.toMainPipe.mshr_alloc_ptr,
+      enable = io.fromMainPipe.mshr_alloc_s3.valid,
+      start = 0, stop = mshrsAll, step = 1)
+    // prefetchOpt.foreach {
+    //   _ =>
+    //     XSPerfAccumulate("prefetch_trains", io.prefetchTrain.get.fire)
+    // }
   }
 }
