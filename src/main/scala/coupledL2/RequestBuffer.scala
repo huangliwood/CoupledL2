@@ -7,7 +7,6 @@ import chisel3.util._
 import coupledL2.utils._
 import xs.utils._
 import xs.utils.perf.HasPerfLogging
-import prefetch.{PrefetchTrain,AccessState}
 
 class ReqEntry(entries: Int = 4)(implicit p: Parameters) extends L2Bundle() {
   val valid    = Bool()
@@ -67,12 +66,6 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
     }))
 
     val hasLatePF = Output(Bool())
-    val hintDup = ValidIO(new Bundle() {
-      val tag = Input(UInt(tagBits.W))
-      val set = Input(UInt(setBits.W))
-      val pfVec = prefetchOpt.map(_ => UInt(PfVectorConst.bits.W))
-    })
-    val prefetchTrain = prefetchOpt.map(_ => DecoupledIO(new PrefetchTrain))
   })
 
   /* ======== mp s2 and s3 block A req ======== */
@@ -137,25 +130,11 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
     io.mshrInfo.map(s =>
       s.valid && s.bits.isAcqOrPrefetch && sameAddr(in, s.bits)) ++
     buffer.map(e =>
-      e.valid && sameAddr(in, e.task) && in.pfVec.get === e.task.pfVec.get //ignore diff prefetch
+      e.valid && sameAddr(in, e.task)
     )
   ).asUInt
+  val dup        = io.in.valid && isPrefetch && dupMask.orR
 
-  // val dup        = io.in.fire && isPrefetch && dupMask.orR // open latePf dup
- val dup        = false.B // close latePf dup
-  io.hintDup.valid := dup
-  io.hintDup.bits.tag := io.in.bits.tag
-  io.hintDup.bits.set := io.in.bits.set
-  io.hintDup.bits.pfVec.get := io.in.bits.pfVec.get
-  if(io.prefetchTrain.isDefined){
-    io.prefetchTrain.get.valid := dup
-    io.prefetchTrain.get.bits.tag := io.in.bits.tag
-    io.prefetchTrain.get.bits.set := io.in.bits.set
-    io.prefetchTrain.get.bits.source := io.in.bits.sourceId
-    io.prefetchTrain.get.bits.needT := false.B
-    io.prefetchTrain.get.bits.state := AccessState.LATE_HIT
-    io.prefetchTrain.get.bits.pfVec := io.in.bits.pfVec.get
-  }
   //!! TODO: we can also remove those that duplicate with mainPipe
 
   /* ======== Alloc ======== */
@@ -273,19 +252,6 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 4)(implicit p: Paramete
 
   when(chosenQ.io.deq.fire && !cancel) {
     buffer(chosenQ.io.deq.bits.id).valid := false.B
-  }
-  def TaskBundletoMainPipeInfo(task: TaskBundle): MainPipeInfo = {
-    val info = Wire(new MainPipeInfo)
-    info.reqTag := task.tag
-    info.set := task.set
-    info.isPrefetch := task.opcode === Hint
-    info.channel := task.channel
-    info
-  }
-  io.bufferInfo.zip(buffer).foreach {
-    case (out, in) =>
-      out.valid := in.valid
-      out.bits := TaskBundletoMainPipeInfo(in.task)
   }
 
   // for Dir to choose a free way
