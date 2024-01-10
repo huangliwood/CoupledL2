@@ -145,7 +145,7 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val bMergeTask = Wire(Decoupled(new BMergeTask))
   bMergeTask.valid := (io.b.valid || taskRetryPipe.valid) && task_mergeB && !task_s3AddrConflict
   bMergeTask.bits.id := task_mergeBId
-  bMergeTask.bits.task := task
+  bMergeTask.bits.task := task_be_sent
   val bMergeTaskOutPipe = Queue(bMergeTask, entries = 1, pipe = true, flow = false) // for timing: mshrCtl <> sinkB <> mshrCtl
   io.bMergeTask.valid := bMergeTaskOutPipe.valid
   io.bMergeTask.bits := Mux(bMergeTaskOutPipe.valid, bMergeTaskOutPipe.bits, 0.U.asTypeOf(bMergeTaskOutPipe.bits))
