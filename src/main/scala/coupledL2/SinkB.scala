@@ -115,6 +115,12 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val task_mergeB = mergeB(task_be_sent)
   val task_mergeBId = mergeBId(task_be_sent)
   val task_s3AddrConflict = s3AddrConflict(task_be_sent)
+  dontTouch(task_be_sent)
+  dontTouch(task_addrConflict)
+  dontTouch(task_replaceConflict)
+  dontTouch(task_mergeB)
+  dontTouch(task_mergeBId)
+  dontTouch(task_s3AddrConflict)
 
   // when conflict, we block B req from entering SinkB
   // when !conflict and mergeB , we merge B req to MSHR

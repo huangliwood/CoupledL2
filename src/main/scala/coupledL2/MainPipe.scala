@@ -153,9 +153,9 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   }
 
   /* ======== Enchantment ======== */
-  val dirResult_s3    = io.dirResp_s3
-  val meta_s3         = dirResult_s3.meta
-  val req_s3          = task_s3.bits
+  val dirResult_s3    = WireInit(io.dirResp_s3);dontTouch(dirResult_s3)
+  val meta_s3         = WireInit(dirResult_s3.meta);dontTouch(meta_s3)
+  val req_s3          = WireInit(task_s3.bits);dontTouch(req_s3)
 
   val mshr_req_s3     = req_s3.mshrTask
   val sink_req_s3     = !mshr_req_s3
@@ -345,10 +345,14 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   val need_write_refillBuf = sinkA_req_s3 && req_needT_s3 && dirResult_s3.hit && meta_s3.state === BRANCH && !req_prefetch_s3
 
   /* ======== Write Directory ======== */
-  val metaW_valid_s3_a    = sinkA_req_s3 && !need_mshr_s3_a && !req_get_s3 && !req_prefetch_s3 // get & prefetch that hit will not write meta
-  val metaW_valid_s3_b    = sinkB_req_s3 && !need_mshr_s3_b && dirResult_s3.hit && (meta_s3.state === TIP || meta_s3.state === BRANCH && req_s3.param === toN)
-  val metaW_valid_s3_c    = sinkC_req_s3 && dirResult_s3.hit
-  val metaW_valid_s3_mshr = mshr_req_s3 && req_s3.metaWen && !(mshr_refill_s3 && retry)
+  val metaW_valid_s3_a    = WireInit(sinkA_req_s3 && !need_mshr_s3_a && !req_get_s3) // get & prefetch that hit will not write meta
+  val metaW_valid_s3_b    = WireInit(sinkB_req_s3 && !need_mshr_s3_b && dirResult_s3.hit && (meta_s3.state === TIP || meta_s3.state === BRANCH && req_s3.param === toN))
+  val metaW_valid_s3_c    = WireInit(sinkC_req_s3 && dirResult_s3.hit)
+  val metaW_valid_s3_mshr = WireInit(mshr_req_s3 && req_s3.metaWen && !(mshr_refill_s3 && retry))
+  dontTouch(metaW_valid_s3_a   ) 
+  dontTouch(metaW_valid_s3_b   ) 
+  dontTouch(metaW_valid_s3_c   ) 
+  dontTouch(metaW_valid_s3_mshr) 
   require(clientBits == 1)
 
   // Get and Prefetch should not change alias bit
@@ -357,18 +361,38 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     meta_s3.alias.getOrElse(0.U),
     req_s3.alias.getOrElse(0.U)
   )
-  val metaW_s3_a = MetaEntry(
-    dirty = meta_s3.dirty,
-    state = Mux(req_needT_s3 || sink_resp_s3_a_promoteT, TRUNK, meta_s3.state),
-    clients = Fill(clientBits, true.B),
-    alias = Some(metaW_s3_a_alias),
-    accessed = true.B,
-    prefetch = if(meta_s3.prefetch.isDefined){
-      Mux(meta_s3.prefetch.get && dirResult_s3.hit, false.B, meta_s3.prefetch.get)
-    } else {
-      false.B
-    }
+  val metaW_valid_s3_a_prefetch_valid = WireInit(req_prefetch_s3)
+  val metaW_s3_a_prefetchUpdate = WireInit(meta_s3)
+  if(prefetchOpt.isDefined){
+    metaW_s3_a_prefetchUpdate.prefetch.get := Mux(metaW_s3_a_prefetchUpdate.pfVec.get =/= PfSource.NONE, true.B, false.B)
+    metaW_s3_a_prefetchUpdate.pfVec.get := Mux(meta_s3.prefetch.get && dirResult_s3.hit, 0.U, task_s3.bits.pfVec.get | meta_s3.pfVec.get)
+  }
+
+  val metaW_s3_a_normal = MetaEntry(
+      dirty = meta_s3.dirty,
+      state = Mux(req_needT_s3 || sink_resp_s3_a_promoteT, TRUNK, meta_s3.state),
+      clients = Fill(clientBits, true.B),
+      alias = Some(metaW_s3_a_alias),
+      accessed = true.B,
+      prefetch = if(meta_s3.prefetch.isDefined){
+        Mux(meta_s3.prefetch.get && dirResult_s3.hit, false.B, meta_s3.prefetch.get)
+      } else {
+        false.B
+      },
+      pfVec = if(meta_s3.pfVec.isDefined){
+        Mux(meta_s3.prefetch.get && dirResult_s3.hit, 0.U, task_s3.bits.pfVec.get | meta_s3.pfVec.get)
+      } else {
+        0.U
+      }
   )
+  val metaW_s3_a = WireInit(0.U.asTypeOf(new MetaEntry))
+  if(prefetchOpt.isDefined){
+    metaW_s3_a := Mux(metaW_valid_s3_a_prefetch_valid, metaW_s3_a_prefetchUpdate, metaW_s3_a_normal)
+  }else{
+    metaW_s3_a := metaW_s3_a_normal
+  }
+  
+
   val metaW_s3_b = Mux(req_s3.param === toN, MetaEntry(),
     MetaEntry(
       dirty = false.B,
@@ -454,9 +478,15 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
     train.bits.source := req_s3.sourceId
     train.bits.vaddr.foreach(_ := req_s3.vaddr.getOrElse(0.U))
     train.bits.state:= Mux(!dirResult_s3.hit, AccessState.MISS,
-      Mux(!meta_s3.prefetch.get, AccessState.HIT, AccessState.PREFETCH_HIT))
-    train.bits.pfVec := PfSource.BOP_SPP
-    // train.bits.pfVec := Mux(!dirResult_s3.hit, PfSource.BOP_SPP, req_s3.pfVec.getOrElse(PfSource.NONE))
+      Mux(meta_s3.pfVec.get === PfSource.NONE, AccessState.HIT, AccessState.PREFETCH_HIT))
+    train.bits.pfVec := Mux(!dirResult_s3.hit, PfSource.BOP_SPP, meta_s3.pfVec.getOrElse(PfSource.BOP_SPP))
+
+    if(cacheParams.enablePerf) { 
+      val prefetch_pf_hit = WireInit(task_s3.valid && req_prefetch_s3 && dirResult_s3.hit);dontTouch(prefetch_pf_hit)
+      val normal_pf_hit = WireInit(train.valid && train.bits.state === AccessState.PREFETCH_HIT);dontTouch(normal_pf_hit)
+      XSPerfAccumulate("mp_prefetch_pf_hit",prefetch_pf_hit)
+      XSPerfAccumulate("mp_normal_pf_hit",normal_pf_hit)
+    }
   }
   if(io.prefetchEvict.isDefined){
     val evict = io.prefetchEvict.get
@@ -639,6 +669,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   when(req_s3.fromA) {
     alloc_state.s_refill := false.B
     alloc_state.w_grantack := req_prefetch_s3 || req_get_s3
+    alloc_state.s_accessackdata := !req_get_s3
     alloc_state.w_replResp := dirResult_s3.hit // need replRead when NOT dirHit
     // need Acquire downwards
     when(need_acquire_s3_a) {

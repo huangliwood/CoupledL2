@@ -224,6 +224,7 @@ class FSMState(implicit p: Parameters) extends L2Bundle {
   val s_merge_probeack = Bool() // respond probeack downwards, Probe merge into A-replacement-Release
   // val s_grantack = Bool() // respond grantack downwards, moved to GrantBuf
   val s_prefetchevict = prefetchOpt.map(_ => Bool())
+  val s_accessackdata = Bool()
   // wait
   val w_rprobeackfirst = Bool()
   val w_rprobeacklast = Bool()
