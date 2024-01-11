@@ -25,8 +25,6 @@ import freechips.rocketchip.tilelink._
 import coupledL2._
 import xs.utils.mbist.MBISTPipeline
 import xs.utils.perf.HasPerfLogging
-// import {HyperPrefetcher, HyperPrefetchParams}
-import intel_spp.{HyperPrefetchDev2, HyperPrefetchParams}
 
 object AccessState {
   val bits = 2
