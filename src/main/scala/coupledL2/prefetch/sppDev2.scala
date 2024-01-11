@@ -1786,7 +1786,7 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
 
     def is_rubbish:Bool = WireInit(ghr_avgRound.l2pf_hitAcc === 0.U && ghr_coarse.spp_issued =/= 0.U);dontTouch(is_rubbish)
     def sms_flush_pfQ = ghr.l1pf_hitAcc === 0.U && ghr_coarse.l1pf_hitAcc << 4.U < ghr_coarse.l1pf_issued
-    def bop_flush_pfQ = ghr.l2pf_hitAcc === 0.U && ghr_coarse.l2pf_hitAcc << 4.U < (ghr_coarse.bop_issued + ghr_coarse.spp_issued)
+    def bop_flush_pfQ = false.B//ghr.l2pf_hitAcc === 0.U && ghr_coarse.l2pf_hitAcc << 4.U < (ghr_coarse.bop_issued + ghr_coarse.spp_issued)
     def spp_flush_pfQ = {
       val s_IDLE :: s_WAIT :: s_RESET :: Nil = Enum(3)
       val state = RegInit(s_IDLE)
