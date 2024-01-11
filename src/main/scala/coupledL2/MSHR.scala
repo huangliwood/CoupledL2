@@ -26,7 +26,8 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink.TLPermissions._
 import org.chipsalliance.cde.config.Parameters
-import coupledL2.prefetch.PrefetchTrain
+import prefetch.PrefetchTrain
+
 
 class MSHRTasks(implicit p: Parameters) extends L2Bundle {
   // outer
@@ -405,6 +406,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
       ),
       alias = Some(aliasFinal),
       prefetch = req_prefetch || dirResult.hit && meta_pft,
+      pfVec = Mux(dirResult.hit, meta.pfVec.get | req.pfVec.get, req.pfVec.get),//should merge diffrent prefetcher
       accessed = req_acquire || req_get
     )
     mp_grant.metaWen := true.B
@@ -592,6 +594,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
   io.msInfo.bits.mergeB := mergeB
   io.msInfo.bits.isAcqOrPrefetch := req_acquire || req_prefetch
   io.msInfo.bits.isPrefetch := req_prefetch
+  io.msInfo.bits.channel := req.channel
 
   if(cacheParams.enableAssert) {
     assert(!(c_resp.valid && !io.status.bits.w_c_resp))

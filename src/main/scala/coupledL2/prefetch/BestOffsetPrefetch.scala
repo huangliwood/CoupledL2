@@ -23,7 +23,8 @@ import chisel3._
 import chisel3.util._
 import coupledL2.HasCoupledL2Parameters
 import xs.utils.perf.HasPerfLogging
-
+import coupledL3.MemReqSource
+import coupledL2.PfSource
 case class BOPParameters(
   rrTableEntries: Int = 256,
   rrTagBits:      Int = 12,
@@ -32,7 +33,7 @@ case class BOPParameters(
   badScore:       Int = 1,
   offsetList: Seq[Int] = Seq(
     -32, -30, -27, -25, -24, -20, -18, -16, -15,
-    -12, -10,  -9,  -8,  -6,  -5,  -4,  -3,  -2,  -1,
+    -12, -10,  -9,  -8,  -6,  -5,  -4,  -3,  -2,  -1, 0, 
       1,   2,   3,   4,   5,   6,   8,   9,  10,
      12,  15,  16,  18,  20,  24,  25,  27,  30//,
     /*32,  36,
@@ -248,7 +249,7 @@ class OffsetScoreTable(implicit p: Parameters) extends BOPModule with HasPerfLog
       val renewOffset = newScore >= bestScore
       bestOffset := Mux(renewOffset, offset, bestOffset)
       bestScore := Mux(renewOffset, newScore, bestScore)
-      // (1) one of the score equals SCOREMAX
+      // (1) one of the score equals SCOREMAXbestOffset
       when(newScore >= scoreMax.U) {
         state := s_idle
       }
@@ -266,10 +267,10 @@ class OffsetScoreTable(implicit p: Parameters) extends BOPModule with HasPerfLog
   XSPerfAccumulate("bop_test_hit", io.test.resp.fire && io.test.resp.bits.hit)
   for (off <- offsetList) {
     if (off < 0) {
-      XSPerfAccumulate("best_offset_neg_" + (-off).toString + "_learning_phases",
+      XSPerfAccumulate("best_offset_learning_phases_neg_" + (-off).toString,
         Mux(state === s_idle, (bestOffset === off.S(offsetWidth.W).asUInt).asUInt, 0.U))
     } else {
-      XSPerfAccumulate("best_offset_pos_" + off.toString + "_learning_phases",
+      XSPerfAccumulate("best_offset_learning_phases_pos_" + off.toString ,
         Mux(state === s_idle, (bestOffset === off.U).asUInt, 0.U))
     }
   }
@@ -286,15 +287,16 @@ class BestOffsetPrefetch(implicit p: Parameters) extends BOPModule with HasPerfL
 
   val rrTable = Module(new RecentRequestTable)
   val scoreTable = Module(new OffsetScoreTable)
-  val respQueue = Module(new Queue(new PrefetchResp, 16, flow=true))
+  // val respQueue = Module(new Queue(new PrefetchResp, 16, flow=true))
   val prefetchOffset = scoreTable.io.prefetchOffset
   val oldAddr = io.train.bits.addr
   val newAddr = oldAddr + signedExtend((prefetchOffset << offsetBits), fullAddressBits)
 
   rrTable.io.r <> scoreTable.io.test
-  respQueue.io.enq <> io.resp
-  rrTable.io.w.valid := respQueue.io.deq.valid
-  rrTable.io.w.bits := Cat(Cat(respQueue.io.deq.bits.tag, respQueue.io.deq.bits.set) - signedExtend(prefetchOffset, setBits + fullTagBits), 0.U(offsetBits.W))
+  // respQueue.io.enq <> io.resp
+  rrTable.io.w.valid := io.resp.valid //respQueue.io.deq.valid
+  rrTable.io.w.bits := Cat(Cat(io.resp.bits.tag,io.resp.bits.set) - signedExtend(prefetchOffset, setBits + fullTagBits), 0.U(offsetBits.W))
+  io.resp.ready := rrTable.io.w.ready
   scoreTable.io.req.valid := io.train.valid
   scoreTable.io.req.bits := oldAddr
 
@@ -309,6 +311,7 @@ class BestOffsetPrefetch(implicit p: Parameters) extends BOPModule with HasPerfL
     req.set := parseFullAddress(newAddr)._2
     req.needT := io.train.bits.needT
     req.source := io.train.bits.source
+    req.pfVec := PfSource.BOP
     req_valid := !crossPage // stop prefetch when prefetch req crosses pages
   }
 
@@ -318,7 +321,6 @@ class BestOffsetPrefetch(implicit p: Parameters) extends BOPModule with HasPerfL
   io.train.ready := scoreTable.io.req.ready && (!req_valid || io.req.ready)
   io.resp.ready := true.B;dontTouch(io.resp.ready)
   io.shareBO := RegNext(prefetchOffset.asSInt,0.S)
-  respQueue.io.deq.ready := rrTable.io.w.ready
 
   for (off <- offsetList) {
     if (off < 0) {
@@ -327,8 +329,10 @@ class BestOffsetPrefetch(implicit p: Parameters) extends BOPModule with HasPerfL
       XSPerfAccumulate("best_offset_pos_" + off.toString, prefetchOffset === off.U)
     }
   }
+  dontTouch(io)
   XSPerfAccumulate("bop_req", io.req.fire)
-  XSPerfAccumulate("bop_train", io.train.fire)
+  XSPerfAccumulate("bop_recv_train", io.train.fire)
+  XSPerfAccumulate("bop_recv_resp", io.resp.fire)
   XSPerfAccumulate("bop_train_stall_for_st_not_ready", io.train.valid && !scoreTable.io.req.ready)
   XSPerfAccumulate("bop_cross_page", scoreTable.io.req.fire && crossPage)
 }

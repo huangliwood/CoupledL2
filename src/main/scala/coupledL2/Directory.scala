@@ -36,6 +36,7 @@ class MetaEntryWithoutPfVec(implicit p: Parameters) extends L2Bundle {
   // TODO: record specific state of clients instead of just 1-bit
   val alias = aliasBitsOpt.map(width => UInt(width.W)) // alias bits of client
   val prefetch = if (hasPrefetchBit) Some(Bool()) else None // whether block is prefetched
+  // val pfVec = if (hasPrefetchSrc) Some(UInt(PfVectorConst.bits.W)) else None // prefetch source
   val accessed = Bool()
 
   def =/=(entry: MetaEntry): Bool = {

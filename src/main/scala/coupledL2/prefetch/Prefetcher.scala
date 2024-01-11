@@ -25,12 +25,14 @@ import freechips.rocketchip.tilelink._
 import coupledL2._
 import xs.utils.mbist.MBISTPipeline
 import xs.utils.perf.HasPerfLogging
+// import {HyperPrefetcher, HyperPrefetchParams}
+import intel_spp.{HyperPrefetchDev2, HyperPrefetchParams}
 
 object AccessState {
   val bits = 2
 
   def MISS          = 0.U(bits.W)
-  def HIT           = 1.U(bits.W)
+  def DEMAND_HIT    = 1.U(bits.W)
   def PREFETCH_HIT  = 2.U(bits.W)
   def LATE_HIT      = 3.U(bits.W)
 }
@@ -106,14 +108,15 @@ class PrefetchIO(implicit p: Parameters) extends PrefetchBundle {
     case hyper: HyperPrefetchParams => Some(Flipped(DecoupledIO(new PrefetchEvict)))
     case _ => None
   }
-  val hint2llc = if(sppMultiLevelRefillOpt.nonEmpty)  Some(ValidIO(new PrefetchReq)) else None
+  val hint2llc = if(sppMultiLevelRefillOpt.nonEmpty) Some(ValidIO(new PrefetchReq)) else None
 }
 
 class PrefetchQueue(inflightEntries:Int = 32)(implicit p: Parameters) extends PrefetchModule with HasPerfLogging{
   val io = IO(new Bundle {
     val enq = Flipped(DecoupledIO(new PrefetchReq))
     val deq = DecoupledIO(new PrefetchReq)
-    val used = Output(UInt(6.W))
+    val full = Output(Bool())
+    val queue_used = Output(UInt(log2Ceil(inflightEntries).W))
   })
   /*  Here we implement a queue that
    *  1. is pipelined  2. flows
@@ -147,8 +150,8 @@ class PrefetchQueue(inflightEntries:Int = 32)(implicit p: Parameters) extends Pr
   io.enq.ready := true.B
   io.deq.valid := !empty || io.enq.valid
   io.deq.bits := Mux(empty, io.enq.bits, queue(head))
-
-  io.used := PopCount(valids.asUInt)
+  io.queue_used := RegEnable(PopCount(valids.asUInt),io.enq.valid)
+  io.full := full
 
   // The reqs that are discarded = enq - deq
   XSPerfAccumulate("prefetch_queue_enq", io.enq.fire)
@@ -187,7 +190,7 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
         case L2ParamKey => p(L2ParamKey).copy(prefetch = Some(BOPParameters()))
       })))
       val pftQueue = Module(new PrefetchQueue)
-      val pipe = Module(new Pipeline(io.req.bits.cloneType, 1))
+      val delayQ = Module(new Queue(io.req.bits.cloneType, entries = 1, pipe = true, flow = false))
       val bop_en = RegNextN(io_l2_pf_en, 2, Some(true.B))
       // l1 prefetch
       l1_pf.io.recv_addr := ValidIODelay(io.recv_addr, 2)
@@ -205,9 +208,10 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
       )
       l1_pf.io.req.ready := true.B
       bop.io.req.ready := true.B
-      pipe.io.in <> pftQueue.io.deq
-      io.req <> pipe.io.out
+      delayQ.io.enq <> pftQueue.io.deq
+      io.req <> delayQ.io.deq
       XSPerfAccumulate("prefetch_req_fromL1", l1_pf.io.req.valid)
+      XSPerfAccumulate("bop_send2_queue", bop.io.req.valid)
       XSPerfAccumulate("prefetch_req_fromL2", bop_en && bop.io.req.valid)
       XSPerfAccumulate("prefetch_req_L1L2_overlapped", l1_pf.io.req.valid && bop_en && bop.io.req.valid)
       XSPerfAccumulate("bop_send2_queue", bop_en && bop.io.req.valid)
@@ -247,6 +251,6 @@ class Prefetcher(parentName:String = "Unknown")(implicit p: Parameters) extends 
   XSPerfAccumulate("prefetch_train", io.train.fire)
   XSPerfAccumulate("prefetch_train_on_miss", io.train.fire && io.train.bits.state === AccessState.MISS)
   XSPerfAccumulate("prefetch_train_on_pf_hit", io.train.fire && io.train.bits.state === AccessState.PREFETCH_HIT)
-  XSPerfAccumulate("prefetch_train_on_cache_hit", io.train.fire && io.train.bits.state === AccessState.HIT)
+  XSPerfAccumulate("prefetch_train_on_cache_hit", io.train.fire && io.train.bits.state === AccessState.DEMAND_HIT)
   XSPerfAccumulate("prefetch_send2_pfq", io.req.fire)
 }

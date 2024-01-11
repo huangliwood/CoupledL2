@@ -25,10 +25,11 @@ import freechips.rocketchip.util.leftOR
 import org.chipsalliance.cde.config.Parameters
 import coupledL2.utils._
 import coupledL2.debug._
-import coupledL2.prefetch.PrefetchIO
+import coupledL2.prefetch.{PrefetchIO,PrefetchTrain}
 import xs.utils.RegNextN
 import xs.utils.mbist.MBISTPipeline
 import xs.utils.perf.HasPerfLogging
+import xs.utils.FastArbiter
 
 class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Module with HasPerfLogging with HasPerfEvents{
   val io = IO(new Bundle {
@@ -42,8 +43,11 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
     val eccError = Output(Bool())
   })
 
+  val reqBuf_entries = 4
+
   val reqArb = Module(new RequestArb())
-  val a_reqBuf = Module(new RequestBuffer)
+  // val a_reqBuf = Module(new RequestBuffer(entries=8))
+  val a_reqBuf = Module(new RequestBuffer(entries = 4))
   val mainPipe = Module(new MainPipe())
   val mshrCtl = Module(new MSHRCtl())
   val directory = Module(new Directory(parentName + "dir_"))
@@ -141,16 +145,21 @@ class Slice(parentName:String = "Unknown")(implicit p: Parameters) extends L2Mod
   grantBuf.io.d_task <> mainPipe.io.toSourceD
   grantBuf.io.fromReqArb.status_s1 := reqArb.io.status_s1
   grantBuf.io.pipeStatusVec := reqArb.io.status_vec ++ mainPipe.io.status_vec_toD
+  grantBuf.io.hintDup := a_reqBuf.io.hintDup
   mshrCtl.io.pipeStatusVec(0) := reqArb.io.status_vec(1) // s2 status
   mshrCtl.io.pipeStatusVec(1) := mainPipe.io.status_vec_toD(0) // s3 status
 
   if(io.prefetch.isDefined){
     val pfio = io.prefetch.get
-    pfio.train <> mainPipe.io.prefetchTrain.get
+    val pf_train_arb = Module(new FastArbiter(new PrefetchTrain(), 2))
+    pf_train_arb.io.in(0) <> a_reqBuf.io.prefetchTrain.get
+    pf_train_arb.io.in(1) <> mainPipe.io.prefetchTrain.get
+    pfio.train <> pf_train_arb.io.out
+    
     sinkA.io.prefetchReq.get <> pfio.req
     pfio.resp <> grantBuf.io.prefetchResp.get
     pfio.recv_addr := 0.U.asTypeOf(ValidIO(UInt(64.W)))
-    if(pfio.evict.isDefined){
+    if(pfio.evict.isDefined && mainPipe.io.prefetchEvict.isDefined){
       pfio.evict.get <> mainPipe.io.prefetchEvict.get
     }
   }

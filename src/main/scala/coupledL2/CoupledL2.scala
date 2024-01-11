@@ -72,6 +72,7 @@ trait HasCoupledL2Parameters {
   val Csr_PfCtrlBits = cacheParams.Csr_PfCtrlBits
   val sppMultiLevelRefillOpt = cacheParams.sppMultiLevelRefill
   val hasPrefetchBit = prefetchOpt.nonEmpty && prefetchOpt.get.hasPrefetchBit
+  val hasPrefetchSrc = prefetchOpt.nonEmpty && prefetchOpt.get.hasPrefetchSrc
   val topDownOpt = if(cacheParams.elaboratedTopDown) Some(true) else None
 
   lazy val edgeIn = p(EdgeInKey)
@@ -230,7 +231,7 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
 }
 
   val spp_send_node: Option[BundleBridgeSource[LlcPrefetchRecv]] = prefetchOpt match {
-    case Some(hyper_pf: HyperPrefetchParams) =>
+    case Some(hyper_pf2: HyperPrefetchParams) =>
       sppMultiLevelRefillOpt match{
         case Some(receive: PrefetchReceiverParams) =>
           Some(BundleBridgeSource(() => new LlcPrefetchRecv()))
@@ -294,7 +295,7 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
     val prefetchTrains = prefetchOpt.map(_ => Wire(Vec(banks, DecoupledIO(new PrefetchTrain()(pftParams)))))
     val prefetchResps = prefetchOpt.map(_ => Wire(Vec(banks, DecoupledIO(new PrefetchResp()(pftParams)))))
     val prefetchEvicts = prefetchOpt.map({
-      case hyper : HyperPrefetchParams =>
+      case hyper2 : HyperPrefetchParams =>
         Some( Wire(Vec(banks, DecoupledIO(new PrefetchEvict()(pftParams)))))
       case _ => None
     })
@@ -313,8 +314,10 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
 
     pf_recv_node match {
       case Some(x) =>
-        prefetcher.get.io.recv_addr.valid := x.in.head._1.addr_valid
-        prefetcher.get.io.recv_addr.bits := x.in.head._1.addr
+        println("coupledL2 initialize pf recv node")
+        dontTouch(x.in.head._1)
+        prefetcher.get.io.recv_addr.valid := x.in.head._1.addr_valid//csrPfRecv.addr.valid
+        prefetcher.get.io.recv_addr.bits := x.in.head._1.addr//csrPfRecv.addr.bits
         prefetcher.get.io_l2_pf_en := x.in.head._1.l2_pf_en
         prefetcher.get.io_l2_pf_ctrl := x.in.head._1.l2_pf_ctrl
       case None =>
@@ -420,17 +423,6 @@ class CoupledL2(parentName:String = "L2_")(implicit p: Parameters) extends LazyM
               prefetchTrains.get(i).bits.set := train_set
               prefetchResps.get(i).bits.tag := resp_tag
               prefetchResps.get(i).bits.set := resp_set
-              // prefetchEvicts match {
-              //   case Some(evict_wire) => 
-              //     val s_evict = Pipeline(s.evict.get)
-              //     val evict_full_addr = Cat(
-              //       s_evict.bits.tag, s_evict.bits.set, i.U(bankBits.W), 0.U(offsetBits.W)
-              //     )
-              //     val (evict_tag, evict_set, _) = s.parseFullAddress(evict_full_addr)
-              //     evict_wire(i).bits.tag := evict_tag
-              //     evict_wire(i).bits.set := evict_set
-              //   case None =>
-              // }
             }
         }
 

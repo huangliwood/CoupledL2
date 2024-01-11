@@ -22,22 +22,11 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink.TLPermissions._
 import xs.utils.tl.MemReqSource
+import freechips.rocketchip.rocket.PRV
 
 abstract class L2Module(implicit val p: Parameters) extends Module with HasCoupledL2Parameters
 abstract class L2Bundle(implicit val p: Parameters) extends Bundle with HasCoupledL2Parameters
 
-class ReplacerInfo(implicit p: Parameters) extends L2Bundle {
-  val channel = UInt(3.W)
-  val opcode = UInt(3.W)
-  val reqSource = UInt(MemReqSource.reqSourceBits.W)
-}
-
-trait HasChannelBits { this: Bundle =>
-  val channel = UInt(3.W)
-  def fromA = channel(0).asBool
-  def fromB = channel(1).asBool
-  def fromC = channel(2).asBool
-}
 
 object PfSource extends Enumeration {
   val bits = 3
@@ -55,6 +44,19 @@ object PfVectorConst extends {
 
   val bits = 3
   val DEFAULT = 0.U(bits.W)
+}
+
+class ReplacerInfo(implicit p: Parameters) extends L2Bundle {
+  val channel = UInt(3.W)
+  val opcode = UInt(3.W)
+  val reqSource = UInt(MemReqSource.reqSourceBits.W)
+}
+
+trait HasChannelBits { this: Bundle =>
+  val channel = UInt(3.W)
+  def fromA = channel(0).asBool
+  def fromB = channel(1).asBool
+  def fromC = channel(2).asBool
 }
 
 // We generate a Task for every TL request
@@ -172,8 +174,15 @@ class MSHRRequest(implicit p: Parameters) extends L2Bundle {
   val task = new TaskBundle()
 }
 
-// MSHR info to ReqBuf and SinkB
-class MSHRInfo(implicit p: Parameters) extends L2Bundle {
+// MainPipe info
+  class MainPipeInfo(implicit p: Parameters) extends L2Bundle with HasChannelBits {
+    val reqTag = UInt(tagBits.W)
+    val set = UInt(setBits.W)
+    val isPrefetch = Bool()
+  }
+
+// MSHR info to ReqBuf and SinkB and sinkA and ReqArb
+class MSHRInfo(implicit p: Parameters) extends L2Bundle with HasChannelBits {
   val set = UInt(setBits.W)
   val way = UInt(wayBits.W)
   val reqTag = UInt(tagBits.W)

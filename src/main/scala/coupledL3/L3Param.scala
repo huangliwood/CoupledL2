@@ -34,7 +34,7 @@ case object L3ParamKey extends Field[L3Param](L3Param())
 // L1 Cache Params, used for TestTop generation
 case class L2ClientParam
 (
-  name: String = "L20",
+  name: String = "L2",
   sets: Int = 32,
   ways: Int = 8,
   blockBytes: Int = 64,
