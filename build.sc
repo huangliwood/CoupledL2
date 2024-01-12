@@ -129,6 +129,7 @@ object CoupledL2 extends SbtModule with ScalafmtModule with CommonModule {
     getVersion("chisel"),
     getVersion("chiseltest", "edu.berkeley.cs"),
   )
+  override def forkArgs = Seq("-Xmx4G", "-Xss256m")
   override def moduleDeps = super.moduleDeps ++ Seq(rocketchip, huancun, xsutils, axi2tl)
 
   object test extends SbtModuleTests with TestModule.ScalaTest {
