@@ -59,9 +59,9 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
 
     /* block sinkB */
     val toSinkB = ValidIO(new Bundle() {
-      val tag = UInt(tagBits.W)
-      val set = UInt(setBits.W)
-      val willAllocMshr = Bool()
+      val tags = Vec(2, UInt(tagBits.W))
+      val sets = Vec(2, UInt(setBits.W))
+      val s3WillAllocMshr = Bool()
     })
 
     /* get dir result at stage 3 */
@@ -658,10 +658,14 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   io.status_vec_toC(2).valid := c_s5.valid
   io.status_vec_toC(2).bits.channel := task_s5.bits.channel
 
-  io.toSinkB.valid := task_s3.valid
-  io.toSinkB.bits.tag := task_s3.bits.tag
-  io.toSinkB.bits.set := task_s3.bits.set
-  io.toSinkB.bits.willAllocMshr := io.toMSHRCtl.mshr_alloc_s3.valid
+  // signals used for block sinkB
+  io.toSinkB.valid := task_s3.valid || task_s2.valid
+  io.toSinkB.bits.tags(0) := task_s2.bits.tag
+  io.toSinkB.bits.sets(0) := task_s2.bits.set
+  io.toSinkB.bits.tags(1) := task_s3.bits.tag
+  io.toSinkB.bits.sets(1) := task_s3.bits.set
+  io.toSinkB.bits.s3WillAllocMshr := io.toMSHRCtl.mshr_alloc_s3.valid
+
 
   /* ======== Other Signals Assignment ======== */
   // Initial state assignment
