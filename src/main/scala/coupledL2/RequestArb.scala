@@ -73,6 +73,10 @@ class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging wi
       val blockSinkBReqEntrance = Bool()
       val blockMSHRReqEntrance = Bool()
     })
+    val toSinkB = ValidIO(new Bundle() {
+      val tag = UInt(tagBits.W)
+      val set = UInt(setBits.W)
+    })
   })
 
   /* ======== Reset ======== */
@@ -247,6 +251,10 @@ class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging wi
       status.valid := task.valid
       status.bits.channel := task.bits.channel
   }
+
+  io.toSinkB.valid := chnl_task_s1.valid
+  io.toSinkB.bits.set := chnl_task_s1.bits.set
+  io.toSinkB.bits.tag := chnl_task_s1.bits.tag
 
   dontTouch(io)
 

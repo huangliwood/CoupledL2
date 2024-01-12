@@ -34,6 +34,10 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
     val b = Flipped(DecoupledIO(new TLBundleB(edgeIn.bundle)))
     val task = DecoupledIO(new TaskBundle)
     val msInfo = Vec(mshrsAll, Flipped(ValidIO(new MSHRInfo)))
+    val fromReqArb = Flipped(ValidIO(new Bundle{
+      val set = UInt(tagBits.W)
+      val tag = UInt(setBits.W)
+    }))
     val fromMainPipe = Flipped(ValidIO(new Bundle {
       val tags = Vec(2, UInt(tagBits.W))
       val sets = Vec(2, UInt(setBits.W))
@@ -103,8 +107,9 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
 
   // unable to accept incoming B req because same-addr as mainpipe S3
   def mpAddrConflict(a: TaskBundle): Bool = 
-    (io.fromMainPipe.bits.sets(1) === a.set && io.fromMainPipe.bits.tags(1) === a.tag && io.fromMainPipe.bits.s3WillAllocMshr) || // mainpipe stage 3
-    (io.fromMainPipe.bits.sets(0) === a.set && io.fromMainPipe.bits.tags(0) === a.tag)                                            // mainpipe stage 2
+    (io.fromMainPipe.valid && io.fromMainPipe.bits.sets(1) === a.set && io.fromMainPipe.bits.tags(1) === a.tag && io.fromMainPipe.bits.s3WillAllocMshr) || // mainpipe stage 3
+    (io.fromMainPipe.valid && io.fromMainPipe.bits.sets(0) === a.set && io.fromMainPipe.bits.tags(0) === a.tag)                                         || // mainpipe stage 2
+    (io.fromReqArb.valid   && io.fromReqArb.bits.set === a.set       && io.fromReqArb.bits.tag === a.tag)                                                        // reqArb   stage 1
 
   val task_temp = WireInit(0.U.asTypeOf(io.task))
   val task_retry = WireInit(0.U.asTypeOf(io.task))
@@ -156,6 +161,7 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
   //--------------------------------- assert ----------------------------------------//
   val s_addrConflict = addrConflict(io.task.bits)
   val s_replaceConflict = replaceConflict(io.task.bits)
+  val s_mpAddrConflict = mpAddrConflict(io.task.bits)
 
   val mergeB_mshr = WireInit(io.msInfo(io.bMergeTask.bits.id))
   val mergeB_task = WireInit(io.bMergeTask.bits.task)
@@ -167,7 +173,7 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val task_cnt = RegInit(0.U(16.W)) // task in sinkB
   task_cnt := task_cnt + io.b.fire.asUInt - io.task.fire.asUInt - io.bMergeTask.fire.asUInt
 
-  val io_task_can_valid = !s_addrConflict && !s_replaceConflict && !s_mergeB_for_task
+  val io_task_can_valid = !s_addrConflict && !s_replaceConflict && !s_mergeB_for_task //&& !s_mpAddrConflict
   val io_bMergeTask_can_valid = s_mergeB_for_mergeB_task
   if(cacheParams.enableAssert) {
     when(io.task.fire){
