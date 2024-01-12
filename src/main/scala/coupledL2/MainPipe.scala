@@ -286,12 +286,15 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   val source_req_s3 = Wire(new TaskBundle)
   source_req_s3 := Mux(!mshr_req_s3, sink_resp_s3.bits, req_s3) // sink_req->resp, mshr_resp->resp
 
-  //  TODO: debug address consider multi-bank
-  def restoreAddr(set: UInt, tag: UInt) = {
-    (set << offsetBits).asUInt + (tag << (setBits + offsetBits)).asUInt
+  def restoreFullAddr(bank: UInt, set: UInt, tag: UInt) = {
+    (bank << offsetBits).asUInt + (set << (bankBits + offsetBits)).asUInt + (tag << (setBits + bankBits + offsetBits)).asUInt
   }
-  val debug_addr_s3 = restoreAddr(task_s3.bits.set, task_s3.bits.tag) // (task_s3.bits.set << offsetBits).asUInt + (task_s3.bits.tag << (setBits + offsetBits)).asUInt
-  dontTouch(debug_addr_s3)
+  val debug_addr_s3_vec = WireInit(VecInit(Seq.fill(1 << bankBits)(0.U(fullAddressBits.W))))
+  debug_addr_s3_vec.zipWithIndex.foreach {
+    case (addr, i) =>
+      addr := restoreFullAddr(i.asUInt, task_s3.bits.set, task_s3.bits.tag)
+  }
+  dontTouch(debug_addr_s3_vec)
 
   /* ======== Interact with DS ======== */
   val data_s3 = Mux(io.releaseBufResp_s3.valid, io.releaseBufResp_s3.bits.data, io.refillBufResp_s3.bits.data) // releaseBuf prior
