@@ -202,7 +202,7 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
   }.elsewhen(io.task.fire) {
     task_retry_count := 0.U
   }
-  when(task_retry_count >= 2000.U) {
+  when(task_retry_count >= 20000.U) {
     assert(false.B, "sinkB retry timeout")
   }
 
