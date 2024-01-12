@@ -160,6 +160,11 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val s_mergeB_for_mergeB_task = mergeB_mshr.valid && mergeB_mshr.bits.metaTag === mergeB_task.tag && mergeB_mshr.bits.set === mergeB_task.set && mergeB_mshr.bits.mergeB
   val s_mergeB_for_task = mergeBMask(io.task.bits)
 
+  val buffer_valid_cnt = RegInit(0.U(16.W)) // task in buffer
+  buffer_valid_cnt := buffer_valid_cnt + task_temp.fire.asUInt + task_retry.fire.asUInt + bMergeTask.fire - taskOutPipe.fire.asUInt - taskRetryPipe.fire.asUInt - bMergeTaskOutPipe.fire.asUInt
+  val task_cnt = RegInit(0.U(16.W)) // task in sinkB
+  task_cnt := task_cnt + io.b.fire.asUInt - io.task.fire.asUInt - io.bMergeTask.fire.asUInt
+
   val io_task_can_valid = !s_addrConflict && !s_replaceConflict && !s_mergeB_for_task
   val io_bMergeTask_can_valid = s_mergeB_for_mergeB_task
   if(cacheParams.enableAssert) {
@@ -169,6 +174,7 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
     when(io.bMergeTask.fire){
       assert(io_bMergeTask_can_valid, "io_bMergeTask cant valid")
     }
+    assert(buffer_valid_cnt === task_cnt, "req in should be equal to task out (req loss)")
     dontTouch(s_addrConflict)
     dontTouch(s_replaceConflict)
     dontTouch(mergeB_mshr)
@@ -177,6 +183,8 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
     dontTouch(s_mergeB_for_task)
     dontTouch(io_task_can_valid)
     dontTouch(io_bMergeTask_can_valid)
+    dontTouch(buffer_valid_cnt)
+    dontTouch(task_cnt)
   }
 
   val task_retry_count = RegInit(0.U(12.W))
