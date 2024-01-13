@@ -35,8 +35,8 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
     val task = DecoupledIO(new TaskBundle)
     val msInfo = Vec(mshrsAll, Flipped(ValidIO(new MSHRInfo)))
     val fromReqArb = Flipped(ValidIO(new Bundle{
-      val set = UInt(tagBits.W)
-      val tag = UInt(setBits.W)
+      val set = UInt(setBits.W)
+      val tag = UInt(tagBits.W)
     }))
     val fromMainPipe = Flipped(ValidIO(new Bundle {
       val tags = Vec(2, UInt(tagBits.W))
