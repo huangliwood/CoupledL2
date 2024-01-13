@@ -112,8 +112,6 @@ class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging wi
 
   io.sinkB.ready := sinkB_ready_s0
 
-  val sinkB_blockA = io.sinkB.fire
-
   // if mshr_task_s1 is replRead, it might stall and wait for dirRead.ready, so we block new mshrTask from entering
   // TODO: will cause msTask path vacant for one-cycle after replRead, since not use Flow so as to avoid ready propagation
   io.mshrTask.ready := !io.fromGrantBuffer.blockMSHRReqEntrance && !s1_needs_replRead && !io.fromSourceC.blockMSHRReqEntrance
@@ -132,7 +130,9 @@ class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging wi
   }.elsewhen(sinkB_fire_s1) {
     sinkB_full_s1 := false.B
   }
-  
+
+  val sinkB_blockA = io.sinkB.fire || (sinkB_valid_s1 && io.sinkA.bits.tag === sinkB_bits_s1.tag && io.sinkA.bits.set === sinkB_bits_s1.set)
+
   /* latch mshr_task from s0 to s1 */
   val mshr_replRead_stall = mshr_task_s1.valid && s1_needs_replRead && (!io.dirRead_s1.ready || io.fromMainPipe.blockG_s1)
 
