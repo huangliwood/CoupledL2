@@ -34,14 +34,10 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
     val b = Flipped(DecoupledIO(new TLBundleB(edgeIn.bundle)))
     val task = DecoupledIO(new TaskBundle)
     val msInfo = Vec(mshrsAll, Flipped(ValidIO(new MSHRInfo)))
-    val fromReqArb = Flipped(ValidIO(new Bundle{
-      val set = UInt(setBits.W)
+    val fromMainPipe = Flipped(Vec(5, new Bundle() {
+      val valid = Bool()
       val tag = UInt(tagBits.W)
-    }))
-    val fromMainPipe = Flipped(ValidIO(new Bundle {
-      val tags = Vec(2, UInt(tagBits.W))
-      val sets = Vec(2, UInt(setBits.W))
-      val s3WillAllocMshr = Bool()
+      val set = UInt(setBits.W)
     }))
     val bMergeTask = ValidIO(new BMergeTask)
   })
@@ -106,10 +102,8 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
   def mergeBId(a: TaskBundle) = OHToUInt(mergeBMask(a))
 
   // unable to accept incoming B req because same-addr as mainpipe S3
-  def mpAddrConflict(a: TaskBundle): Bool = 
-    (io.fromMainPipe.valid && io.fromMainPipe.bits.sets(1) === a.set && io.fromMainPipe.bits.tags(1) === a.tag && io.fromMainPipe.bits.s3WillAllocMshr) || // mainpipe stage 3
-    (io.fromMainPipe.valid && io.fromMainPipe.bits.sets(0) === a.set && io.fromMainPipe.bits.tags(0) === a.tag)                                         || // mainpipe stage 2
-    (io.fromReqArb.valid   && io.fromReqArb.bits.set === a.set       && io.fromReqArb.bits.tag === a.tag)                                                        // reqArb   stage 1
+  def mpAddrConflict(a: TaskBundle): Bool = VecInit(io.fromMainPipe.map(m =>
+      m.valid && m.tag === a.tag && m.set === a.set)).asUInt.orR.asBool
 
   val task_temp = WireInit(0.U.asTypeOf(io.task))
   val task_retry = WireInit(0.U.asTypeOf(io.task))
