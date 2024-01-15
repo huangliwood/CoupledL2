@@ -71,7 +71,9 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
 
   val mem_xbar = TLXbar()
   // val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffffffL), beatBytes = 32)) // Normal rtl-based memory
-  val ram = LazyModule(new coupledL2.TLRAM(AddressSet(0, 0xffffffffffL), beatBytes = 32)) // DPI-C memory
+  // val ram = LazyModule(new coupledL2.TLRAM(AddressSet(0, 0xffffffffffL), beatBytes = 32)) // DPI-C memory
+  val ram = LazyModule(new coupledL2.TLRAM_WithDRAMSim3(AddressSet(0, 0xffffffffffL), beatBytes = 32)) // DPI-C memory with DRAMsim3
+
 
   // Create L1 nodes
   (0 until nrL2).foreach{ i =>
@@ -204,16 +206,27 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
   )))
   l2xbar := TLBuffer() := AXI2TL(16, 16) := AXI2TLFragmenter() := l3FrontendAXI4Node
 
+  // has DRAMsim3
   ram.node :=
     mem_xbar :=*
-    TLXbar() :=*
-    TLFragmenter(32, 64) :=*
-    TLBuffer.chainNode(2) :=*
-    TLCacheCork() :=*
-    // TLDelayer(delayFactor) :=*
+    TLDelayer(0.4) :=*
+    TLBuffer.chainNode(4) :=*
+    TLDelayer(0.4) :=*
     l3binder :*=
     l3.node :*=
     l2xbar
+  
+  // without DRAMsim3
+  // ram.node :=
+  //   mem_xbar :=*
+  //   TLXbar() :=*
+  //   TLFragmenter(32, 64) :=*
+  //   TLBuffer.chainNode(2) :=*
+  //   TLCacheCork() :=*
+  //   TLDelayer(delayFactor) :=*
+  //   l3binder :*=
+  //   l3.node :*=
+  //   l2xbar
 
   lazy val module = new LazyModuleImp(this) with HasPerfEvents{
     master_nodes.zipWithIndex.foreach {
