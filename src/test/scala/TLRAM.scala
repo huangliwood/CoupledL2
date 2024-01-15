@@ -17,53 +17,53 @@ import freechips.rocketchip.util.property
 import xs.utils
 import xs.utils.{MaskExpand, Pipeline, RegNextN}
 
-class RAMHelper(memByte: BigInt) extends ExtModule with HasExtModuleInline {
-  val DataBits = 64
+// class RAMHelper(memByte: BigInt) extends ExtModule with HasExtModuleInline {
+//   val DataBits = 64
 
-  val clk   = IO(Input(Clock()))
-  val en    = IO(Input(Bool()))
-  val rIdx  = IO(Input(UInt(DataBits.W)))
-  val rdata = IO(Output(UInt(DataBits.W)))
-  val wIdx  = IO(Input(UInt(DataBits.W)))
-  val wdata = IO(Input(UInt(DataBits.W)))
-  val wmask = IO(Input(UInt(DataBits.W)))
-  val wen   = IO(Input(Bool()))
+//   val clk   = IO(Input(Clock()))
+//   val en    = IO(Input(Bool()))
+//   val rIdx  = IO(Input(UInt(DataBits.W)))
+//   val rdata = IO(Output(UInt(DataBits.W)))
+//   val wIdx  = IO(Input(UInt(DataBits.W)))
+//   val wdata = IO(Input(UInt(DataBits.W)))
+//   val wmask = IO(Input(UInt(DataBits.W)))
+//   val wen   = IO(Input(Bool()))
 
-  val verilogLines = Seq(
-    """  module RAMHelper(""",
-    """    input         clk,""",
-    """    input         en,""",
-    """    input  [63:0] rIdx,""",
-    """    output [63:0] rdata,""",
-    """    input  [63:0] wIdx,""",
-    """    input  [63:0] wdata,""",
-    """    input  [63:0] wmask,""",
-    """    input         wen""",
-    """  );""",
-    """  import "DPI-C" function void ram_write_helper (""",
-    """    input  longint    wIdx,""",
-    """    input  longint    wdata,""",
-    """    input  longint    wmask,""",
-    """    input  bit        wen""",
-    """  );""",
-    "",
-    """  import "DPI-C" function longint ram_read_helper (""",
-    """    input  bit        en,""",
-    """    input  longint    rIdx""",
-    """  );""",
-    "",
-    "",
-    """    assign rdata = ram_read_helper(en, rIdx);""",
-    "",
-    """    always @(posedge clk) begin""",
-    """      ram_write_helper(wIdx, wdata, wmask, wen && en);""",
-    """    end""",
-    "",
-    """  endmodule"""
-  )
+//   val verilogLines = Seq(
+//     """  module RAMHelper(""",
+//     """    input         clk,""",
+//     """    input         en,""",
+//     """    input  [63:0] rIdx,""",
+//     """    output [63:0] rdata,""",
+//     """    input  [63:0] wIdx,""",
+//     """    input  [63:0] wdata,""",
+//     """    input  [63:0] wmask,""",
+//     """    input         wen""",
+//     """  );""",
+//     """  import "DPI-C" function void ram_write_helper (""",
+//     """    input  longint    wIdx,""",
+//     """    input  longint    wdata,""",
+//     """    input  longint    wmask,""",
+//     """    input  bit        wen""",
+//     """  );""",
+//     "",
+//     """  import "DPI-C" function longint ram_read_helper (""",
+//     """    input  bit        en,""",
+//     """    input  longint    rIdx""",
+//     """  );""",
+//     "",
+//     "",
+//     """    assign rdata = ram_read_helper(en, rIdx);""",
+//     "",
+//     """    always @(posedge clk) begin""",
+//     """      ram_write_helper(wIdx, wdata, wmask, wen && en);""",
+//     """    end""",
+//     "",
+//     """  endmodule"""
+//   )
 
-  setInline(s"$desiredName.v", verilogLines.mkString("\n"))
-}
+//   setInline(s"$desiredName.v", verilogLines.mkString("\n"))
+// }
 
 class TLRAMErrors(val params: ECCParams, val addrBits: Int) extends Bundle with CanHaveErrors {
   val correctable   = (params.code.canCorrect && params.notifyErrors).option(Valid(UInt(addrBits.W)))
@@ -392,123 +392,123 @@ class TLRAM(
 }
 
 
-class MemoryRequestHelper(requestType: Int)
-  extends ExtModule(Map("REQUEST_TYPE" -> requestType))
-    with HasExtModuleInline
-{
-  val clock     = IO(Input(Clock()))
-  val reset     = IO(Input(Reset()))
-  val io = IO(new Bundle {
-    val req = Flipped(ValidIO(new Bundle {
-      val addr = UInt(64.W)
-      val id   = UInt(32.W)
-    }))
-    val response = Output(Bool())
-  })
+// class MemoryRequestHelper(requestType: Int)
+//   extends ExtModule(Map("REQUEST_TYPE" -> requestType))
+//     with HasExtModuleInline
+// {
+//   val clock     = IO(Input(Clock()))
+//   val reset     = IO(Input(Reset()))
+//   val io = IO(new Bundle {
+//     val req = Flipped(ValidIO(new Bundle {
+//       val addr = UInt(64.W)
+//       val id   = UInt(32.W)
+//     }))
+//     val response = Output(Bool())
+//   })
 
-  val verilogLines = Seq(
-    "import \"DPI-C\" function bit memory_request (",
-    "  input longint address,",
-    "  input int id,",
-    "  input bit isWrite",
-    ");",
-    "",
-    "module MemoryRequestHelper #(",
-    "  parameter REQUEST_TYPE",
-    ")(",
-    "  input             clock,",
-    "  input             reset,",
-    "  input             io_req_valid,",
-    "  input      [63:0] io_req_bits_addr,",
-    "  input      [31:0] io_req_bits_id,",
-    "  output reg        io_response",
-    ");",
-    "",
-    "always @(posedge clock or posedge reset) begin",
-    "  if (reset) begin",
-    "    io_response <= 1'b0;",
-    "  end",
-    "  else if (io_req_valid) begin",
-    "    io_response <= memory_request(io_req_bits_addr, io_req_bits_id, REQUEST_TYPE);",
-    "  end",
-    "  else begin",
-    "    io_response <= 1'b0;",
-    "  end",
-    "end",
-    "",
-    "endmodule"
-  )
-  setInline(s"$desiredName.v", verilogLines.mkString("\n"))
-}
+//   val verilogLines = Seq(
+//     "import \"DPI-C\" function bit memory_request (",
+//     "  input longint address,",
+//     "  input int id,",
+//     "  input bit isWrite",
+//     ");",
+//     "",
+//     "module MemoryRequestHelper #(",
+//     "  parameter REQUEST_TYPE",
+//     ")(",
+//     "  input             clock,",
+//     "  input             reset,",
+//     "  input             io_req_valid,",
+//     "  input      [63:0] io_req_bits_addr,",
+//     "  input      [31:0] io_req_bits_id,",
+//     "  output reg        io_response",
+//     ");",
+//     "",
+//     "always @(posedge clock or posedge reset) begin",
+//     "  if (reset) begin",
+//     "    io_response <= 1'b0;",
+//     "  end",
+//     "  else if (io_req_valid) begin",
+//     "    io_response <= memory_request(io_req_bits_addr, io_req_bits_id, REQUEST_TYPE);",
+//     "  end",
+//     "  else begin",
+//     "    io_response <= 1'b0;",
+//     "  end",
+//     "end",
+//     "",
+//     "endmodule"
+//   )
+//   setInline(s"$desiredName.v", verilogLines.mkString("\n"))
+// }
 
-class MemoryResponseHelper(requestType: Int)
-  extends ExtModule(Map("REQUEST_TYPE" -> requestType))
-    with HasExtModuleInline
-{
-  val clock    = IO(Input(Clock()))
-  val reset    = IO(Input(Reset()))
-  val enable   = IO(Input(Bool()))
-  val response = IO(Output(UInt(64.W)))
+// class MemoryResponseHelper(requestType: Int)
+//   extends ExtModule(Map("REQUEST_TYPE" -> requestType))
+//     with HasExtModuleInline
+// {
+//   val clock    = IO(Input(Clock()))
+//   val reset    = IO(Input(Reset()))
+//   val enable   = IO(Input(Bool()))
+//   val response = IO(Output(UInt(64.W)))
 
-  val verilogLines = Seq(
-    "import \"DPI-C\" function longint memory_response (",
-    "  input bit isWrite",
-    ");",
-    "",
-    "module MemoryResponseHelper #(",
-    "  parameter REQUEST_TYPE",
-    ")(",
-    "  input             clock,",
-    "  input             reset,",
-    "  input             enable,",
-    "  output reg [63:0] response",
-    ");",
-    "",
-    "always @(posedge clock or posedge reset) begin",
-    "  if (reset) begin",
-    "    response <= 64'b0;",
-    "  end",
-    "  else if (!reset && enable) begin",
-    "    response <= memory_response(REQUEST_TYPE);",
-    "  end",
-    " else begin",
-    "    response <= 64'b0;",
-    "  end",
-    "end",
-    "",
-    "endmodule"
-  )
-  setInline(s"$desiredName.v", verilogLines.mkString("\n"))
-}
+//   val verilogLines = Seq(
+//     "import \"DPI-C\" function longint memory_response (",
+//     "  input bit isWrite",
+//     ");",
+//     "",
+//     "module MemoryResponseHelper #(",
+//     "  parameter REQUEST_TYPE",
+//     ")(",
+//     "  input             clock,",
+//     "  input             reset,",
+//     "  input             enable,",
+//     "  output reg [63:0] response",
+//     ");",
+//     "",
+//     "always @(posedge clock or posedge reset) begin",
+//     "  if (reset) begin",
+//     "    response <= 64'b0;",
+//     "  end",
+//     "  else if (!reset && enable) begin",
+//     "    response <= memory_response(REQUEST_TYPE);",
+//     "  end",
+//     " else begin",
+//     "    response <= 64'b0;",
+//     "  end",
+//     "end",
+//     "",
+//     "endmodule"
+//   )
+//   setInline(s"$desiredName.v", verilogLines.mkString("\n"))
+// }
 
 
-trait MemoryHelper { this: Module =>
-  private def requestType(isWrite: Boolean): Int = if (isWrite) 1 else 0
-  private def request(valid: Bool, addr: UInt, id: UInt, isWrite: Boolean): Bool = {
-    val helper = Module(new MemoryRequestHelper(requestType(isWrite)))
-    helper.clock := clock
-    helper.reset := reset
-    helper.io.req.valid := valid
-    helper.io.req.bits.addr := addr
-    helper.io.req.bits.id := id
-    helper.io.response
-  }
-  protected def readRequest(valid: Bool, addr: UInt, id: UInt): Bool =
-    request(valid, addr, id, false)
-  protected def writeRequest(valid: Bool, addr: UInt, id: UInt): Bool =
-    request(valid, addr, id, true)
-  private def response(enable: Bool, isWrite: Boolean): (Bool, UInt) = {
-    val helper = Module(new MemoryResponseHelper(requestType(isWrite)))
-    helper.clock := clock
-    helper.reset := reset
-    helper.enable := enable
-    (helper.response(32), helper.response(31, 0))
-  }
-  protected def readResponse(enable: Bool): (Bool, UInt) =
-    response(enable, false)
-  protected def writeResponse(enable: Bool): (Bool, UInt) =
-    response(enable, true)
-}
+// trait MemoryHelper { this: Module =>
+//   private def requestType(isWrite: Boolean): Int = if (isWrite) 1 else 0
+//   private def request(valid: Bool, addr: UInt, id: UInt, isWrite: Boolean): Bool = {
+//     val helper = Module(new MemoryRequestHelper(requestType(isWrite)))
+//     helper.clock := clock
+//     helper.reset := reset
+//     helper.io.req.valid := valid
+//     helper.io.req.bits.addr := addr
+//     helper.io.req.bits.id := id
+//     helper.io.response
+//   }
+//   protected def readRequest(valid: Bool, addr: UInt, id: UInt): Bool =
+//     request(valid, addr, id, false)
+//   protected def writeRequest(valid: Bool, addr: UInt, id: UInt): Bool =
+//     request(valid, addr, id, true)
+//   private def response(enable: Bool, isWrite: Boolean): (Bool, UInt) = {
+//     val helper = Module(new MemoryResponseHelper(requestType(isWrite)))
+//     helper.clock := clock
+//     helper.reset := reset
+//     helper.enable := enable
+//     (helper.response(32), helper.response(31, 0))
+//   }
+//   protected def readResponse(enable: Bool): (Bool, UInt) =
+//     response(enable, false)
+//   protected def writeResponse(enable: Bool): (Bool, UInt) =
+//     response(enable, true)
+// }
 
 class TLRAM_WithDRAMSim3(
     address: AddressSet,
@@ -595,9 +595,13 @@ class TLRAM_WithDRAMSim3(
     val isAcquireBlock = in.a.bits.opcode === AcquireBlock
     val isAcquirePerm = in.a.bits.opcode === AcquirePerm
     val isAcquire = isAcquireBlock || isAcquirePerm
+    val isGet = in.a.bits.opcode === Get
     val isReleaseData = in.c.bits.opcode === ReleaseData
     val isRelease = in.c.bits.opcode === Release
-    assert(( in.a.valid && (isAcquireBlock || isAcquirePerm) ) || !in.a.valid)
+    val isPutFullData = in.a.bits.opcode === PutFullData
+    val isPutPartialData = in.a.bits.opcode === PutPartialData
+    val isPut = isPutFullData || isPutPartialData
+    assert((in.a.valid && (isAcquireBlock || isAcquirePerm || isGet || isPut) ) || !in.a.valid)
 
     // TODO: Release
     assert(!(in.a.bits.opcode === AcquirePerm && in.a.fire))
@@ -605,8 +609,8 @@ class TLRAM_WithDRAMSim3(
     assert(!(in.a.fire && (in.a.bits.param =/= NtoT && in.a.bits.param =/= NtoB)))
     assert(!(in.c.fire && in.c.bits.param =/= TtoN))
     
-    val ren = isAcquire && in.a.fire && a_first
-    val wen = isReleaseData && in.c.fire && c_first
+    val ren = (isAcquire || isGet) && in.a.fire && a_first
+    val wen = (isReleaseData && in.c.fire && c_first) || (isPut && in.a.fire && a_first)
     val en = ren || wen
     val rAddr = Mux(ren, in.a.bits.address, RegEnable(in.a.bits.address, in.a.fire && a_first))
     val rSourceId = Mux(ren, in.a.bits.source, RegEnable(in.a.bits.source, in.a.fire && a_first))
