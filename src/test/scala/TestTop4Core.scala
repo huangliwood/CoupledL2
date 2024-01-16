@@ -100,7 +100,7 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
         clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
         echoField = Seq(huancun.DirtyField()),
         // prefetch = Some(BOPParameters(rrTableEntries = 16,rrTagBits = 6))
-        prefetch = Some(coupledL2.prefetch.HyperPrefetchParams()), // Some(HyperPrefetchParams()),
+        prefetch = None, // Some(HyperPrefetchParams()),
         /* del L2 prefetche recv option, move into: prefetch =  PrefetchReceiverParams
         prefetch options:
           SPPParameters          => spp only
@@ -114,19 +114,23 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
         PrefetchReceiverParams() => spp has cross level refill
         None                     => spp only refill L2 
         */
+        enablePerf = false,
+        enableAssert = true,
+        enableMonitor = true,
         elaboratedTopDown = false,
+        FPGAPlatform = false
       )
       case DebugOptionsKey => DebugOptions()
     })))
     
     val binder = BankBinder(L2NBanks, L2BlockSize)
     l2binders = l2binders ++ Seq(binder)
-    l2.pf_recv_node match {
-      case Some(l2Recv) =>
-        val l1_sms_send_0_node = LazyModule(new PrefetchSmsOuterNode)
-        l2Recv := l1_sms_send_0_node.outNode
-      case None =>
-    }
+//    l2.pf_recv_node match {
+//      case Some(l2Recv) =>
+//        val l1_sms_send_0_node = LazyModule(new PrefetchSmsOuterNode)
+//        l2Recv := l1_sms_send_0_node.outNode
+//      case None =>
+//    }
     l2xbar := TLBuffer.chainNode(2) := TLClientsMerger() := TLXbar() :=* binder :*= l2.node :*= l1xbars(i)
 
     l2
