@@ -347,6 +347,8 @@ object TestTop_fullSys_4Core extends App {
       " disallowPortDeclSharing, disallowLocalVariables," +
       " emittedLineLength=120, explicitBitcast, locationInfoStyle=plain," +
       " disallowExpressionInliningInPorts, disallowMuxInlining"),
+    FirtoolOption("--split-verilog"),
+    FirtoolOption("-o=./build/rtl"),
     ChiselGeneratorAnnotation(() => top.module),
   ))
 }
