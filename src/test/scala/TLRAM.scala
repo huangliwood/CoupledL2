@@ -17,53 +17,6 @@ import freechips.rocketchip.util.property
 import xs.utils
 import xs.utils.{MaskExpand, Pipeline, RegNextN}
 
-// class RAMHelper(memByte: BigInt) extends ExtModule with HasExtModuleInline {
-//   val DataBits = 64
-
-//   val clk   = IO(Input(Clock()))
-//   val en    = IO(Input(Bool()))
-//   val rIdx  = IO(Input(UInt(DataBits.W)))
-//   val rdata = IO(Output(UInt(DataBits.W)))
-//   val wIdx  = IO(Input(UInt(DataBits.W)))
-//   val wdata = IO(Input(UInt(DataBits.W)))
-//   val wmask = IO(Input(UInt(DataBits.W)))
-//   val wen   = IO(Input(Bool()))
-
-//   val verilogLines = Seq(
-//     """  module RAMHelper(""",
-//     """    input         clk,""",
-//     """    input         en,""",
-//     """    input  [63:0] rIdx,""",
-//     """    output [63:0] rdata,""",
-//     """    input  [63:0] wIdx,""",
-//     """    input  [63:0] wdata,""",
-//     """    input  [63:0] wmask,""",
-//     """    input         wen""",
-//     """  );""",
-//     """  import "DPI-C" function void ram_write_helper (""",
-//     """    input  longint    wIdx,""",
-//     """    input  longint    wdata,""",
-//     """    input  longint    wmask,""",
-//     """    input  bit        wen""",
-//     """  );""",
-//     "",
-//     """  import "DPI-C" function longint ram_read_helper (""",
-//     """    input  bit        en,""",
-//     """    input  longint    rIdx""",
-//     """  );""",
-//     "",
-//     "",
-//     """    assign rdata = ram_read_helper(en, rIdx);""",
-//     "",
-//     """    always @(posedge clk) begin""",
-//     """      ram_write_helper(wIdx, wdata, wmask, wen && en);""",
-//     """    end""",
-//     "",
-//     """  endmodule"""
-//   )
-
-//   setInline(s"$desiredName.v", verilogLines.mkString("\n"))
-// }
 
 class TLRAMErrors(val params: ECCParams, val addrBits: Int) extends Bundle with CanHaveErrors {
   val correctable   = (params.code.canCorrect && params.notifyErrors).option(Valid(UInt(addrBits.W)))
