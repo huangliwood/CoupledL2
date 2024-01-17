@@ -245,11 +245,10 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
   val pending_write_req_valid = RegInit(VecInit.fill(2)(false.B))
   val pending_write_req_bits  = RegEnable(in.aw.bits, in.aw.fire)
   val pending_write_req_data  = RegEnable(in.w.bits, in.w.fire)
-  XSError(in.aw.fire && in.aw.bits.len === 0.U, "data must have more than one beat now")
   val pending_write_req_ready = Wire(Bool())
   val pending_write_need_req = pending_write_req_valid.last && !pending_write_req_ready
-  val write_req_valid = pending_write_req_valid.head && (pending_write_need_req || in.w.valid && in.w.bits.last)
-  pending_write_req_ready := writeRequest(write_req_valid, pending_write_req_bits.addr, pending_write_req_bits.id) 
+  val write_req_valid = pending_write_req_valid.head && (pending_write_need_req || in.w.fire && in.w.bits.last); dontTouch(write_req_valid)
+  pending_write_req_ready := writeRequest(write_req_valid, pending_write_req_bits.addr, pending_write_req_bits.id)
 
   when (in.aw.fire) {
     pending_write_req_valid.head := true.B
@@ -262,7 +261,7 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
   }.elsewhen (pending_write_req_ready) {
     pending_write_req_valid.last := false.B
   }
-  in.aw.ready := !pending_write_req_valid.head || pending_write_req_ready
+  in.aw.ready := !pending_write_req_valid.head
   in.w.ready := in.aw.ready || !pending_write_req_valid.last
 
   // ram is written when write data fire
