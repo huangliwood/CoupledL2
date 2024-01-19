@@ -96,7 +96,7 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
       case L2ParamKey => L2Param(
         name = s"l2$i",
         ways = 8,
-        sets = 256,
+        sets = 512,
         clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
         echoField = Seq(huancun.DirtyField()),
         // prefetch = Some(BOPParameters(rrTableEntries = 16,rrTagBits = 6))
@@ -141,8 +141,8 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
     case HCCacheParamsKey => HCCacheParameters(
       name = "L3",
       level = 3,
-      ways = 4,
-      sets = 2048,
+      ways = 8,
+      sets = 512,
       inclusive = false,
       clientCaches = Seq(CacheParameters(sets = 32, ways = 4, blockGranularity = log2Ceil(32), name = "L2")),
       sramClkDivBy2 = true,
