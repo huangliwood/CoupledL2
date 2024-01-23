@@ -246,7 +246,7 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
       useBlackBox = true, 
       executable = true,
       beatBytes = L3OuterBusWidth / 8,
-      burstLen = L3BlockSize / (L3OuterBusWidth / 8)
+      burstLen = 256
     ))
 
     ram.node :=

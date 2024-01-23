@@ -216,11 +216,11 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
   val ramSplit = outer.beatBytes / ramWidth
   val ramBaseAddr = outer.address.head.base
   val ramOffsetBits = log2Ceil(outer.memByte)
-  def ramIndex(addr: UInt) = ((addr - ramBaseAddr.U)(ramOffsetBits - 1, 0) >> log2Ceil(ramWidth)).asUInt
+  def ramIndex(addr: UInt) = ((addr - ramBaseAddr.U)(ramOffsetBits - 1, 0) >> log2Ceil(in.w.bits.data.getWidth/8)).asUInt // 3 5
   val ramHelper = Seq.fill(ramSplit)(MemoryRWHelper(clock, reset))
 
   val numOutstanding = 1 << in.ar.bits.id.getWidth
-  val addressMem = Mem(numOutstanding, UInt((in.ar.bits.addr.getWidth - log2Ceil(ramWidth)).W))
+  val addressMem = Mem(numOutstanding, UInt(in.ar.bits.addr.getWidth.W))
   val arlenMem = Mem(numOutstanding, UInt(in.ar.bits.len.getWidth.W))
 
   // accept a read request and send it to the external model
@@ -234,7 +234,7 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
 
   when (in.ar.fire) {
     pending_read_req_valid := true.B
-    addressMem.write(read_req_bits.id, ramIndex(read_req_bits.addr))
+    addressMem.write(read_req_bits.id, read_req_bits.addr)
     arlenMem.write(read_req_bits.id, read_req_bits.len)
   }.elsewhen (pending_read_req_ready) {
     pending_read_req_valid := false.B
@@ -267,7 +267,7 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
   // ram is written when write data fire
   val wdata_cnt = Counter(outer.burstLen)
   val write_req_addr = Mux(in.aw.fire, in.aw.bits.addr, pending_write_req_bits.addr)
-  val write_req_index = ramIndex(write_req_addr) + Cat(wdata_cnt.value, 0.U(log2Ceil(ramSplit).W))
+  val write_req_index = Cat(ramIndex(write_req_addr)+wdata_cnt.value, 0.U(log2Ceil(ramSplit).W)); dontTouch(write_req_index)
   for ((ram, i) <- ramHelper.zipWithIndex) {
     val enable = in.w.fire
     val address = write_req_index + i.U
@@ -289,11 +289,11 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
   val (read_resp_valid, read_resp_id) = readResponse(!has_read_resp || read_resp_last) 
   has_read_resp := (read_resp_valid && !read_resp_last) || pending_read_resp_valid
   val rdata_cnt = Counter(outer.burstLen)
-  val read_resp_addr = addressMem(in.r.bits.id) + Cat(rdata_cnt.value, 0.U(log2Ceil(ramSplit).W))
+  val read_resp_index = Cat(ramIndex(addressMem(in.r.bits.id))+rdata_cnt.value, 0.U(log2Ceil(ramSplit).W)); dontTouch(read_resp_index)
   val read_resp_len = arlenMem(in.r.bits.id)
   in.r.valid := read_resp_valid || pending_read_resp_valid
   in.r.bits.id := Mux(pending_read_resp_valid, pending_read_resp_id, read_resp_id)
-  val rdata = ramHelper.zipWithIndex.map{ case (ram, i) => ram.read(in.r.valid, read_resp_addr + i.U) }
+  val rdata = ramHelper.zipWithIndex.map{ case (ram, i) => ram.read(in.r.valid, read_resp_index + i.U) }
   in.r.bits.data := VecInit(rdata).asUInt
   in.r.bits.resp := AXI4Parameters.RESP_OKAY
   in.r.bits.last := (rdata_cnt.value === read_resp_len)
