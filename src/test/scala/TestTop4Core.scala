@@ -31,6 +31,9 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
   val L2BlockSize = 64
   val L3BlockSize = 64
 
+  val openL2Pf = false
+  val l2Pf = if(openL2Pf) Some(coupledL2.prefetch.PrefetchReceiverParams()) else None
+
   def createDCacheNode(name: String, sources: Int) = {
     val masterNode = TLClientNode(Seq(
       TLMasterPortParameters.v2(
@@ -99,21 +102,7 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
         sets = 512,
         clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
         echoField = Seq(huancun.DirtyField()),
-        // prefetch = Some(BOPParameters(rrTableEntries = 16,rrTagBits = 6))
-        prefetch = None, // Some(HyperPrefetchParams()),
-        /* del L2 prefetche recv option, move into: prefetch =  PrefetchReceiverParams
-        prefetch options:
-          SPPParameters          => spp only
-          BOPParameters          => bop only
-          PrefetchReceiverParams => sms+bop
-          HyperPrefetchParams    => spp+bop+sms
-        */
-        // sppMultiLevelRefill = None, // Some(coupledL2.prefetch.PrefetchReceiverParams()),
-        /*must has spp, otherwise Assert Fail
-        sppMultiLevelRefill options:
-        PrefetchReceiverParams() => spp has cross level refill
-        None                     => spp only refill L2 
-        */
+        prefetch = l2Pf,
         enablePerf = false,
         enableAssert = true,
         enableMonitor = true,
@@ -125,12 +114,14 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
     
     val binder = BankBinder(L2NBanks, L2BlockSize)
     l2binders = l2binders ++ Seq(binder)
-//    l2.pf_recv_node match {
-//      case Some(l2Recv) =>
-//        val l1_sms_send_0_node = LazyModule(new PrefetchSmsOuterNode)
-//        l2Recv := l1_sms_send_0_node.outNode
-//      case None =>
-//    }
+    if(openL2Pf) {
+      l2.pf_recv_node match {
+       case Some(l2Recv) =>
+         val l1_sms_send_0_node = LazyModule(new PrefetchSmsOuterNode)
+         l2Recv := l1_sms_send_0_node.outNode
+       case None =>
+     }
+    }
     l2xbar := TLBuffer.chainNode(2) := TLClientsMerger() := TLXbar() :=* binder :*= l2.node :*= l1xbars(i)
 
     l2
