@@ -64,6 +64,8 @@ class MSHR(implicit p: Parameters) extends L2Module {
   val alreadySRefill   = RegInit(false.B)
   val AneedReplMergeB  = RegInit(false.B)
 
+  val alreadyNestC     = RegInit(false.B)
+
   val gotT = RegInit(false.B) // L3 might return T even though L2 wants B
   val gotDirty = RegInit(false.B)
   val gotGrantData = RegInit(false.B)
@@ -101,6 +103,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
     alreadySendProbe := false.B
     alreadySRefill   := false.B
     AneedReplMergeB  := false.B
+    alreadyNestC     := false.B
 
     req_valid_dups.foreach(_ := true.B)
     state_dups.foreach(_ := io.alloc.bits.state)
@@ -135,7 +138,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
 
   val mp_probeack_valid = !state_dups(0).s_probeack && state_dups(0).w_pprobeacklast
   val mp_merge_probeack_valid = !state_dups(0).s_merge_probeack && state_dups(1).w_rprobeacklast 
-  val mp_grant_valid = !state_dups(0).s_refill && state_dups(0).w_grantlast && state_dups(1).w_rprobeacklast // [Alias] grant after rprobe done
+  val mp_grant_valid = !state_dups(0).s_refill && state_dups(0).w_grantlast && state_dups(1).w_rprobeacklast && state_dups(0).w_release // [Alias] grant after rprobe done
   io.tasks.mainpipe.valid := mp_release_valid || mp_probeack_valid || mp_merge_probeack_valid || mp_grant_valid
   // io.tasks.prefetchTrain.foreach(t => t.valid := !state_dups(0).s_triggerprefetch.getOrElse(true.B))
 
@@ -477,6 +480,10 @@ class MSHR(implicit p: Parameters) extends L2Module {
       state_dups.foreach(_.w_pprobeacklast := state_dups(1).w_pprobeacklast || c_resp.bits.last)
       state_dups.foreach(_.w_pprobeack := state_dups(0).w_pprobeack || req.off === 0.U || c_resp.bits.last)
     }
+    if(cacheParams.enableAssert) { assert(!(c_resp.bits.opcode === ProbeAckData && c_resp.bits.param === NtoN)) }
+    when (c_resp.bits.opcode === ProbeAck && c_resp.bits.param === NtoN) {
+      state_dups.foreach(_.w_release := alreadyNestC) // when alreadyNestC not need to wait release
+    }
     when (c_resp.bits.opcode === ProbeAckData) {
       probeDirty := true.B
     }
@@ -629,6 +636,11 @@ class MSHR(implicit p: Parameters) extends L2Module {
     dirResult.set === io.nestedwb.set &&
     dirResult_tag_dups(4) === io.nestedwb.tag &&
     state_dups(2).w_replResp
+
+  when (io.nestedwb.is_c && nestedwb_match){
+    alreadyNestC := true.B
+    when(!state_dups(0).w_release) { state_dups.foreach(_.w_release := true.B) }
+  }
 
   when (nestedwb_match) {
     when (io.nestedwb.c_set_dirty) {

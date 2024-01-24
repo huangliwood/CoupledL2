@@ -237,6 +237,7 @@ class FSMState(implicit p: Parameters) extends L2Bundle {
   val w_releaseack = Bool()
   val w_grantack = Bool()
   val w_replResp = Bool()
+  val w_release = Bool() // wait release when got probeAck NtoN
 }
 
 class SourceAReq(implicit p: Parameters) extends L2Bundle {
@@ -272,6 +273,7 @@ class NestedWriteback(implicit p: Parameters) extends L2Bundle {
   val tag = UInt(tagBits.W)
   val b_set_meta_N = Bool()
   val c_set_dirty = Bool()
+  val is_c = Bool()
 }
 
 class PrefetchRecv(implicit p: Parameters) extends L2Bundle {
