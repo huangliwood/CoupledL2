@@ -26,6 +26,12 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
   val NumCores = 4
   val nrL2 = NumCores
 
+  val l2Set = 512
+  val l2Way = 8
+
+  val l3Set = 512
+  val l3Way = 8
+
   val L2NBanks = 2
   val L3NBanks = 4
   val L2BlockSize = 64
@@ -98,8 +104,8 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
     val l2 = LazyModule(new CoupledL2()(new Config((_, _, _) => {
       case L2ParamKey => L2Param(
         name = s"l2$i",
-        ways = 8,
-        sets = 512,
+        ways = l2Way,
+        sets = l2Set,
         clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
         echoField = Seq(huancun.DirtyField()),
         prefetch = l2Pf,
@@ -128,14 +134,15 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
   }
 
   // Create L3 node
+  val clientDirBytes = (0 until nrL2).map( _ => l2Set * l2Way * L2BlockSize ).sum
   val l3 = LazyModule(new HuanCun()(new Config((_, _, _) => {
     case HCCacheParamsKey => HCCacheParameters(
       name = "L3",
       level = 3,
-      ways = 8,
-      sets = 512,
+      ways = l3Way,
+      sets = l3Set,
       inclusive = false,
-      clientCaches = Seq(CacheParameters(sets = 32, ways = 4, blockGranularity = log2Ceil(32), name = "L2")),
+      clientCaches = Seq(CacheParameters(sets = 2 * clientDirBytes / L2NBanks / l2Way / 64, ways = l2Way + 2, blockGranularity = log2Ceil(32), name = "L2")), 
       sramClkDivBy2 = true,
       sramDepthDiv = 8,
       dataBytes = 8,
