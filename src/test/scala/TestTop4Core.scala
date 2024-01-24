@@ -26,10 +26,10 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
   val NumCores = 4
   val nrL2 = NumCores
 
-  val l2Set = 512
+  val l2Set = 256
   val l2Way = 8
 
-  val l3Set = 512
+  val l3Set = 2048
   val l3Way = 8
 
   val L2NBanks = 2
