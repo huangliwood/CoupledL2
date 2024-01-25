@@ -53,12 +53,16 @@ class Monitor(implicit p: Parameters) extends L2Module {
   val dirResult_s3  = mp.dirResult_s3
   val meta_s3       = mp.dirResult_s3.meta
 
-  //  TODO: debug address consider multi-bank
-  def restoreAddr(set: UInt, tag: UInt) = {
-    (set << offsetBits).asUInt + (tag << (setBits + offsetBits)).asUInt
+  def restoreFullAddr(bank: UInt, set: UInt, tag: UInt) = {
+    (bank << offsetBits).asUInt + (set << (bankBits + offsetBits)).asUInt + (tag << (setBits + bankBits + offsetBits)).asUInt
   }
-  val debug_addr_s3 = restoreAddr(req_s3.set, req_s3.tag)
-  dontTouch(debug_addr_s3)
+
+  val debug_addr_s3_vec = WireInit(VecInit(Seq.fill(1 << bankBits)(0.U(fullAddressBits.W))))
+  debug_addr_s3_vec.zipWithIndex.foreach {
+    case (addr, i) =>
+      addr := restoreFullAddr(i.asUInt, req_s3.set, req_s3.tag)
+  }
+  dontTouch(debug_addr_s3_vec)
   /* ======== MainPipe Assertions ======== */
   // ! Release w/o data will not trigger nestedWBValid, either
   // ! consider using mshrs.map(_.io.nestedwb_match) and passes to Monitor, if necessary
@@ -70,11 +74,11 @@ class Monitor(implicit p: Parameters) extends L2Module {
 
   val c_should_has_client_hit = s3_valid && !mshr_req_s3 && dirResult_s3.hit && meta_s3.state === TRUNK && !meta_s3.clients.orR
   dontTouch(c_should_has_client_hit)
-  if(cacheParams.enableAssert) assert(RegNext(!(c_should_has_client_hit)), "Trunk should have some client hit addr: %x", RegNext(debug_addr_s3))
+  if(cacheParams.enableAssert) assert(RegNext(!(c_should_has_client_hit)), "Trunk should have some client hit addr: slice0[%x] slice1[%x]", RegNext(debug_addr_s3_vec(0)), RegNext(debug_addr_s3_vec(1)))
 
   val inv_should_not_send_c = s3_valid && req_s3.fromC && dirResult_s3.hit && !meta_s3.clients.orR
   dontTouch(inv_should_not_send_c)
-  if(cacheParams.enableAssert) assert(RegNext(!(inv_should_not_send_c)), "Invalid Client should not send Release addr: %x", RegNext(debug_addr_s3))
+  if(cacheParams.enableAssert) assert(RegNext(!(inv_should_not_send_c)), "Invalid Client should not send Release addr: slice0[%x] slice1[%x]", RegNext(debug_addr_s3_vec(0)), RegNext(debug_addr_s3_vec(1)))
 
   // assertion for set blocking
   // A channel task @s1 never have same-set task @s2/s3
