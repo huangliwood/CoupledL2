@@ -84,11 +84,13 @@ trait HasCoupledL2Parameters {
   lazy val sourceIdAll = 1 << sourceIdBits
 
   val mshrsAll = cacheParams.mshrs
-  val idsAll = 256// ids of L2 //TODO: Paramterize like this: max(mshrsAll * 2, sourceIdAll * 2)
-  val mshrBits = log2Up(idsAll)
-  // id of 0XXXX refers to mshrId
-  // id of 1XXXX refers to reqs that do not enter mshr
-  // require(isPow2(idsAll))
+
+  // id of 0XXXXX refers to mshrId
+  // id of 10XXXX refers to reqs that do not enter mshr
+  // id of 11XXXX refers to reqs that do not enter mshr remap in grantBuf
+  val sourceIdAllTemp = 256
+  val idsAll = mshrsAll.max(sourceIdAllTemp * 2) * 2 // TODO: Paramterize sourceIdAll like this : (mshrsAll.max(sourceIdAll) + 1) * 2
+  val mshrBits = log2Ceil(idsAll) // mshrIdBits
 
   val grantBufSize = mshrsAll
   val grantBufInflightSize = mshrsAll //TODO: lack or excessive? !! WARNING
