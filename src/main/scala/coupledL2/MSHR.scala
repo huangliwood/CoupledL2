@@ -481,9 +481,6 @@ class MSHR(implicit p: Parameters) extends L2Module {
       state_dups.foreach(_.w_pprobeack := state_dups(0).w_pprobeack || req.off === 0.U || c_resp.bits.last)
     }
     if(cacheParams.enableAssert) { assert(!(c_resp.bits.opcode === ProbeAckData && c_resp.bits.param === NtoN)) }
-    when (c_resp.bits.opcode === ProbeAck && c_resp.bits.param === NtoN) {
-      state_dups.foreach(_.w_release := alreadyNestC) // when alreadyNestC not need to wait release
-    }
     when (c_resp.bits.opcode === ProbeAckData) {
       probeDirty := true.B
     }
@@ -637,9 +634,15 @@ class MSHR(implicit p: Parameters) extends L2Module {
     dirResult_tag_dups(4) === io.nestedwb.tag &&
     state_dups(2).w_replResp
 
+  // when probeAck NtoN, mshr need to wait RelaseData nest it
+  // Warnning: under logic only consider nest one time
   when (io.nestedwb.is_c && nestedwb_match){
     alreadyNestC := true.B
-    when(!state_dups(0).w_release) { state_dups.foreach(_.w_release := true.B) }
+    state_dups.foreach(_.w_release := true.B)
+  }.elsewhen(c_resp.valid){
+    when(c_resp.bits.opcode === ProbeAck && c_resp.bits.param === NtoN) {
+      state_dups.foreach(_.w_release := alreadyNestC) // when alreadyNestC not need to wait release
+    }
   }
 
   when (nestedwb_match) {
