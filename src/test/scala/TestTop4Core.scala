@@ -249,7 +249,7 @@ class TestTop_fullSys_4Core()(implicit p: Parameters) extends LazyModule {
 
     val ram = LazyModule(new AXI4Memory(
       address = memRange, 
-      memByte = 16L * 1024 * 1024 * 1024, 
+      memByte = 128L * 1024 * 1024 * 1024, 
       useBlackBox = true, 
       executable = true,
       beatBytes = L3OuterBusWidth / 8,
