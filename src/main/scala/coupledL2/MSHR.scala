@@ -109,6 +109,8 @@ class MSHR(implicit p: Parameters) extends L2Module {
     state_dups.foreach(_ := io.alloc.bits.state)
     req_set_dups.foreach(_ := io.alloc.bits.task.set)
     dirResult_tag_dups.foreach(_ := io.alloc.bits.dirResult.tag)
+
+    if(cacheParams.enableAssert) { assert(PopCount(state_dups.map(_.asUInt.andR.asBool)).asUInt === 4.U, "all state must be ture when alloc new task") }
   }
 
   /* ======== Enchantment ======== */
@@ -133,11 +135,12 @@ class MSHR(implicit p: Parameters) extends L2Module {
   io.tasks.source_b.valid := !state_dups(0).s_pprobe || !state_dups(0).s_rprobe
   val will_mp_release_valid = !state_dups(0).s_release && state_dups(0).w_rprobeacklast && !io.bMergeTask.valid &&
     state_dups(0).w_grantlast &&
-    state_dups(0).w_replResp // release after Grant to L1 sent and replRead returns
+    state_dups(0).w_replResp && // release after Grant to L1 sent and replRead returns
+    state_dups(0).w_release
   val mp_release_valid = RegNext(will_mp_release_valid) && !io.bMergeTask.valid && will_mp_release_valid // add reg because sinkB bMergeTask out add pipe
 
-  val mp_probeack_valid = !state_dups(0).s_probeack && state_dups(0).w_pprobeacklast
-  val mp_merge_probeack_valid = !state_dups(0).s_merge_probeack && state_dups(1).w_rprobeacklast 
+  val mp_probeack_valid = !state_dups(0).s_probeack && state_dups(0).w_pprobeacklast && state_dups(0).w_release
+  val mp_merge_probeack_valid = !state_dups(0).s_merge_probeack && state_dups(1).w_rprobeacklast  && state_dups(0).w_release
   val mp_grant_valid = !state_dups(0).s_refill && state_dups(0).w_grantlast && state_dups(1).w_rprobeacklast && state_dups(0).w_release // [Alias] grant after rprobe done
   io.tasks.mainpipe.valid := mp_release_valid || mp_probeack_valid || mp_merge_probeack_valid || mp_grant_valid
   // io.tasks.prefetchTrain.foreach(t => t.valid := !state_dups(0).s_triggerprefetch.getOrElse(true.B))
