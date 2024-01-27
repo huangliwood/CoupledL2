@@ -23,6 +23,10 @@ test-top-l2:
 	mill -i CoupledL2.test.runMain coupledL2.TestTop_L2 -td build
 	mv build/TestTop_L2.v build/TestTop.v
 
+test-top-l3:
+	mill -i CoupledL2.test.runMain coupledL2.TestTop_L3 -td build
+	mv build/TestTop_L3.v build/TestTop.v
+
 test-top-l2standalone:
 	mill -i CoupledL2.test.runMain coupledL2.TestTop_L2_Standalone -td build
 	mv build/TestTop_L2_Standalone.v build/TestTop.v
@@ -55,9 +59,9 @@ test-top-fullsys_1:
 	mill -i CoupledL2.test.runMain coupledL2.TestTop_fullSys_1 -td build
 	mv build/TestTop_fullSys_1.v build/TestTop.v
 
-test-top-l3:
-	mill -i CoupledL2.test.runMain coupledL3.TestTop_L3 -td build
-	mv build/TestTop_L3.v build/TestTop.v
+# test-top-l3:
+# 	mill -i CoupledL2.test.runMain coupledL3.TestTop_L3 -td build
+# 	mv build/TestTop_L3.v build/TestTop.v
 
 test-top-for-l2-sysn:
 	mill -i CoupledL2.test.runMain coupledL2.TestTop_l2_for_sysn -td build_l2
