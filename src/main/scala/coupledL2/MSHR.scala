@@ -65,6 +65,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
   val AneedReplMergeB  = RegInit(false.B)
 
   val alreadyNestC     = RegInit(false.B)
+  val nestCIsXtoN      = RegInit(false.B)
 
   val gotT = RegInit(false.B) // L3 might return T even though L2 wants B
   val gotDirty = RegInit(false.B)
@@ -104,6 +105,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
     alreadySRefill   := false.B
     AneedReplMergeB  := false.B
     alreadyNestC     := false.B
+    nestCIsXtoN      := false.B
 
     req_valid_dups.foreach(_ := true.B)
     state_dups.foreach(_ := io.alloc.bits.state)
@@ -274,7 +276,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
           meta.state
         )
       ),
-      clients = Fill(clientBits, !probeGotN),
+      clients = Fill(clientBits, !(probeGotN || (nestCIsXtoN && alreadyNestC))),
       alias = meta.alias, //[Alias] Keep alias bits unchanged
       prefetch = req.param =/= toN && meta_pft,
       accessed = req.param =/= toN && meta.accessed
@@ -321,7 +323,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
     mp_merge_probeack.meta := MetaEntry(
       dirty = false.B,
       state = Mux(task.param === toN, INVALID, Mux(task.param === toB, BRANCH, meta.state)),
-      clients = Fill(clientBits, !probeGotN),
+      clients = Fill(clientBits, !(probeGotN || (nestCIsXtoN && alreadyNestC))),
       alias = meta.alias,
       prefetch = task.param =/= toN && meta_pft,
       accessed = task.param =/= toN && meta.accessed
@@ -407,7 +409,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
       clients = Mux(
         req_prefetch,
         Mux(dirResult.hit, meta.clients, Fill(clientBits, false.B)),
-        Fill(clientBits, !(req_get && (!dirResult.hit || meta_no_client || probeGotN)))
+        Fill(clientBits, !(req_get && (!dirResult.hit || meta_no_client || probeGotN || probeGotN || (nestCIsXtoN && alreadyNestC))))
       ),
       alias = Some(aliasFinal),
       prefetch = req_prefetch || dirResult.hit && meta_pft,
@@ -639,13 +641,19 @@ class MSHR(implicit p: Parameters) extends L2Module {
 
   // when probeAck NtoN, mshr need to wait RelaseData nest it
   // Warnning: under logic only consider nest one time
+  val wait_release_counter = RegInit(0.U(16.W)) // MAX = 65535
+  wait_release_counter := Mux(!state_dups(0).w_release, wait_release_counter + 1.U, 0.U)
+
   when (io.nestedwb.is_c && nestedwb_match){
     alreadyNestC := true.B
+    nestCIsXtoN := io.nestedwb.c_param === TtoN || io.nestedwb.c_param === BtoN
     state_dups.foreach(_.w_release := true.B)
   }.elsewhen(c_resp.valid){
     when(c_resp.bits.opcode === ProbeAck && c_resp.bits.param === NtoN) {
       state_dups.foreach(_.w_release := alreadyNestC) // when alreadyNestC not need to wait release
     }
+  }.elsewhen(wait_release_counter === 5000.U){ // automatic unlocking because some time it will never be nest by C (For more information, see Bug #157)
+    state_dups.foreach(_.w_release := true.B)
   }
 
   when (nestedwb_match) {

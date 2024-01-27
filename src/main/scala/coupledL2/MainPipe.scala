@@ -408,7 +408,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
 
   val metaW_s3_c = MetaEntry(
     dirty = meta_s3.dirty || wen_c,
-    state = Mux(isParamFromT(req_s3.param), TIP, meta_s3.state),
+    state = Mux(isParamFromT(req_s3.param), TIP, Mux(meta_s3.state === TRUNK, BRANCH, meta_s3.state)), // when release BtoN but self is Trunk, wmeta are downgraded to Branch
     clients = Fill(clientBits, !isToN(req_s3.param)),
     alias = meta_s3.alias,
     accessed = meta_s3.accessed
@@ -470,6 +470,7 @@ class MainPipe(implicit p: Parameters) extends L2Module with HasPerfLogging with
   // c_set_dirty is true iff Release has Data
   io.nestedwb.c_set_dirty := task_s3.valid && task_s3.bits.fromC && task_s3.bits.opcode === ReleaseData
   io.nestedwb.is_c := task_s3.valid && task_s3.bits.fromC
+  io.nestedwb.c_param := task_s3.bits.param
 
   io.nestedwbData := c_releaseData_s3.asTypeOf(new DSBlock)
 

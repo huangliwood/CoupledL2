@@ -274,6 +274,7 @@ class NestedWriteback(implicit p: Parameters) extends L2Bundle {
   val b_set_meta_N = Bool()
   val c_set_dirty = Bool()
   val is_c = Bool()
+  val c_param = Bool()
 }
 
 class PrefetchRecv(implicit p: Parameters) extends L2Bundle {
