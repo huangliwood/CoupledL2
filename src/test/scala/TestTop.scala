@@ -796,6 +796,138 @@ class TestTop_fullSys_1()(implicit p: Parameters) extends LazyModule {
   }
 }
 
+class TestTop_L3()(implicit p: Parameters) extends LazyModule {
+
+  /*   L2  L2(fake)
+   *    \ /
+   *     L3
+   */
+
+  val delayFactor = 0.5
+  val cacheParams = p(L2ParamKey)
+
+  val NumCores = 2
+  val nrL2 = NumCores
+
+  val l3Set = 32
+  val l3Way = 4
+  val l3ClientSet = 32
+  val l3ClientWay = 4
+
+  // val L2NBanks = 2
+  // val L3NBanks = 4
+  val L2BlockSize = 64
+  val L3BlockSize = 64
+
+  def createClientNode(name: String, sources: Int) = {
+    val masterNode = TLClientNode(Seq(
+      TLMasterPortParameters.v2(
+        masters = Seq(
+          TLMasterParameters.v1(
+            name = name,
+            sourceId = IdRange(0, sources),
+            supportsProbe = TransferSizes(cacheParams.blockBytes)
+          )
+        ),
+        channelBytes = TLChannelBeatBytes(cacheParams.blockBytes),
+        minLatency = 1,
+        echoFields = Nil,
+        requestFields = Seq(AliasField(2)),
+        responseKeys = cacheParams.respKey
+      )
+    ))
+    masterNode
+  }
+
+  val fake_l2_nodes = (0 until nrL2) map( i => createClientNode(s"l2$i", 32))
+  val master_nodes = fake_l2_nodes
+
+  val l3 = LazyModule(new HuanCun()(new Config((_, _, _) => {
+    case HCCacheParamsKey => HCCacheParameters(
+      name = "L3",
+      level = 3,
+      ways = l3Way,
+      sets = l3Set,
+      inclusive = false,
+      clientCaches = Seq(CacheParameters(sets = l3ClientSet, ways = l3ClientWay, blockGranularity = log2Ceil(32), name = "L2")),
+      sramClkDivBy2 = true,
+      sramDepthDiv = 4,
+      dataBytes = 8,
+      simulation = true,
+      hasMbist = false,
+      prefetch = None,
+      prefetchRecv = None,
+      tagECC = Some("secded"),
+      dataECC = Some("secded"),
+      ctrl = Some(huancun.CacheCtrl(address = 0x390_0000))
+    )
+    case DebugOptionsKey => DebugOptions()
+  })))
+
+  val ctrl_node = TLClientNode(Seq(TLMasterPortParameters.v2(
+      Seq(TLMasterParameters.v1(
+        name = "ctrl",
+        sourceId = IdRange(0, 16),
+        supportsProbe = TransferSizes.none
+      )),
+      channelBytes = TLChannelBeatBytes(8), // 64bits
+      minLatency = 1,
+      echoFields = Nil,
+    )))
+  
+  val l3_ecc_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
+  l3.ctlnode.foreach(_ := TLBuffer() := ctrl_node)
+  l3.intnode.foreach(l3_ecc_int_sink := _)
+
+  val l2xbar = TLXbar()
+  val PAddrBits = 37
+  val L3OuterBusWidth = 256
+  val memAddrMask = (1L << PAddrBits) - 1L
+  val memRange = AddressSet(0x00000000L, memAddrMask).subtract(AddressSet(0x00000000L, 0x7FFFFFFFL))
+
+  // has DRAMsim3 (AXI4 RAM)
+  val ram = LazyModule(new AXI4Memory(
+    address = memRange, 
+    memByte = 128L * 1024 * 1024 * 1024, 
+    useBlackBox = true, 
+    executable = true,
+    beatBytes = L3OuterBusWidth / 8,
+    burstLen = L3BlockSize / (L3OuterBusWidth / 8)
+  ))
+
+
+  for (l2 <- fake_l2_nodes) {
+    l2xbar := TLBuffer() := l2
+  }
+
+  ram.node :=
+    AXI4Buffer() :=
+    AXI4Buffer() :=
+    AXI4Buffer() :=
+    AXI4IdIndexer(idBits = 14) :=
+    AXI4UserYanker() :=
+    AXI4Deinterleaver(L3BlockSize) :=
+    TLToAXI4() :=
+    TLSourceShrinker(64) :=
+    TLWidthWidget(L3OuterBusWidth / 8) :=
+    TLBuffer.chainNode(2) :=
+      TLXbar() :=*
+      // TLFragmenter(32, 64) :=*
+      TLCacheCork() :=*
+      TLDelayer(delayFactor) :=*
+      l3.node :=* 
+        l2xbar
+
+  lazy val module = new LazyModuleImp(this){
+    master_nodes.zipWithIndex.foreach{
+      case (node, i) =>
+        node.makeIOs()(ValName(s"master_port_$i"))
+    }
+    ctrl_node.makeIOs()(ValName("cmo_port"))
+    l3_ecc_int_sink.makeIOs()(ValName("l3_int_port"))
+  }
+}
+
 object TestTop_L2 extends App {
   val config = new Config((_, _, _) => {
     case L2ParamKey => L2Param(
@@ -1057,4 +1189,28 @@ object TestTop_l2_for_sysn extends App {
   ChiselDB.init(false)
   ChiselDB.addToFileRegisters
   FileRegisters.write("./build")
+}
+
+object TestTop_L3 extends App {
+  val config = new Config((_, _, _) => {
+    case L2ParamKey => L2Param(
+      clientCaches = Seq(L1Param(aliasBitsOpt = Some(2))),
+      echoField = Seq(DirtyField())
+    )
+    case DebugOptionsKey => DebugOptions()
+  })
+  val top = DisableMonitors(p => LazyModule(new TestTop_L3()(p)) )(config)
+
+  (new ChiselStage).execute(Array("--target", "verilog") ++ args, Seq(
+    FirtoolOption("-O=release"),
+    FirtoolOption("--disable-all-randomization"),
+    FirtoolOption("--disable-annotation-unknown"),
+    FirtoolOption("--strip-debug-info"),
+    FirtoolOption("--lower-memories"),
+    FirtoolOption("--lowering-options=noAlwaysComb," +
+      " disallowPortDeclSharing, disallowLocalVariables," +
+      " emittedLineLength=120, explicitBitcast, locationInfoStyle=plain," +
+      " disallowExpressionInliningInPorts, disallowMuxInlining"),
+    ChiselGeneratorAnnotation(() => top.module),
+  ))
 }
