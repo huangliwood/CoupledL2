@@ -568,7 +568,7 @@ class MSHR(implicit p: Parameters) extends L2Module {
 
   // mergeB is only allowed when release not sent
   //(TODO: or we could just blockB, since Release will be sent to MP very shortly and have no deadlock problem)
-  val mergeB = !state_dups(2).s_release
+  val mergeB = !state_dups(2).s_release && !mp_release_valid
   // alias: should protect meta from being accessed or occupied
   val releaseNotSent = !state_dups(3).s_release || !state_dups(2).s_merge_probeack || io.bMergeTask.valid
   // if releaseTask is already in mainpipe_s1/s2, while a refillTask in mainpipe_s3, the refill should also be blocked and retry
