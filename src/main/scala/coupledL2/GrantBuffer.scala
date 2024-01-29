@@ -200,7 +200,7 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
 
   // =========== record unreceived GrantAck ===========
   // Addrs with Grant sent and GrantAck not received
-  val inflight_grant = RegInit(VecInit(Seq.fill(grantBufInflightSize + mshrsAll){
+  val inflight_grant = RegInit(VecInit(Seq.fill(grantBufInflightSize){
     0.U.asTypeOf(Valid(new InflightGrantEntry))
   }))
   // remap sink id when has same id in buffer
