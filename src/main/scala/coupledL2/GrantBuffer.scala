@@ -31,7 +31,7 @@ import xs.utils.perf.HasPerfLogging
 class InflightGrantEntry(implicit p: Parameters) extends L2Bundle {
   val set   = UInt(setBits.W)
   val tag   = UInt(tagBits.W)
-  val sink  = UInt(mshrBits.W)
+  val sink  = UInt((mshrBits+1).W)
   val isAccessAckData = Bool()
   val source = UInt(16.W)
 }
@@ -42,7 +42,7 @@ class TaskWithData(implicit p: Parameters) extends L2Bundle {
 }
 
  class TLBundleDwithBeat1(implicit p: Parameters) extends L2Bundle {
-   val d = new TLBundleD(edgeIn.bundle)
+   val d = new TLBundleD(edgeIn.bundle.copy(sinkBits = mshrBits))
    val beat1 = new DSBeat()
  }
 
@@ -82,15 +82,15 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
   })
 
   // =========== functions ===========
-   def toTLBundleDwithBeat1(td: TaskWithData, sink: UInt) = {
+   def toTLBundleDwithBeat1(td: TaskWithData) = {
      val data = td.data.asTypeOf(Vec(beatSize, new DSBeat))
-     val d = Wire(new TLBundleD(edgeIn.bundle))
+     val d = Wire(new TLBundleD(edgeIn.bundle.copy(sinkBits = mshrBits)))
      val beat1 = Wire(new DSBeat())
      d.opcode := td.task.opcode
      d.param := td.task.param
      d.size := offsetBits.U
      d.source := td.task.sourceId
-     d.sink := sink
+     d.sink := 0.U // unuse
      d.denied := false.B
      d.data := data(0).asUInt
      d.corrupt := false.B
@@ -102,7 +102,9 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
      output.beat1 := beat1
      output
    }
-  val sink = WireInit(0.U(mshrBits.W))
+  val sink = WireInit(0.U((mshrBits+1).W))
+  require(sink.getWidth == io.e.bits.sink.getWidth)
+
   val dtaskOpcode = io.d_task.bits.task.opcode
   // The following is organized in the order of data flow
   // =========== save d_task in queue[FIFO] ===========
@@ -110,17 +112,28 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
      hasMbist = cacheParams.hasMbist, hasShareBus = cacheParams.hasShareBus,
      hasClkGate = enableClockGate, parentName = parentName))
   grantQueue.io.enq.valid := io.d_task.valid && dtaskOpcode =/= HintAck
-  grantQueue.io.enq.bits := toTLBundleDwithBeat1(io.d_task.bits, sink)
+  grantQueue.io.enq.bits := toTLBundleDwithBeat1(io.d_task.bits)
   io.d_task.ready := true.B // GrantBuf should always be ready
 
   val grantQueueCnt = grantQueue.io.count
   val full = !grantQueue.io.enq.ready
   if(cacheParams.enableAssert) assert(!(full && io.d_task.valid), "GrantBuf full and RECEIVE new task, back pressure failed")
 
+  // =========== save d_task sink in grantSinkQueue ===========
+  val grantSinkQueue = Module(new Queue(chiselTypeOf(io.e.bits.sink), entries = mshrsAll, flow = true))
+  grantSinkQueue.io.enq.valid := grantQueue.io.enq.valid
+  grantSinkQueue.io.enq.bits := sink
+  grantSinkQueue.io.deq.ready := grantQueue.io.deq.ready
+  if(cacheParams.enableAssert) {
+    assert(Mux(grantQueue.io.deq.valid, grantSinkQueue.io.deq.valid, true.B))
+    assert(grantQueue.io.count === grantSinkQueue.io.count)
+  }
+
   // =========== dequeue entry and fire ===========
   require(beatSize == 2)
   val deqValid = grantQueue.io.deq.valid
   val deq = grantQueue.io.deq.bits
+  val deqSink = grantSinkQueue.io.deq.bits
 
   // grantBuf: to keep the remaining unsent beat of GrantData
   val grantBufValid = RegInit(false.B)
@@ -132,6 +145,7 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
   when(deqValid && io.d.ready && !grantBufValid && deq.d.opcode(0)) {
     grantBufValid := true.B
     grantBuf := deq.d
+    grantBuf.sink := deqSink
     grantBuf.data := deq.beat1.asUInt
   }
   when(grantBufValid && io.d.ready) {
@@ -143,6 +157,11 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
     grantBufValid,
     grantBuf,
     deq.d
+  )
+  io.d.bits.sink := Mux(
+    grantBufValid,
+    grantBuf.sink,
+    deqSink
   )
 
   // =========== send response to prefetcher ===========
@@ -188,7 +207,7 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
   val mshrId = io.d_task.bits.task.mshrId
   val noFromMshr = mshrId(mshrBits - 1).asBool; dontTouch(noFromMshr)
   val sinkMatchVec = inflight_grant.map(m => m.bits.sink === mshrId && m.valid)
-  sink := Mux(PopCount(sinkMatchVec).asUInt > 0.U && noFromMshr, (1 << (mshrBits-2)).U + mshrId, mshrId)
+  sink := Mux(PopCount(sinkMatchVec).asUInt > 0.U && noFromMshr, (1 << mshrBits).U + mshrId, mshrId)
   // set entry value
   when (io.d_task.fire && (dtaskOpcode(2, 1) === Grant(2, 1) || dtaskOpcode(2, 1) === AccessAckData(2, 1))) {
     // choose an empty entry

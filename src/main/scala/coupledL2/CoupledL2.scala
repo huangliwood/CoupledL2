@@ -85,12 +85,14 @@ trait HasCoupledL2Parameters {
 
   val mshrsAll = cacheParams.mshrs
 
-  // id of 0XXXXX refers to mshrId
-  // id of 10XXXX refers to reqs that do not enter mshr
-  // id of 11XXXX refers to reqs that do not enter mshr remap in grantBuf
   val sourceIdAllTemp = 256
-  val idsAll = mshrsAll.max(sourceIdAllTemp * 2) * 2 // TODO: Paramterize sourceIdAll like this : (mshrsAll.max(sourceIdAll) + 1) * 2
-  val mshrBits = log2Ceil(idsAll) // mshrIdBits
+  // TODO: Paramterize sourceIdAll like this : (mshrsAll.max(sourceIdAll) + 1) * 2
+  val mshrBits = log2Ceil(sourceIdAllTemp) // mshrIdBits
+
+  // id of 00XXXXX refers to mshrId
+  // id of 01XXXX refers to reqs that do not enter mshr
+  // id of 11XXXX refers to reqs that do not enter mshr remap in grantBuf
+  val idsAll = sourceIdAllTemp * 2
 
   val grantBufSize = mshrsAll
   val grantBufInflightSize = mshrsAll //TODO: lack or excessive? !! WARNING
