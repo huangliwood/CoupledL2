@@ -160,18 +160,22 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
   val mergeB_mshr = WireInit(io.msInfo(io.bMergeTask.bits.id))
   val mergeB_task = WireInit(io.bMergeTask.bits.task)
   val s_mergeB_for_mergeB_task = mergeB_mshr.valid && mergeB_mshr.bits.metaTag === mergeB_task.tag && mergeB_mshr.bits.set === mergeB_task.set && mergeB_mshr.bits.mergeB
-  val s_mergeB_for_task = mergeBMask(io.task.bits)
+  val s_mergeB_for_task = mergeB(io.task.bits)
 
   val buffer_valid_cnt = RegInit(0.U(16.W)) // task in buffer
   buffer_valid_cnt := buffer_valid_cnt + task_temp.fire.asUInt + task_retry.fire.asUInt + bMergeTask.fire - taskOutPipe.fire.asUInt - taskRetryPipe.fire.asUInt - bMergeTaskOutPipe.fire.asUInt
   val task_cnt = RegInit(0.U(16.W)) // task in sinkB
   task_cnt := task_cnt + io.b.fire.asUInt - io.task.fire.asUInt - io.bMergeTask.fire.asUInt
 
-  val io_task_can_valid = !s_addrConflict && !s_replaceConflict && !s_mergeB_for_task //&& !s_mpAddrConflict
+  val io_task_can_valid = !s_addrConflict && !s_replaceConflict
   val io_bMergeTask_can_valid = s_mergeB_for_mergeB_task
   if(cacheParams.enableAssert) {
     when(io.task.fire){
       assert(io_task_can_valid, "io_task cant valid")
+
+      when(s_mergeB_for_task) {
+        printf("[L2 WARNING] mergeB failed! set:0x%x tag:0x%x\n", io.task.bits.set, io.task.bits.tag)
+      }
     }
     when(io.bMergeTask.fire){
       assert(io_bMergeTask_can_valid, "io_bMergeTask cant valid")
