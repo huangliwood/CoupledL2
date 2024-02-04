@@ -257,7 +257,9 @@ class Directory(parentName: String = "Unknown")(implicit p: Parameters) extends 
   val useRandomWay = RegInit(false.B)
   val failedSet = RegInit(0.U(setBits.W))
   val failedSetMatch = req_s3.set === failedSet
-  val randomWay = LFSR(ways)
+  val randomWay = UIntToOH(LFSR(log2Ceil(ways)))
+  require(randomWay.getWidth == ways)
+  assert(PopCount(randomWay) === 1.U)
   
   val chosenWay = Mux(inv, invalidWay, Mux(useRandomWay && failedSetMatch, randomWay, replaceWay))
   // if chosenWay not in wayMask, then choose a way in wayMask
