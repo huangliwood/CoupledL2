@@ -680,10 +680,12 @@ class MSHR(implicit p: Parameters) extends L2Module {
     val VALID_CNT_MAX = 50000
     val validCnt = RegInit(0.U(64.W))
 
-    when(req_valid_dups(0)) {
-      validCnt := validCnt + 1.U 
-    }.otherwise {
+    val refresh = io.tasks.source_a.fire || io.tasks.source_b.fire || !req_valid_dups(0)
+
+    when(refresh) {
       validCnt := 0.U
+    }.otherwise {
+      validCnt := validCnt + 1.U
     }
 
     assert(validCnt <= VALID_CNT_MAX.U, "mshr timeout! cnt:%d set:0x%x tag:0x%x sourceId:%d/0x%x opcode:%d param:%d channel:%d", validCnt, req_set_dups(0), req.tag, req.sourceId, req.sourceId, req.opcode, req.param, req.channel)
