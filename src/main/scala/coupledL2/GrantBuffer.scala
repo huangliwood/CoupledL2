@@ -301,6 +301,20 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
 
   io.toReqArb := RegNext(toReqArb)
 
+  if(cacheParams.enableAssert) {
+    val STALL_CNT_MAX = 50000
+    val stallCnt = RegInit(0.U(64.W))
+    val d = io.d.bits
+
+    when(io.d.valid && !io.d.ready) {
+      stallCnt := stallCnt + 1.U
+    }.otherwise{
+      stallCnt := 0.U
+    }
+
+    assert(stallCnt <= STALL_CNT_MAX.U, "grantBuffer timeout! cnt:%d sourceId: %d/0x%x sinkId:%d/0x%x", stallCnt, d.source, d.source, d.sink, d.sink)
+  }
+
   dontTouch(noSpaceForSinkReq)
   dontTouch(noSpaceForMSHRReq)
   dontTouch(noSpaceForWaitSinkE)

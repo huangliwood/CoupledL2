@@ -118,6 +118,21 @@ class SourceB(implicit p: Parameters) extends L2Module with HasPerfLogging{
   io.sourceB.valid := issueArb.io.out.valid
   io.sourceB.bits  := toTLBundleB(issueArb.io.out.bits)
 
+
+  if(cacheParams.enableAssert) {
+    val STALL_CNT_MAX = 50000
+    val stallCnt = RegInit(0.U(64.W))
+    val b = io.sourceB.bits
+
+    when(io.sourceB.valid && !io.sourceB.ready) {
+      stallCnt := stallCnt + 1.U
+    }.otherwise{
+      stallCnt := 0.U
+    }
+
+    assert(stallCnt <= STALL_CNT_MAX.U, "sourceB timeout! cnt:%d addr:0x%x sourceId: %d/0x%x", stallCnt, b.address, b.source, b.source)
+  }
+
   /* ======== Perf ======== */
   if(cacheParams.enablePerf) {
     for(i <- 0 until entries){

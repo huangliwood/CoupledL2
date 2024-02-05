@@ -261,6 +261,36 @@ class RequestArb(implicit p: Parameters) extends L2Module with HasPerfLogging wi
 
   dontTouch(io)
 
+  if(cacheParams.enableAssert) {
+    val VALID_CNT_MAX = 50000
+    val validCntA, validCntB, validCntC = RegInit(0.U(64.W))
+    val (a, b, c) = (io.sinkA.bits, io.sinkB.bits, io.sinkC.bits)
+    
+    when(io.sinkA.valid && !io.sinkA.ready) {
+      validCntA := validCntA + 1.U
+    }.otherwise {
+      validCntA := 0.U
+    }
+
+    when(io.sinkB.valid && !io.sinkB.ready) {
+      validCntB := validCntB + 1.U
+    }.otherwise {
+      validCntB := 0.U
+    }
+
+    when(io.sinkC.valid && !io.sinkC.ready) {
+      validCntC := validCntC + 1.U
+    }.otherwise {
+      validCntC := 0.U
+    }
+
+    assert(validCntA <= VALID_CNT_MAX.U, "sinkA timeout! cnt:%d set:0x%x tag:0x%x sourceId:%d/0x%x", validCntA, a.set, a.tag, a.sourceId, a.sourceId)
+    assert(validCntB <= VALID_CNT_MAX.U, "sinkB timeout! cnt:%d set:0x%x tag:0x%x sourceId:%d/0x%x", validCntB, b.set, b.tag, b.sourceId, b.sourceId)
+    assert(validCntC <= VALID_CNT_MAX.U, "sinkC timeout! cnt:%d set:0x%x tag:0x%x sourceId:%d/0x%x", validCntC, c.set, c.tag, c.sourceId, c.sourceId)
+
+
+  }
+
   // Performance counters
   if(cacheParams.enablePerf) {
     XSPerfAccumulate("mshr_req", mshr_task_s0.valid)

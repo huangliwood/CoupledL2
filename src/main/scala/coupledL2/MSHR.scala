@@ -675,6 +675,19 @@ class MSHR(implicit p: Parameters) extends L2Module {
   io.nestedwbData := nestedwb_match && io.nestedwb.c_set_dirty
 
   dontTouch(state_dups)
+  
+  if(cacheParams.enableAssert) {
+    val VALID_CNT_MAX = 50000
+    val validCnt = RegInit(0.U(64.W))
+
+    when(req_valid_dups(0)) {
+      validCnt := validCnt + 1.U 
+    }.otherwise {
+      validCnt := 0.U
+    }
+
+    assert(validCnt <= VALID_CNT_MAX.U, "mshr timeout! cnt:%d set:0x%x tag:0x%x sourceId:%d/0x%x opcode:%d param:%d channel:%d", validCnt, req_set_dups(0), req.tag, req.sourceId, req.sourceId, req.opcode, req.param, req.channel)
+  }
 
   /* ======== Performance counters ======== */
   // time stamp

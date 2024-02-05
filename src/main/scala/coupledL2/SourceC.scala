@@ -206,7 +206,21 @@ class SourceC(implicit p: Parameters) extends L2Module with HasPerfLogging{
     }
   }
 
-  if(cacheParams.enableAssert) assert(io.in.ready, "SourceC should never be full") // WARNING
+  if(cacheParams.enableAssert) {
+    assert(io.in.ready, "SourceC should never be full") // WARNING
+
+    val STALL_CNT_MAX = 50000
+    val stallCnt = RegInit(0.U(64.W))
+    val c = io.out.bits
+
+    when(io.out.valid && !io.out.ready) {
+      stallCnt := stallCnt + 1.U
+    }.otherwise{
+      stallCnt := 0.U
+    }
+
+    assert(stallCnt <= STALL_CNT_MAX.U, "sourceC timeout! cnt:%d addr:0x%x sourceId: %d/0x%x", stallCnt, c.address, c.source, c.source)
+  }
 
   // ========== Misc ============
   val (first, last, done, count) = edgeOut.count(io.out)
