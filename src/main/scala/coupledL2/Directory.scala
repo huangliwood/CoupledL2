@@ -343,9 +343,22 @@ class Directory(parentName: String = "Unknown")(implicit p: Parameters) extends 
     failedSet := req_s3.set
   }
 
-  when(useRandomWay && failedSetMatch) {
+  when(useRandomWay && failedSetMatch && io.replResp.valid) {
     useRandomWay := false.B
     refillRetryContinusCnt := 0.U
+  }
+
+  if(cacheParams.enableAssert) {
+    val REFILL_RETRY_MAX = 20000
+    val refillRetryContinusCnt_assert = RegInit(0.U(64.W))
+
+    when(refillRetry && lastRefillRetry) {
+      refillRetryContinusCnt_assert := refillRetryContinusCnt_assert + 1.U
+    }.otherwise {
+      refillRetryContinusCnt_assert := 0.U
+    }
+
+    assert(refillRetryContinusCnt_assert <= REFILL_RETRY_MAX.U, "refill retry timeout! maybe there is a deadlock! cnt:%d", refillRetryContinusCnt_assert)
   }
 
   /* ====== Update ====== */
