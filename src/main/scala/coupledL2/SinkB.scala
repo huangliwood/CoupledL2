@@ -87,7 +87,7 @@ class SinkB(implicit p: Parameters) extends L2Module with HasPerfLogging{
   def addrConflictMask(a: TaskBundle): UInt = VecInit(io.msInfo.map(s =>
     s.valid && sameAddr(a, s.bits) && !s.bits.willFree && !s.bits.nestB)).asUInt
   def replaceConflictMask(a: TaskBundle): UInt = VecInit(io.msInfo.map(s =>
-    s.valid && sameAddr(a, s.bits) && s.bits.blockRefill && !s.bits.mergeB)).asUInt
+    s.valid && sameAddrMeta(a, s.bits) && s.bits.blockRefill && !s.bits.mergeB)).asUInt
   def mergeBMask(a: TaskBundle): UInt = VecInit(io.msInfo.map(s =>
     s.valid && sameAddrMeta(a, s.bits) && s.bits.mergeB)).asUInt
 
