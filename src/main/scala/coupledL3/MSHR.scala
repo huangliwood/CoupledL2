@@ -443,7 +443,7 @@ class MSHR(implicit p: Parameters) extends L3Module with noninclusive.HasClientI
 
     newSelfState := MuxLookup(
                       req.param,
-                      meta.state,
+                      meta.state)(
                       Seq(
                         TtoT -> TRUNK,
                         TtoB -> TIP,
@@ -513,13 +513,12 @@ class MSHR(implicit p: Parameters) extends L3Module with noninclusive.HasClientI
       0.U, // Get/Put -> AccessAckData/AccessAck
       MuxLookup( // Acquire -> Grant
         req.param,
-        req.param,
-        Seq(
+        req.param)
+        (Seq(
           NtoB -> Mux(req_promoteT || nestedReleaseToN, toT, toB),
           BtoT -> toT,
           NtoT -> toT
-        )
-      )
+        ))
     )
     mp_grant.mshrTask := true.B
     mp_grant.mshrId := io.id
@@ -581,7 +580,7 @@ class MSHR(implicit p: Parameters) extends L3Module with noninclusive.HasClientI
           Mux(aNeedProbe, highestState, Mux(gotT, Mux(req_acquire, TRUNK, TIP), BRANCH)), // Miss
           Mux(nestedReleaseToN, TRUNK, Mux(gotT, Mux(req_acquire, TRUNK, TIP), BRANCH)) // Hit
         ),
-        MuxLookup(dirResult.meta.state, INVALID, Seq( // dirResult.hit
+        MuxLookup(dirResult.meta.state, INVALID)(Seq( // dirResult.hit
           INVALID -> BRANCH,
           BRANCH -> Mux(req_promoteT, TRUNK, BRANCH),
           // if prefetch read && hit && self is Trunk
@@ -786,7 +785,7 @@ class MSHR(implicit p: Parameters) extends L3Module with noninclusive.HasClientI
         assert(client <= clientBits.U)
 
         probeAckParamVec(client) := c_resp.bits.param
-        stateAfterProbe := MuxLookup(c_resp.bits.param, INVALID, Seq(
+        stateAfterProbe := MuxLookup(c_resp.bits.param, INVALID)(Seq(
                                 TtoN -> TIP,
                                 BtoN -> Mux(dirResult.hit && dirResult.meta.state === TIP, TIP, BRANCH),
                                 TtoB -> TIP

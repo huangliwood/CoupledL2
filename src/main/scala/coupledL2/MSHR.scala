@@ -366,13 +366,12 @@ class MSHR(implicit p: Parameters) extends L2Module {
       0.U, // Get -> AccessAckData
       MuxLookup( // Acquire -> Grant
         req.param,
-        req.param,
-        Seq(
+        req.param)
+        (Seq(
           NtoB -> Mux(req_promoteT, toT, toB),
           BtoT -> toT,
           NtoT -> toT
-        )
-      )
+        ))
     )
     mp_grant.size := 0.U(msgSizeBits.W)
     mp_grant.bufIdx := 0.U(bufIdxBits.W)

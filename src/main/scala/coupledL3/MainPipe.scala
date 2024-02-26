@@ -447,7 +447,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
         ProbeAck
       )
       sink_resp_s3.bits.param := Mux(!dirResult_s3.hit, NtoN,
-        MuxLookup(Cat(req_s3.param, meta_s3.state), BtoB, Seq(
+        MuxLookup(Cat(req_s3.param, meta_s3.state), BtoB)(Seq(
           Cat(toN, BRANCH) -> BtoN,
           Cat(toN, TIP) -> TtoN,
           Cat(toB, TIP) -> TtoB,
@@ -593,7 +593,7 @@ class MainPipe(implicit p: Parameters) extends L3Module with noninclusive.HasCli
   val metaW_s3_c = {
     val selfState = MuxLookup(
       req_s3.param,
-      meta_s3.state,
+      meta_s3.state)(
       Seq(
         TtoT -> TRUNK,
         TtoB -> TIP,

@@ -617,7 +617,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
   //pressure caculate
   s2_testBO :=  MuxLookup(
       s2_opcode,
-      0.S(shareBOBits.W),
+      0.S(shareBOBits.W))(
       Seq(
         M_SIMPLE_TIMELY -> s1_ghr_shareBO,
         M_SIMPLE_UNTIMELY -> (s1_ghr_shareBO.asUInt << 2.U).asSInt,
@@ -643,7 +643,7 @@ class PatternTable(parentName:String="Unkown")(implicit p: Parameters) extends S
     "b1111".U,
     MuxLookup(
       s2_C_A,
-      GenMask.apply(0),
+      GenMask.apply(0))(
       Seq(
         LOW_COV_LOW_ACC   -> "b0001".U,
         LOW_COV_HIGH_ACC  -> "b1111".U,
@@ -1664,7 +1664,7 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
 
       weight := MuxLookup(
         Cat(spp_state,bop_state_cur),
-        1.U,
+        1.U)(
         Seq(
           Cat(s_NONE,s_NONE)  -> 1.U,
           Cat(s_NONE,s_LOW)   -> 1.U,
@@ -1705,7 +1705,7 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
 
       weight := MuxLookup(
         Cat(spp_state_cur,bop_state),
-        1.U,
+        1.U)(
         Seq(
           Cat(s_NONE,s_NONE)  -> 2.U,
           Cat(s_NONE,s_LOW )  -> 2.U,
@@ -1746,7 +1746,7 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
 
       weight := MuxLookup(
         Cat(now,last2avg),
-        1.U,
+        1.U)(
         Seq(
           Cat(s_NONE,s_NONE)  -> 2.U,
           Cat(s_NONE,s_LOW)   -> 1.U,
@@ -1766,7 +1766,7 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
 
       weight := MuxLookup(
         Cat(now,last2avg),
-        1.U,
+        1.U)(
         Seq(
           Cat(s_NONE,s_NONE)  -> 2.U,
           Cat(s_NONE,s_LOW)   -> 2.U,
@@ -1794,7 +1794,7 @@ class HyperPrefetchDev2(parentName:String = "Unknown")(implicit p: Parameters) e
       def empty_hit(x:UInt) = x === 0.U
       lut_Threshold  := MuxLookup(
         Cat(empty_hit(ghr_last3Round.l2pf_hitAcc),empty_hit(ghr_last4Round.l2pf_hitAcc)),
-        1.U,
+        1.U)(
         Seq(
           "b100".U  -> 1.U,
           "b110".U  -> 2.U,
