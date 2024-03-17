@@ -494,7 +494,8 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
 
   val l2xbar = TLXbar()
   // val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffffffL), beatBytes = 32)) // Normal rtl-based memory
-  val ram = LazyModule(new coupledL2.TLRAM(AddressSet(0, 0xffffffffffffL), beatBytes = 32)) // DPI-C memory
+  // val ram = LazyModule(new coupledL2.TLRAM(AddressSet(0, 0xffffffffffffL), beatBytes = 32)) // DPI-C memory
+
   var master_nodes: Seq[TLClientNode] = Seq() // TODO
   val NumCores=2
   // val nullNode = LazyModule(new SppSenderNull)
@@ -636,12 +637,45 @@ class TestTop_fullSys()(implicit p: Parameters) extends LazyModule {
   // AXI4IdIndexer(4) :=
   // l3FrontendAXI4Node
 
-  ram.node :=
+  // has DRAMsim3 (AXI4 RAM)
+  val mem_xbar = TLXbar()
+  mem_xbar :=*
     TLXbar() :=*
-      TLFragmenter(32, 64) :=*
-      TLCacheCork() :=*
-      TLDelayer(delayFactor) :=*
-      l3.node :=* l2xbar
+    TLBuffer.chainNode(2) :=*
+    TLCacheCork() :=*
+    TLDelayer(delayFactor) :=*
+    l3.node :=
+    l2xbar
+  
+  val PAddrBits = 37
+  val L3OuterBusWidth = 256
+  val L2BlockSize = 64
+  val L3BlockSize = 64
+
+  val memAddrMask = (1L << PAddrBits) - 1L
+  val memRange = AddressSet(0x00000000L, memAddrMask).subtract(AddressSet(0x00000000L, 0x7FFFFFFFL))
+
+  val ram = LazyModule(new AXI4Memory(
+    address = memRange, 
+    memByte = 16L * 1024 * 1024 * 1024, 
+    useBlackBox = true, 
+    executable = true,
+    beatBytes = L3OuterBusWidth / 8,
+    burstLen = L3BlockSize / (L3OuterBusWidth / 8)
+  ))
+
+  ram.node :=
+    AXI4Buffer() :=
+    AXI4Buffer() :=
+    AXI4Buffer() :=
+    AXI4IdIndexer(idBits = 14) :=
+    AXI4UserYanker() :=
+    AXI4Deinterleaver(L3BlockSize) :=
+    TLToAXI4() :=
+    TLSourceShrinker(64) :=
+    TLWidthWidget(L3OuterBusWidth / 8) :=
+    TLBuffer.chainNode(2) :=
+    mem_xbar
 
   lazy val module = new LazyModuleImp(this) with HasPerfEvents{
     master_nodes.zipWithIndex.foreach {
