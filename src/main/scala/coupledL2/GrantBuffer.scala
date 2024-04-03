@@ -108,12 +108,13 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
   val dtaskOpcode = io.d_task.bits.task.opcode
   // The following is organized in the order of data flow
   // =========== save d_task in queue[FIFO] ===========
-  val grantQueue = Module(new SRAMQueue(new TLBundleDwithBeat1(), entries = mshrsAll, flow = true,
+  val grantQueue = Module(new SRAMQueue(new TLBundleDwithBeat1(), entries = mshrsAll, flow = true, pipe = false, singlePort = true,
      hasMbist = cacheParams.hasMbist, hasShareBus = cacheParams.hasShareBus,
      hasClkGate = enableClockGate, parentName = parentName))
   grantQueue.io.enq.valid := io.d_task.valid && dtaskOpcode =/= HintAck
   grantQueue.io.enq.bits := toTLBundleDwithBeat1(io.d_task.bits)
   io.d_task.ready := true.B // GrantBuf should always be ready
+  if(cacheParams.enableAssert) assert(grantQueue.io.enq.ready, "GrantBuf should always be ready")
 
   val grantQueueCnt = grantQueue.io.count
   val full = !grantQueue.io.enq.ready
@@ -123,7 +124,7 @@ class GrantBuffer(parentName: String = "Unknown")(implicit p: Parameters) extend
   val grantSinkQueue = Module(new Queue(chiselTypeOf(io.e.bits.sink), entries = mshrsAll, flow = true))
   grantSinkQueue.io.enq.valid := grantQueue.io.enq.valid
   grantSinkQueue.io.enq.bits := sink
-  grantSinkQueue.io.deq.ready := grantQueue.io.deq.ready
+  grantSinkQueue.io.deq.ready := grantQueue.io.deq.fire
   if(cacheParams.enableAssert) {
     assert(Mux(grantQueue.io.deq.valid, grantSinkQueue.io.deq.valid, true.B))
     assert(grantQueue.io.count === grantSinkQueue.io.count)
