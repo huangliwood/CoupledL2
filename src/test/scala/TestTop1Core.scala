@@ -22,7 +22,8 @@ class TestTop_fullSys_1Core()(implicit p: Parameters) extends LazyModule {
   val delayFactor = 0.2
   val cacheParams = p(L2ParamKey)
 
-  val hasPTW = true
+  val hasPTW = false
+  val hasDMA = true
   val NumCores = 1
   val nrL2 = NumCores
 
@@ -32,8 +33,8 @@ class TestTop_fullSys_1Core()(implicit p: Parameters) extends LazyModule {
   val l3Set = 2048
   val l3Way = 8
 
-  val L2NBanks = 2
-  val L3NBanks = 4
+  val L2NBanks = 1
+  val L3NBanks = 1
   val L2BlockSize = 64
   val L3BlockSize = 64
 
@@ -200,15 +201,17 @@ class TestTop_fullSys_1Core()(implicit p: Parameters) extends LazyModule {
     case(source, sink) => sink := source
   }
 
-  // val idBits = 13
-  // val l3FrontendAXI4Node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
-  //   Seq(AXI4MasterParameters(
-  //     name = "dma",
-  //     id = IdRange(0, 1 << idBits),
-  //     maxFlight = Some(16)
-  //   ))
-  // )))
-  // l2xbar := TLBuffer() := AXI2TL(16, 16) := AXI2TLFragmenter() := l3FrontendAXI4Node
+  val idBits = 8
+  val l3FrontendAXI4Node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
+    Seq(AXI4MasterParameters(
+      name = "dma",
+      id = IdRange(0, 1 << idBits),
+      maxFlight = Some(16)
+    ))
+  )))
+  if(hasDMA) {
+    l2xbar := TLBuffer() := AXI2TL(16, 16) := AXI2TLFragmenter() := l3FrontendAXI4Node
+  }
 
   // has DRAMsim3 (AXI4 RAM)
     mem_xbar :=*
@@ -254,14 +257,17 @@ class TestTop_fullSys_1Core()(implicit p: Parameters) extends LazyModule {
       case (node, i) =>
         node.makeIOs()(ValName(s"master_port_$i"))
     }
-    ptw_nodes.zipWithIndex.foreach {
-      case (node, i) =>
-        node.makeIOs()(ValName(s"ptw_port_$i"))
+    if(hasPTW) {
+      ptw_nodes.zipWithIndex.foreach {
+        case (node, i) =>
+          node.makeIOs()(ValName(s"ptw_port_$i"))
+      }
     }
-    // l3FrontendAXI4Node.makeIOs()(ValName("dma_port"))
-    // ctrl_node.makeIOs()(ValName("cmo_port"))
-    //    l3_ecc_int_sink.makeIOs()(ValName("l3_int_port"))
-
+    if(hasDMA) {
+      l3FrontendAXI4Node.makeIOs()(ValName("dma_port"))
+    }
+    ctrl_node.makeIOs()(ValName("cmo_port"))
+    l3_ecc_int_sink.makeIOs()(ValName("l3_int_port"))
     l2_ecc_int_sinks.zipWithIndex.foreach{ case(sink, i) => sink.makeIOs()(ValName("l2_int_port_"+i))}
 
     val io = IO(new Bundle{
